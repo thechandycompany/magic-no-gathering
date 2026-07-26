@@ -77,6 +77,109 @@ const VOLTRON_COMMANDER = {
 };
 
 /* =====================================================================
+   VOLTRON VIRTUAL DECK — 51 "other" cards broken into typed categories
+   modeled after typical Gruul Voltron Commander deck composition.
+   Each entry is a template; the deck shuffles indices into these pools.
+   Mana costs determine when the AI can cast them.
+   ===================================================================== */
+const VOLTRON_CARDS = {
+  // 14 creatures: mana dorks, utility, and secondary threats
+  creatures: [
+    {name:"Llanowar Emissary",     ico:"🌱", p:1, t:1, cost:1, kind:"dork",    effect:"Taps for mana on future turns.", rampValue:1},
+    {name:"Fyndhorn Scout",        ico:"🌿", p:1, t:1, cost:1, kind:"dork",    effect:"Taps for mana on future turns.", rampValue:1},
+    {name:"Arbor Channeler",       ico:"🌳", p:0, t:3, cost:2, kind:"dork",    effect:"Taps for mana on future turns.", rampValue:1},
+    {name:"Sylvan Reclaimer",      ico:"🍃", p:2, t:2, cost:2, kind:"utility", effect:"Enters: search a land to hand."},
+    {name:"Ironwood Shaman",       ico:"🔨", p:2, t:3, cost:3, kind:"utility", effect:"Enters: tutor an equipment to hand."},
+    {name:"Trailguide Ranger",     ico:"🏹", p:3, t:2, cost:3, kind:"beater",  effect:"Haste. Pressures early.", kws:["Haste"], haste:true},
+    {name:"Territorial Gorger",    ico:"🐗", p:4, t:3, cost:4, kind:"beater",  effect:"Trample. Secondary threat.", kws:["Trample"]},
+    {name:"Stampede Elder",        ico:"🦬", p:3, t:4, cost:4, kind:"utility", effect:"Other creatures get +1/+0."},
+    {name:"Primal Hydra",          ico:"🐉", p:5, t:5, cost:5, kind:"threat",  effect:"Trample. Must be answered.", kws:["Trample"]},
+    {name:"Grove Guardian",        ico:"🌲", p:6, t:6, cost:6, kind:"threat",  effect:"Trample, reach. Major threat.", kws:["Trample","Reach"]},
+    {name:"Rootcoil Serpent",      ico:"🐍", p:2, t:4, cost:3, kind:"utility", effect:"Hexproof. Hard to remove.", kws:["Hexproof"]},
+    {name:"Wildspark Elemental",   ico:"⚡", p:4, t:2, cost:3, kind:"beater",  effect:"Haste. Fast pressure.", kws:["Haste"], haste:true},
+    {name:"Thornhide Brute",       ico:"🦏", p:5, t:4, cost:5, kind:"threat",  effect:"Trample. Solid secondary body.", kws:["Trample"]},
+    {name:"Bloodfern Cultivator",  ico:"🌺", p:1, t:3, cost:2, kind:"dork",    effect:"Taps for mana on future turns.", rampValue:1}
+  ],
+  // 12 equipment/aura — the gear pipeline for Rukha
+  gear: [
+    {name:"Bonesaw Cleaver",    cost:2, bonus:2, effect:"+2/+2"},
+    {name:"Wildwood Mantle",    cost:2, bonus:2, effect:"+2/+2, trample", kw:"Trample"},
+    {name:"Stonefist Gauntlet", cost:2, bonus:2, effect:"+2/+1, first strike", kw:"First Strike"},
+    {name:"Ironbark Shield",    cost:3, bonus:3, effect:"+1/+3, ward 2", kw:"Ward 2"},
+    {name:"Fang of the Wilds",  cost:3, bonus:3, effect:"+3/+2", kw:null},
+    {name:"Savagecrown Helm",   cost:3, bonus:3, effect:"+3/+3, trample", kw:"Trample"},
+    {name:"Primal Aegis",       cost:4, bonus:4, effect:"+3/+3, hexproof", kw:"Hexproof"},
+    {name:"Bloodforged Plate",  cost:4, bonus:4, effect:"+4/+4", kw:null},
+    {name:"Runic Greatsword",   cost:5, bonus:5, effect:"+5/+3, trample", kw:"Trample"},
+    {name:"Vanguard's Armor",   cost:3, bonus:2, effect:"+2/+2, indestructible", kw:"Indestructible"},
+    {name:"Heartwood Cloak",    cost:2, bonus:2, effect:"+2/+2, hexproof", kw:"Hexproof"},
+    {name:"Wraithbane Edge",    cost:4, bonus:4, effect:"+4/+2, deathtouch", kw:"Deathtouch"}
+  ],
+  // 10 protection/interaction instants
+  protection: [
+    {name:"Blossoming Defense",  cost:1, effect:"Target creature gets +2/+2 and hexproof until end of turn."},
+    {name:"Vines of Vastwood",   cost:1, effect:"Target creature can't be the target of spells this turn. Kicked: +4/+4."},
+    {name:"Heroic Intervention", cost:2, effect:"Your permanents gain hexproof and indestructible until end of turn."},
+    {name:"Tamiyo's Safekeeping",cost:1, effect:"Target permanent gains hexproof and indestructible until end of turn."},
+    {name:"Wild Ricochet",       cost:4, effect:"Copy target instant or sorcery; you may choose new targets."},
+    {name:"Beast Within",        cost:3, effect:"Destroy target permanent. Its controller creates a 3/3 Beast."},
+    {name:"Ram Through",         cost:2, effect:"Target creature you control deals damage equal to its power to target creature you don't control."},
+    {name:"Chaos Warp",          cost:3, effect:"Shuffle target permanent into its owner's library; reveal top card."},
+    {name:"Return to Nature",    cost:2, effect:"Destroy target artifact or enchantment."},
+    {name:"Bolt Bend",           cost:4, effect:"Change the target of target spell or ability with a single target."}
+  ],
+  // 5 card draw / advantage
+  draw: [
+    {name:"Hunter's Insight",  cost:3, effect:"Draw cards equal to combat damage dealt by target creature."},
+    {name:"Rishkar's Expertise",cost:6, effect:"Draw cards equal to greatest power among creatures you control; cast a free spell."},
+    {name:"Return of the Wildspeaker",cost:5, effect:"Draw cards equal to greatest power, or creatures get +3/+3."},
+    {name:"Harmonize",         cost:4, effect:"Draw three cards."},
+    {name:"Greater Good",      cost:4, effect:"Sacrifice a creature: draw cards equal to its power, then discard 3."}
+  ],
+  // 4 haymakers / board control
+  haymakers: [
+    {name:"Overwhelming Stampede", cost:5, effect:"All your creatures get +X/+X and trample where X is greatest power."},
+    {name:"Blasphemous Act",       cost:9, effect:"Deal 13 damage to each creature. Costs less for each creature on field.", scaleCost:true},
+    {name:"Chain Reaction",        cost:4, effect:"Deal damage to each creature equal to the number of creatures on the battlefield."},
+    {name:"Chandra's Ignition",    cost:5, effect:"Target creature deals damage equal to its power to each other creature and each opponent."}
+  ],
+  // 6 misc utility (card selection, recursion, value engines)
+  utility: [
+    {name:"Eternal Witness",     cost:3, effect:"Enters: return a card from graveyard to hand.", isCreature:true, p:2, t:1},
+    {name:"Regrowth",            cost:2, effect:"Return target card from your graveyard to your hand."},
+    {name:"Reckless Impulse",    cost:2, effect:"Exile the top two cards; you may play them this turn."},
+    {name:"Outpost Siege",       cost:4, effect:"At the beginning of your upkeep, exile top card; you may play it this turn."},
+    {name:"Lifecrafter's Bestiary",cost:3, effect:"At upkeep, scry 1. Whenever you cast a creature, draw a card."},
+    {name:"Skullclamp",          cost:1, effect:"Equipped creature gets +1/-1. When it dies, draw two cards."}
+  ]
+};
+
+// Build the 51-card "other" deck composition by category count
+const VOLTRON_DECK_COMPOSITION = {creatures:14, gear:12, protection:10, draw:5, haymakers:4, utility:6};
+
+/**
+ * Generates a shuffled array of card references for the 51 "other" slots.
+ * Each entry is {category, index} pointing into VOLTRON_CARDS.
+ */
+function generateVoltronOtherDeck(){
+  const cards=[];
+  for(const [category,count] of Object.entries(VOLTRON_DECK_COMPOSITION)){
+    const pool=VOLTRON_CARDS[category];
+    for(let i=0;i<count;i++){
+      cards.push({category, index:i%pool.length});
+    }
+  }
+  return shuffled(cards);
+}
+
+/**
+ * Resolves a card reference into its full data object.
+ */
+function resolveVoltronCard(ref){
+  return VOLTRON_CARDS[ref.category][ref.index];
+}
+
+/* =====================================================================
    TURN PHASE / STEP SYSTEM — mirrors official MTG turn structure
    Each phase has named steps; each step (except untap/cleanup) grants
    priority, meaning instants and abilities can be used. Sorcery-speed
@@ -177,6 +280,7 @@ function freshState(mode){
     spellLock:"", lastPlayerDamage:0, conclaveAscension:0, conclaveRoster:shuffled(CONCLAVE_UNITS.map(c=>c.id)), lastConclaveId:null,
     commanderDamage:0, commanderTax:0, commanderZone:cfg.id==="voltron", voltronMana:0, voltronGear:0,
     voltronDeck:null, voltronHand:{lands:0,ramp:0,explosive:0,other:0}, voltronBottom:{lands:0,ramp:0,explosive:0,other:0}, voltronLandsInPlay:0, voltronRampInPlay:0, voltronExplosiveInPlay:0, voltronMulligans:0,
+    voltronOtherDeck:null, voltronTypedHand:[], voltronProtectionHeld:0,
     // Phase tracking for the player turn (MTG turn structure)
     playerPhase: TURN_PHASES.BEGINNING,
     playerStep: TURN_STEPS.UNTAP,
@@ -200,6 +304,9 @@ function normalizeState(state){
   state.voltronExplosiveInPlay=state.voltronExplosiveInPlay||0;
   state.voltronMulligans=state.voltronMulligans||0;
   state.voltronDeck=state.voltronDeck||null;
+  state.voltronOtherDeck=state.voltronOtherDeck||null;
+  state.voltronTypedHand=state.voltronTypedHand||[];
+  state.voltronProtectionHeld=state.voltronProtectionHeld||0;
   state.pendingTurnInput=state.pendingTurnInput||null;
   if(state.mode==="voltron"&&state.commanderZone==null)state.commanderZone=!state.tokens.some(token=>token.kind==="commander");
   state.tokens.forEach(t=>{ if(t.baseP==null)t.baseP=t.p; if(t.baseT==null)t.baseT=t.t; });
@@ -321,11 +428,124 @@ function initializeVoltronManaModel(){
 }
 function voltronManaFromSources(){return S.voltronLandsInPlay+S.voltronRampInPlay+(S.voltronExplosiveInPlay*2);}
 function voltronDeckSummary(){return `${S.voltronDeck.lands} lands · ${S.voltronDeck.ramp+S.voltronDeck.explosive} ramp left`;}
+
+/**
+ * Draw a typed card from the voltronOtherDeck when a generic "other" card is drawn.
+ * Returns the resolved card data or null if the typed deck is empty.
+ */
+function drawTypedVoltronCard(){
+  if(!S.voltronOtherDeck)S.voltronOtherDeck=generateVoltronOtherDeck();
+  if(S.voltronOtherDeck.length===0)return null;
+  const ref=S.voltronOtherDeck.pop();
+  const card=resolveVoltronCard(ref);
+  S.voltronTypedHand.push({...card,ref});
+  return card;
+}
+
+/**
+ * AI casting priority for spending remaining mana on support cards.
+ * Returns an array of action step descriptions for everything cast.
+ */
+function voltronCastSupportCards(manaAvailable,commanderOnField){
+  const cast=[];
+  let mana=manaAvailable;
+  const hand=S.voltronTypedHand;
+
+  // Sort hand by AI priority: dorks/ramp first if no commander, gear if commander out, then creatures by cost
+  const scored=(card,index)=>{
+    let score=0;
+    if(!commanderOnField&&card.rampValue)score=100; // dorks are critical pre-commander
+    else if(commanderOnField&&card.ref?.category==="gear")score=90;
+    else if(card.ref?.category==="creatures")score=70;
+    else if(card.ref?.category==="draw")score=50;
+    else if(card.ref?.category==="utility")score=40;
+    else if(card.ref?.category==="haymakers"&&commanderOnField)score=30;
+    else if(card.ref?.category==="protection")score=10; // hold protection, don't cast sorcery-speed
+    score-=card.cost; // prefer cheaper cards when competing
+    return {card,index,score};
+  };
+
+  const ranked=hand.map(scored).sort((a,b)=>b.score-a.score);
+  const castIndices=[];
+
+  for(const entry of ranked){
+    if(mana<entry.card.cost)continue;
+    const card=entry.card;
+
+    // Protection stays in hand as a virtual held resource
+    if(card.ref?.category==="protection"){
+      S.voltronProtectionHeld++;
+      castIndices.push(entry.index);
+      // Don't spend mana — protection is held, not cast proactively
+      cast.push({label:`Hold ${card.name}`,detail:`${card.effect} (kept as protection for future turns).`});
+      continue;
+    }
+
+    mana-=card.cost;
+
+    if(card.ref?.category==="gear"&&commanderOnField){
+      // Apply gear to commander
+      const commander=voltronCommander();
+      if(commander){
+        const bonus=card.bonus||2;
+        commander.baseP+=bonus;commander.baseT+=bonus;commander.p=commander.baseP;commander.t=commander.baseT;
+        S.voltronGear=(S.voltronGear||0)+1;
+        if(card.kw&&!commander.kws.includes(card.kw))commander.kws.push(card.kw);
+        commander.effect=`Commander — ${S.voltronGear} gear; ${commander.kws.join(", ").toLowerCase()}.`;
+        cast.push({label:`Equip ${card.name} to ${commander.name}`,detail:`${card.effect}. Now ${tokenPower(commander)}/${tokenToughness(commander)}.`});
+        logG(`equips ${card.name} on ${commander.name}; now ${tokenPower(commander)}/${tokenToughness(commander)}.`);
+      }
+    }else if(card.ref?.category==="creatures"||(card.ref?.category==="utility"&&card.isCreature)||card.rampValue){
+      // Deploy creature to battlefield
+      const p=card.p||2,t=card.t||2;
+      const kws=card.kws?[...card.kws]:[];
+      S.tokens.push({name:card.name,ico:card.ico||"🐾",kind:card.rampValue?"voltron-support":"voltron-creature",type:card.type||"Creature",p,t,baseP:p,baseT:t,kws,effect:card.effect||"",summoningSick:!card.haste});
+      if(card.rampValue)S.voltronRampInPlay=(S.voltronRampInPlay||0)+card.rampValue;
+      cast.push({label:`Cast ${card.name} (${card.cost} mana)`,detail:`${p}/${t}${kws.length?" · "+kws.join(", "):""} — ${card.effect}`});
+      logG(`casts ${card.name} (${p}/${t}).`);
+    }else if(card.ref?.category==="draw"){
+      // Card draw — draw extra typed cards
+      const extraDraws=Math.min(3,S.voltronOtherDeck?.length||0);
+      for(let i=0;i<extraDraws;i++)drawTypedVoltronCard();
+      cast.push({label:`Cast ${card.name} (${card.cost} mana)`,detail:`${card.effect} Rukha draws ${extraDraws} card${extraDraws===1?"":"s"}.`});
+      logG(`casts ${card.name} and draws ${extraDraws} cards.`);
+    }else if(card.ref?.category==="haymakers"){
+      // Haymaker — logged as a powerful effect
+      cast.push({label:`Cast ${card.name} (${card.cost} mana)`,detail:card.effect});
+      logG(`casts ${card.name}!`);
+    }else if(card.ref?.category==="utility"&&!card.isCreature){
+      // Non-creature utility
+      cast.push({label:`Cast ${card.name} (${card.cost} mana)`,detail:card.effect});
+      logG(`casts ${card.name}.`);
+    }else{
+      // Fallback — generic play
+      cast.push({label:`Play ${card.name} (${card.cost} mana)`,detail:card.effect||"Rukha plays a spell."});
+    }
+
+    castIndices.push(entry.index);
+  }
+
+  // Remove cast/held cards from hand (descending order to preserve indices)
+  castIndices.sort((a,b)=>b-a).forEach(i=>hand.splice(i,1));
+  S.voltronMana=mana;
+  return cast;
+}
 function addVoltronSupport(){
   initializeVoltronManaModel();
-  if(S.voltronHand.ramp<=0)return false;
+  // Try to cast a creature from the typed hand
+  const creature=S.voltronTypedHand.find(c=>(c.ref?.category==="creatures"||c.rampValue)&&c.cost<=voltronManaFromSources());
+  if(!creature&&S.voltronHand.ramp<=0)return false;
+  if(creature){
+    const idx=S.voltronTypedHand.indexOf(creature);
+    S.voltronTypedHand.splice(idx,1);
+    const p=creature.p||2,t=creature.t||2;
+    S.tokens.push({name:creature.name,ico:creature.ico||"🐾",kind:creature.rampValue?"voltron-support":"voltron-creature",type:creature.type||"Creature",p,t,baseP:p,baseT:t,kws:creature.kws?[...creature.kws]:[],effect:creature.effect||"",summoningSick:!creature.haste});
+    if(creature.rampValue)S.voltronRampInPlay=(S.voltronRampInPlay||0)+creature.rampValue;
+    return true;
+  }
+  // Fallback to generic ramp
   S.voltronHand.ramp--;S.voltronRampInPlay=(S.voltronRampInPlay||0)+1;
-  S.tokens.push({name:"Wilds Guide",ico:"🌿",kind:"voltron-support",type:"Creature — Shaman",p:2,t:2,baseP:2,baseT:2,kws:[],effect:"Drawn ramp source supporting Rukha's mana base.",summoningSick:true});
+  S.tokens.push({name:"Wilds Guide",ico:"🌿",kind:"voltron-support",type:"Creature — Shaman",p:2,t:2,baseP:2,baseT:2,kws:[],effect:"Drawn ramp source.",summoningSick:true});
   return true;
 }
 function returnVoltronCommanderToZone(token){
@@ -750,57 +970,89 @@ function startConclaveTurn(){
 function startVoltronTurn(){
   S.pendingDecl="voltron";
   initializeVoltronManaModel();
+  if(!S.voltronOtherDeck)S.voltronOtherDeck=generateVoltronOtherDeck();
   const actions=[];
+
+  // --- DRAW PHASE ---
   if(S.turn>1){
     const drawn=drawVoltronCard();
-    actions.push({label:"Draw from the rival deck",detail:drawn==="none"?"The virtual deck is empty.":`Rukha draws a ${drawn==="lands"?"land":drawn==="ramp"?"ramp source":drawn==="explosive"?"fast-mana rock":"non-mana spell"}.`});
+    let drawDetail;
+    if(drawn==="none")drawDetail="The virtual deck is empty.";
+    else if(drawn==="other"){
+      const typedCard=drawTypedVoltronCard();
+      drawDetail=typedCard?`Rukha draws ${typedCard.name} (${typedCard.ref?.category}).`:"Rukha draws a spell.";
+    }else{
+      drawDetail=`Rukha draws a ${drawn==="lands"?"land":drawn==="ramp"?"ramp source":"fast-mana rock"}.`;
+    }
+    actions.push({label:"Draw",detail:drawDetail});
   }else{
-    actions.push({label:"Keep opening hand",detail:`Rukha keeps ${S.voltronHand.lands} land${S.voltronHand.lands===1?"":"s"} after ${S.voltronMulligans?`${S.voltronMulligans} mulligan${S.voltronMulligans===1?"":"s"}`:"the opening draw"}.`});
+    // Opening hand: draw typed cards for the "other" slots in the opening hand
+    for(let i=0;i<S.voltronHand.other;i++)drawTypedVoltronCard();
+    actions.push({label:"Keep opening hand",detail:`Rukha keeps ${S.voltronHand.lands} land${S.voltronHand.lands===1?"":"s"} and ${S.voltronTypedHand.length} spell${S.voltronTypedHand.length===1?"":"s"}.`});
   }
+
+  // --- LAND DROP ---
   if(S.voltronHand.lands>0){
     S.voltronHand.lands--;S.voltronLandsInPlay++;
-    actions.push({label:"Play a land",detail:`${S.voltronLandsInPlay} land${S.voltronLandsInPlay===1?"":"s"} now fuel Rukha's mana base.`});
+    actions.push({label:"Play a land",detail:`${S.voltronLandsInPlay} land${S.voltronLandsInPlay===1?"":"s"} in play.`});
   }else{
-    actions.push({label:"Miss a land drop",detail:"No land is available in Rukha's virtual hand this turn."});
+    actions.push({label:"Miss a land drop",detail:"No land available in Rukha's hand."});
   }
+
+  // --- MANA AVAILABLE ---
   S.voltronMana=voltronManaFromSources();
+
+  // --- PRIMARY ACTION: commander cast, ramp, or gear ---
   let commander=voltronCommander();
   if(!commander){
     const cost=voltronCommanderCost();
-    if(deployVoltronCommander()){
-      actions.push({label:`Cast ${VOLTRON_COMMANDER.name}`,detail:`Rukha spends ${cost} mana from ${S.voltronLandsInPlay} land${S.voltronLandsInPlay===1?"":"s"} and ${S.voltronRampInPlay+S.voltronExplosiveInPlay} ramp source${S.voltronRampInPlay+S.voltronExplosiveInPlay===1?"":"s"}.`});
+    if(S.voltronMana>=cost&&deployVoltronCommander()){
+      actions.push({label:`Cast ${VOLTRON_COMMANDER.name} (${cost} mana)`,detail:`Rukha enters from the command zone.${S.commanderTax?` Includes ${S.commanderTax} commander tax.`:""}`});
       logG(`casts ${VOLTRON_COMMANDER.name} from the command zone for ${cost} mana.`);
+      commander=voltronCommander();
     }else if(S.voltronHand.explosive>0&&S.voltronMana>=1){
       S.voltronHand.explosive--;S.voltronExplosiveInPlay++;S.voltronMana--;
-      actions.push({label:"Deploy fast mana",detail:"Rukha casts a rare explosive rock; it will add 2 mana on future turns."});
+      actions.push({label:"Deploy fast mana (1 mana)",detail:"Rukha plays a rare explosive rock; +2 mana on future turns."});
       logG("deploys a fast-mana rock.");
     }else if(S.voltronHand.ramp>0&&S.voltronMana>=2){
       S.voltronHand.ramp--;S.voltronRampInPlay++;S.voltronMana-=2;
-      actions.push({label:"Cast a ramp spell",detail:"Rukha converts a drawn ramp source into 1 additional mana on future turns."});
+      actions.push({label:"Cast ramp spell (2 mana)",detail:"Rukha converts a drawn ramp source into +1 mana on future turns."});
       logG("casts a ramp spell.");
-    }else{
-      actions.push({label:"Develop the board",detail:`Rukha has ${S.voltronMana} mana but needs ${cost} to cast her commander.`});
     }
   }else{
     S.commanderZone=false;
-    if(S.voltronMana>=2&&S.voltronHand.other>0){
-      S.voltronHand.other--;
-      const bonus=S.voltronMana>=5?3:2;
+    // Look for gear in the typed hand first
+    const gearInHand=S.voltronTypedHand.filter(c=>c.ref?.category==="gear");
+    const bestGear=gearInHand.filter(c=>c.cost<=S.voltronMana).sort((a,b)=>b.bonus-a.bonus)[0];
+    if(bestGear){
+      S.voltronMana-=bestGear.cost;
+      const bonus=bestGear.bonus||2;
       commander.baseP+=bonus;commander.baseT+=bonus;commander.p=commander.baseP;commander.t=commander.baseT;
-      S.voltronMana-=2;S.voltronGear=(S.voltronGear||0)+1;
-      if(!commander.kws.includes("Trample"))commander.kws.push("Trample");
-      if(S.voltronGear>=2&&!commander.kws.includes("Ward 2"))commander.kws.push("Ward 2");
-      commander.effect=`Commander — ${S.voltronGear} gear piece${S.voltronGear===1?"":"s"}; trample${commander.kws.includes("Ward 2")?"; ward 2":""}.`;
-      actions.push({label:`Suit up ${commander.name}`,detail:`A drawn gear package grants +${bonus}/+${bonus}${commander.kws.includes("Ward 2")?" and ward 2":""}.`});
-      logG(`equips ${commander.name}; it is now ${tokenPower(commander)}/${tokenToughness(commander)}.`);
-    }else{
-      const reason=S.voltronMana<2?`only ${S.voltronMana} mana available`:"no drawn gear or protection card available";
-      actions.push({label:"Hold the line",detail:`Rukha has ${reason} and cannot suit up ${commander.name} this turn.`});
+      S.voltronGear=(S.voltronGear||0)+1;
+      if(bestGear.kw&&!commander.kws.includes(bestGear.kw))commander.kws.push(bestGear.kw);
+      commander.effect=`Commander — ${S.voltronGear} gear; ${commander.kws.join(", ").toLowerCase()}.`;
+      const gearIdx=S.voltronTypedHand.indexOf(bestGear);
+      if(gearIdx>=0)S.voltronTypedHand.splice(gearIdx,1);
+      actions.push({label:`Equip ${bestGear.name} (${bestGear.cost} mana)`,detail:`${bestGear.effect}. Now ${tokenPower(commander)}/${tokenToughness(commander)}.`});
+      logG(`equips ${bestGear.name}; now ${tokenPower(commander)}/${tokenToughness(commander)}.`);
     }
   }
+
+  // --- SECONDARY ACTIONS: spend remaining mana on support cards ---
+  if(S.voltronMana>0&&S.voltronTypedHand.length>0){
+    const supportActions=voltronCastSupportCards(S.voltronMana,!!voltronCommander());
+    actions.push(...supportActions);
+  }
+
+  // --- HOLD STATUS ---
+  if(actions.length<=2){
+    const reason=S.voltronMana<1?"no mana remaining":"no castable cards in hand";
+    actions.push({label:"Pass with mana open",detail:`Rukha has ${reason}. ${S.voltronProtectionHeld?`Holding ${S.voltronProtectionHeld} protection spell${S.voltronProtectionHeld===1?"":"s"}.`:""}`});
+  }
+
   S.actionSteps=actions;
   S.attackPower=totalPower();
-  S.declFlavor=voltronCommander()?"Rukha builds toward a commander-damage strike.":"Rukha searches the wilds for the mana to cast her commander.";
+  S.declFlavor=voltronCommander()?"Rukha builds toward a commander-damage strike.":"Rukha develops mana and board presence.";
   appendAttackStep();
   showGarrukTurn();
 }
@@ -1552,7 +1804,8 @@ function render(){
     const commander=voltronCommander();
     const deck=S.voltronDeck||newVoltronDeck();
     const rampInPlay=(S.voltronRampInPlay||0)+(S.voltronExplosiveInPlay||0);
-    commanderStatus.innerHTML=`<span>${commander?"On field":"Command zone"}</span><span>Tax +${S.commanderTax}</span><span>${S.voltronLandsInPlay||0} lands + ${rampInPlay} ramp</span><span>Deck ${deck.lands}L · ${deck.ramp+deck.explosive}R</span><span>Commander damage ${S.commanderDamage}/21</span>`;
+    const handSize=(S.voltronTypedHand?.length||0)+(S.voltronHand?.lands||0)+(S.voltronHand?.ramp||0)+(S.voltronHand?.explosive||0);
+    commanderStatus.innerHTML=`<span>${commander?"On field":"Command zone"}</span><span>Tax +${S.commanderTax}</span><span>${S.voltronLandsInPlay||0} lands + ${rampInPlay} ramp</span><span>Hand ${handSize}</span>${S.voltronProtectionHeld?`<span>🛡 ${S.voltronProtectionHeld}</span>`:""}<span>Cmdr dmg ${S.commanderDamage}/21</span>`;
   }else{commanderStatus.hidden=true;commanderStatus.textContent="";}
   document.getElementById('pLife').textContent=S.player.life;document.getElementById('pCreatures').textContent=S.player.creatures;
   document.getElementById('lifeStat').classList.toggle('warn',S.player.life<=10);
@@ -1570,13 +1823,13 @@ function renderTokens(){
   S.tokens.forEach((t,i)=>{
     const d=document.createElement('div');
     const selectedCasualty=casualtyMode&&turnInput.enemyDeaths.has(i);
-    d.className="card"+(t.kind==="commander"?" commander":t.kind==="synergy"?" synergy":t.kind==="horde"?" horde":t.kind==="beast"?" beast":"")+(t.summoningSick?" sick":"")+(casualtyMode?" casualty-selectable":"")+(selectedCasualty?" casualty-selected":"");
+    d.className="card"+(t.kind==="commander"?" commander":t.kind==="synergy"?" synergy":t.kind==="horde"?" horde":t.kind==="beast"?" beast":t.kind==="voltron-creature"?" voltron-creature":"")+(t.summoningSick?" sick":"")+(casualtyMode?" casualty-selectable":"")+(selectedCasualty?" casualty-selected":"");
     const p=tokenPower(t),toughness=tokenToughness(t);
     const primaryLabel=casualtyMode?`${selectedCasualty?"Unmark":"Mark"} ${t.name} as dead`:`View details for ${t.name}`;
     d.innerHTML=`
       ${selectedCasualty?'<div class="c-casualty">✓ Dies</div>':t.summoningSick?'<div class="c-sick">💤</div>':''}
       <button type="button" class="card-main" aria-label="${primaryLabel}"${casualtyMode?` aria-pressed="${selectedCasualty?"true":"false"}"`:""}>
-        <span class="c-name"><span>${t.name}</span><span class="mana">${t.kind==="commander"?"⚜":t.kind==="synergy"?"✦":t.kind==="horde"?"☠":"🌲"}</span></span>
+        <span class="c-name"><span>${t.name}</span><span class="mana">${t.kind==="commander"?"⚜":t.kind==="voltron-creature"||t.kind==="voltron-support"?"🌲":t.kind==="synergy"?"✦":t.kind==="horde"?"☠":"🌲"}</span></span>
         <span class="c-art">${t.ico}</span>
         <span class="c-pt">${p}/${toughness}</span>
       </button>

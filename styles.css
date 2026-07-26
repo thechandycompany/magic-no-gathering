@@ -541,3 +541,6 @@ header.app-bar{
 .mode-card.commander-mode{background:linear-gradient(180deg,#3d2114,#1d1009); border-color:#81502b;}
 .mode-option input:checked + .mode-card.commander-mode{border-color:#d98c42; box-shadow:0 0 0 1px #d98c42 inset,0 0 18px rgba(217,140,66,.2); background:linear-gradient(180deg,#51301b,#231309);}
 @media(max-width:760px){.commander-status{max-width:210px;}.commander-status span{font-size:8px;}}
+
+.card.voltron-creature{background:linear-gradient(160deg,#4a3d1e 0%,#2e2510 55%,#1a150a 100%); border-color:#8a7a42;}
+.card.voltron-creature .c-pt{background:linear-gradient(180deg,#2e2510,#151008); border-color:#8a7a42;}
