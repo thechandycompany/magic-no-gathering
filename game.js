@@ -446,9 +446,10 @@ function drawTypedVoltronCard(){
  * AI casting priority for spending remaining mana on support cards.
  * Returns an array of action step descriptions for everything cast.
  */
-function voltronCastSupportCards(manaAvailable,commanderOnField){
+function voltronCastSupportCards(manaAvailable,commanderOnField,maxCasts=99){
   const cast=[];
   let mana=manaAvailable;
+  let castCount=0;
   const hand=S.voltronTypedHand;
 
   // Sort hand by AI priority: dorks/ramp first if no commander, gear if commander out, then creatures by cost
@@ -470,18 +471,17 @@ function voltronCastSupportCards(manaAvailable,commanderOnField){
 
   for(const entry of ranked){
     if(mana<entry.card.cost)continue;
+    if(castCount>=maxCasts&&entry.card.ref?.category!=="protection")continue;
     const card=entry.card;
 
-    // Protection stays in hand as a virtual held resource
+    // Protection stays in hand — don't extract it proactively.
+    // It's counted from the typed hand when relevant.
     if(card.ref?.category==="protection"){
-      S.voltronProtectionHeld++;
-      castIndices.push(entry.index);
-      // Don't spend mana — protection is held, not cast proactively
-      cast.push({label:`Hold ${card.name}`,detail:`${card.effect} (kept as protection for future turns).`});
       continue;
     }
 
     mana-=card.cost;
+    castCount++;
 
     if(card.ref?.category==="gear"&&commanderOnField){
       // Apply gear to commander
@@ -1038,9 +1038,9 @@ function startVoltronTurn(){
     }
   }
 
-  // --- SECONDARY ACTIONS: spend remaining mana on support cards ---
+  // --- SECONDARY ACTIONS: spend remaining mana on support cards (max 1 per turn) ---
   if(S.voltronMana>0&&S.voltronTypedHand.length>0){
-    const supportActions=voltronCastSupportCards(S.voltronMana,!!voltronCommander());
+    const supportActions=voltronCastSupportCards(S.voltronMana,!!voltronCommander(),1);
     actions.push(...supportActions);
   }
 
@@ -1805,7 +1805,8 @@ function render(){
     const deck=S.voltronDeck||newVoltronDeck();
     const rampInPlay=(S.voltronRampInPlay||0)+(S.voltronExplosiveInPlay||0);
     const handSize=(S.voltronTypedHand?.length||0)+(S.voltronHand?.lands||0)+(S.voltronHand?.ramp||0)+(S.voltronHand?.explosive||0);
-    commanderStatus.innerHTML=`<span>${commander?"On field":"Command zone"}</span><span>Tax +${S.commanderTax}</span><span>${S.voltronLandsInPlay||0} lands + ${rampInPlay} ramp</span><span>Hand ${handSize}</span>${S.voltronProtectionHeld?`<span>🛡 ${S.voltronProtectionHeld}</span>`:""}<span>Cmdr dmg ${S.commanderDamage}/21</span>`;
+    const protectionInHand=(S.voltronTypedHand||[]).filter(c=>c.ref?.category==="protection").length;
+    commanderStatus.innerHTML=`<span>${commander?"On field":"Command zone"}</span><span>Tax +${S.commanderTax}</span><span>${S.voltronLandsInPlay||0} lands + ${rampInPlay} ramp</span><span>Hand ${handSize}</span>${protectionInHand?`<span>🛡 ${protectionInHand}</span>`:""}<span>Cmdr dmg ${S.commanderDamage}/21</span>`;
   }else{commanderStatus.hidden=true;commanderStatus.textContent="";}
   document.getElementById('pLife').textContent=S.player.life;document.getElementById('pCreatures').textContent=S.player.creatures;
   document.getElementById('lifeStat').classList.toggle('warn',S.player.life<=10);
