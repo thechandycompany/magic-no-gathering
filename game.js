@@ -280,7 +280,7 @@ function freshState(mode){
     difficulty:cfg.id, enraged:false, player:{life:cfg.life,creatures:0}, tokens:[], pendingDecl:null,
     attackPower:0, slayTarget:null, declFlavor:"", actionSteps:[], log:[], turnPowerBonus:0,
     spellLock:"", lastPlayerDamage:0, conclaveAscension:0, conclaveRoster:shuffled(CONCLAVE_UNITS.map(c=>c.id)), lastConclaveId:null,
-    commanderDamage:0, commanderTax:0, commanderZone:cfg.id==="voltron", voltronMana:0, voltronGear:0,
+    commanderDamage:0, commanderDamageToEnemy:0, commanderTax:0, commanderZone:cfg.id==="voltron", voltronMana:0, voltronGear:0,
     voltronDeck:null, voltronHand:{lands:0,ramp:0,explosive:0,other:0}, voltronBottom:{lands:0,ramp:0,explosive:0,other:0}, voltronLandsInPlay:0, voltronRampInPlay:0, voltronExplosiveInPlay:0, voltronMulligans:0,
     voltronOtherDeck:null, voltronTypedHand:[], voltronProtectionHeld:0,
     // Phase tracking for the player turn (MTG turn structure)
@@ -297,7 +297,7 @@ function normalizeState(state){
   state.turnPowerBonus=state.turnPowerBonus||0; state.spellLock=state.spellLock||""; state.lastPlayerDamage=state.lastPlayerDamage||0;
   state.conclaveAscension=state.conclaveAscension||0;
   state.conclaveRoster=state.conclaveRoster||shuffled(CONCLAVE_UNITS.map(c=>c.id));
-  state.commanderDamage=state.commanderDamage||0; state.commanderTax=state.commanderTax||0;
+  state.commanderDamage=state.commanderDamage||0; state.commanderDamageToEnemy=state.commanderDamageToEnemy||0; state.commanderTax=state.commanderTax||0;
   state.voltronMana=state.voltronMana||0; state.voltronGear=state.voltronGear||0;
   state.voltronHand=state.voltronHand||{lands:0,ramp:0,explosive:0,other:0};
   state.voltronBottom=state.voltronBottom||{lands:0,ramp:0,explosive:0,other:0};
@@ -378,6 +378,14 @@ function damageLoyalty(n){
 function gainLoyalty(n){ S.loyalty+=n; if(S.loyalty>S.maxLoyaltySeen)S.maxLoyaltySeen=S.loyalty; render(); }
 function adjust(stat,d){ S.player[stat]=Math.max(0,S.player[stat]+d); render(); }
 function setStat(stat,v){ S.player[stat]=Math.max(0,v); render(); }
+/* Commander life counts down from 21 as the enemy commander's combat damage
+   (S.commanderDamage) accumulates — mirrors the 21 commander-damage loss rule.
+   Adjusting it manually moves S.commanderDamage in the opposite direction. */
+function commanderLifeRemaining(){ return Math.max(0,21-(S.commanderDamage||0)); }
+function adjustCommanderLife(d){
+  S.commanderDamage=Math.max(0,Math.min(21,(S.commanderDamage||0)-d));
+  render();
+}
 function addWolf(){
   const big=S.mode==="hard" && S.turn>=5;
   const size=big?4:2;
@@ -1240,6 +1248,7 @@ function ensureTurnInput(){
     playerDeaths:0,
     creaturesPlayed:0,
     damageToEnemy:0,
+    commanderDamageToEnemy:0,
     enemyDeaths:new Set(),
     allowEnemyDeaths:S.tokens.length>0&&(isEnemy||timing.canCastInstant),
     slayOutcome:isEnemy&&S.pendingDecl==="slay"?"dies":null,
@@ -1536,6 +1545,7 @@ function renderPlayerTurnInputs(){
   }else if(timing.isCombat){
     html+=`<div class="context-summary combat-summary"><span class="context-summary-icon">⚔️</span><div><strong>Final combat result</strong><span>Enter the outcome.</span></div></div>`;
     html+=numberFieldHtml("damageToEnemy",`Damage dealt to ${resource}`,"Damage that reached the enemy resource.");
+    if(S.mode==="voltron")html+=numberFieldHtml("commanderDamageToEnemy","Commander damage to Rukha","Unblocked damage from your commander (toward 21).",input.damageToEnemy||undefined);
     html+=numberFieldHtml("playerDeaths","Your creatures that died","Reduces your creature total.",S.player.creatures);
     if(input.allowEnemyDeaths)html+=casualtyFieldHtml("Enemy creatures that died","Select cards above.");
     html+=disclosureHtml("More combat changes",numberFieldHtml("creaturesPlayed","Creatures added","Flash, tokens, or returned creatures."));
@@ -1650,6 +1660,11 @@ function resolvePlayerTurnInputs(input){
       damageLoyalty(input.damageToEnemy);
       logP(`You deal ${input.damageToEnemy} to ${modeConfig().resource.toLowerCase()} → ${S.loyalty}.`);
     }
+    if(S.mode==="voltron"&&input.commanderDamageToEnemy>0){
+      const cmdrDmg=Math.min(input.commanderDamageToEnemy,input.damageToEnemy);
+      S.commanderDamageToEnemy+=cmdrDmg;
+      logP(`Your commander deals ${cmdrDmg} commander damage to ${enemyName()} (${S.commanderDamageToEnemy}/21).`);
+    }
     if(input.playerDeaths>0){
       adjust("creatures",-input.playerDeaths);
       logP(`${input.playerDeaths} of your creature(s) die in combat.`);
@@ -1743,6 +1758,7 @@ function checkPhase(){
 function checkEnd(){
   const won=S.mode==="horde"?S.loyalty<=0&&S.tokens.length===0:S.loyalty<=0;
   if(won){endGame(true);return true;}
+  if(S.mode==="voltron"&&S.commanderDamageToEnemy>=21){endGame(true,"Your commander dealt 21 commander damage to "+enemyName()+".");return true;}
   if(S.mode==="voltron"&&S.commanderDamage>=21){endGame(false,`${enemyName()} dealt 21 commander damage.`);return true;}
   if(S.player.life<=0){endGame(false,"Your life total hit 0.");return true;}
   return false;
@@ -1751,7 +1767,7 @@ function endGame(won,reason){
   if(gameOver)return;gameOver=true;save();
   const m=document.getElementById('modal'),o=document.getElementById('overlay'),cfg=modeConfig();
   if(won){
-    const victory=S.mode==="horde"?"The final corpse falls and the Horde deck is empty.":`${cfg.enemy}'s ${cfg.resource.toLowerCase()} reaches 0.`;
+    const victory=reason||( S.mode==="horde"?"The final corpse falls and the Horde deck is empty.":`${cfg.enemy}'s ${cfg.resource.toLowerCase()} reaches 0.`);
     m.className="modal";m.innerHTML=`<div class="big-ico">🏆</div><h2>Victory!</h2><p>${victory}<br>You survived <b>${S.turn}</b> turns of ${cfg.name}.</p><button class="cta" onclick="restart()">Choose Another Encounter</button>`;
   }else{
     m.className="modal lose";m.innerHTML=`<div class="big-ico">💀</div><h2>Defeated</h2><p>${reason||`${cfg.enemy} defeated you.`}<br><br>${cfg.resource} remaining: <b>${S.loyalty}</b>.</p><button class="cta" onclick="restart()">Try Another Encounter</button>`;
@@ -1811,10 +1827,19 @@ function render(){
     const rampInPlay=(S.voltronRampInPlay||0)+(S.voltronExplosiveInPlay||0);
     const handSize=(S.voltronTypedHand?.length||0)+(S.voltronHand?.lands||0)+(S.voltronHand?.ramp||0)+(S.voltronHand?.explosive||0);
     const protectionInHand=(S.voltronTypedHand||[]).filter(c=>c.ref?.category==="protection").length;
-    commanderStatus.innerHTML=`<span>${commander?"On field":"Command zone"}</span><span>Tax +${S.commanderTax}</span><span>${S.voltronLandsInPlay||0} lands + ${rampInPlay} ramp</span><span>Hand ${handSize}</span>${protectionInHand?`<span>🛡 ${protectionInHand}</span>`:""}<span>Cmdr dmg ${S.commanderDamage}/21</span>`;
+    commanderStatus.innerHTML=`<span>${commander?"On field":"Command zone"}</span><span>Tax +${S.commanderTax}</span><span>${S.voltronLandsInPlay||0} lands + ${rampInPlay} ramp</span><span>Hand ${handSize}</span>${protectionInHand?`<span>🛡 ${protectionInHand}</span>`:""}<span>Cmdr dmg dealt ${S.commanderDamage}/21</span><span>Cmdr dmg taken ${S.commanderDamageToEnemy}/21</span>`;
   }else{commanderStatus.hidden=true;commanderStatus.textContent="";}
   document.getElementById('pLife').textContent=S.player.life;document.getElementById('pCreatures').textContent=S.player.creatures;
   document.getElementById('lifeStat').classList.toggle('warn',S.player.life<=10);
+  const cmdrLifeStat=document.getElementById('cmdrLifeStat');
+  if(S.mode==="voltron"){
+    cmdrLifeStat.hidden=false;
+    const cmdrLifeLeft=commanderLifeRemaining();
+    document.getElementById('pCmdrLife').textContent=cmdrLifeLeft;
+    cmdrLifeStat.classList.toggle('warn',cmdrLifeLeft<=7);
+  }else{
+    cmdrLifeStat.hidden=true;
+  }
   const readyCount=S.tokens.filter(t=>!t.summoningSick).length,sickCount=S.tokens.length-readyCount;
   let atkText=readyCount?`Attack power: ${totalPower()} (${readyCount} ready)`:"";
   if(sickCount)atkText+=`${atkText?" · ":""}${sickCount} summoning sick`;
@@ -1974,7 +1999,9 @@ function setUtilityMenu(open){
   trigger.setAttribute('aria-expanded',open?"true":"false");
 }
 function wire(){
-  document.querySelectorAll('.adj button').forEach(b=>{ b.onclick=()=>adjust(b.dataset.stat, parseInt(b.dataset.d,10)); });
+  document.querySelectorAll('.adj button').forEach(b=>{
+    b.onclick=()=>b.dataset.stat==="commanderLife"?adjustCommanderLife(parseInt(b.dataset.d,10)):adjust(b.dataset.stat, parseInt(b.dataset.d,10));
+  });
   document.getElementById('addWolfBtn').onclick=manualAddEnemy;
   document.getElementById('endTurnBtn').onclick=resolveTurn;
   document.getElementById('quickEndBtn').onclick=endPlayerTurnNow;

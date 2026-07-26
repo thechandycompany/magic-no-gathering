@@ -544,3 +544,9 @@ header.app-bar{
 
 .card.voltron-creature{background:linear-gradient(160deg,#4a3d1e 0%,#2e2510 55%,#1a150a 100%); border-color:#8a7a42;}
 .card.voltron-creature .c-pt{background:linear-gradient(180deg,#2e2510,#151008); border-color:#8a7a42;}
+
+/* Commander life stat — mirrors the 21 commander-damage loss condition */
+.stat.commander-life-stat[hidden]{display:none;}
+.commander-life-stat .sv{color:#f4d6a6;}
+.commander-life-stat.warn .sv{color:var(--blood-lt);}
+@media(max-width:760px){.commander-life-stat{order:1;}}
