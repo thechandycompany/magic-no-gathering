@@ -17,3 +17,18 @@ Add player-side discard/mill actions that interact with Rukha's finite virtual h
 - Once Rukha is topdecking, she can only act on what she draws each turn
 - Mill overlaps with discard strategies and accelerates deck depletion
 - Consider a "Rukha has no cards in hand" state where she skips non-combat development
+
+## Second Commander Rival Archetype
+
+Build a second Commander Rival opponent using the existing framework (finite virtual deck, typed hand, mana model, command zone, commander damage). The engine work is done; this is mostly content.
+
+**Candidate archetypes (from original brainstorm):**
+- **Esper Artifacts** — develops engines, protects them, creates artifact creatures, resets the board selectively
+- **Mardu Aristocrats** — creates fodder, sacrifices creatures for value, drains life, rebuilds after wipes
+- **Sultai Graveyard** — mills, reanimates, recurs threats, makes removal less final
+- **Boros Tokens/Equipment** — goes wide or empowers its commander through equipment (closest analog to Voltron, so probably not the first pick for variety)
+
+**Design notes:**
+- Reuse VOLTRON_CARDS-style typed pool structure, but with archetype-appropriate categories (e.g. Aristocrats: sac outlets, token generators, drain effects instead of gear/protection/haymakers)
+- Needs its own win condition framing — not every archetype should use commander damage as the primary clock (Aristocrats/Graveyard decks usually grind via card advantage + drain, not one big creature)
+- Consider whether this should be a wholly separate mode or a "commander select" step within a shared "Commander Rival" mode
