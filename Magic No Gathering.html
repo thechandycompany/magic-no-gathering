@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Magic No Gathering — Solo Encounter Engine</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="wrap">
+
+  <header class="app-bar">
+    <div class="brand">
+      <h1 id="brandTitle">Magic No Gathering</h1>
+      <span class="sub sr-only" id="brandSub">Solo Commander Encounter Engine</span>
+    </div>
+    <div class="session-status" aria-label="Encounter status">
+      <span id="modePill">Vanilla Garruk</span>
+      <span class="status-divider" aria-hidden="true">·</span>
+      <span>Turn <b id="turnNum">1</b></span>
+      <span class="status-divider" aria-hidden="true">·</span>
+      <span id="phasePill">Garruk's Turn</span>
+    </div>
+    <div class="header-actions">
+      <button class="btn-ghost" id="undoBtn" disabled="">↶ Undo</button>
+      <button class="btn-ghost menu-trigger" id="menuBtn" type="button" aria-expanded="false" aria-controls="utilityMenu">More ···</button>
+      <div class="utility-menu" id="utilityMenu">
+        <button class="utility-item" id="logBtn">Encounter Log <span class="badge" id="logCount">0</span></button>
+        <button class="utility-item" id="saveBtn">Save Encounter</button>
+        <button class="utility-item danger" id="resetBtn">Restart Encounter</button>
+      </div>
+    </div>
+  </header>
+
+  <section class="player-hud" aria-label="Your battlefield totals">
+    <div class="stat-row">
+      <div class="stat" id="lifeStat">
+        <span class="sico">❤️</span>
+        <div><div class="sv" id="pLife">40</div><div class="sl">Life</div></div>
+        <div class="adj"><button data-stat="life" data-d="-1" aria-label="Decrease life">−</button><button data-stat="life" data-d="1" aria-label="Increase life">+</button></div>
+      </div>
+      <div class="stat">
+        <span class="sico">🐾</span>
+        <div><div class="sv" id="pCreatures">0</div><div class="sl">Creatures</div></div>
+        <div class="adj"><button data-stat="creatures" data-d="-1" aria-label="Decrease creatures">−</button><button data-stat="creatures" data-d="1" aria-label="Increase creatures">+</button></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="board" id="board" aria-labelledby="boardTitle">
+    <div class="board-h"><span class="ico" id="boardIcon">🌲</span> <span id="boardTitle">Garruk's Battlefield</span>
+      <span class="atk-note" id="atkNote"></span>
+    </div>
+    <div class="board-inner">
+      <div class="garruk-col">
+        <div class="garruk-top">
+          <div class="portrait" id="portrait" role="button" tabindex="0" aria-label="Open encounter rules">
+            <div class="glyph" id="portraitGlyph">🐺</div>
+            <div class="name" id="enemyName">Garruk, the Slayer</div>
+            <div class="portrait-tooltip sr-only" id="portraitTooltip"></div>
+          </div>
+          <div class="garruk-stats">
+            <div class="resource-line"><span class="loyalty-num" id="loyaltyNum">20</span><span class="loyalty-lbl" id="resourceLabel">Loyalty</span></div>
+            <div class="loyalty-bar"><div class="loyalty-fill" id="loyaltyFill" style="width:100%"></div></div>
+            <div class="enemy-tools">
+              <span class="phase-tag" id="phaseTag">Hunt Phase</span>
+              <div class="commander-status" id="commanderStatus" aria-live="polite" hidden></div>
+              <button class="btn-quiet" id="rulesBtn" type="button">Rules</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="field-col">
+        <div class="field-h">
+          <span class="lbl" id="creatureFieldLabel">Enemy creatures</span>
+          <button class="btn-ghost" id="addWolfBtn">+ Wolf</button>
+        </div>
+        <div class="tokens" id="tokens"></div>
+      </div>
+    </div>
+  </section>
+
+  <main class="grid">
+    <section class="panel action-panel" aria-labelledby="huntTitle">
+      <div class="panel-h"><span class="ico">⚔</span> <span id="huntTitle">The Hunt</span></div>
+      <div class="panel-b">
+        <div id="phaseBarWrap" class="phase-bar-wrap" style="display:none;">
+          <div class="phase-bar" id="phaseBar"></div>
+          <div class="phase-bar-label" id="phaseBarLabel"></div>
+        </div>
+        <div class="turn-banner garruk sr-only" id="turnBanner"><span class="tb-ico" id="tbIco">🐺</span><span id="tbText">Garruk's Turn</span><span class="tb-sub" id="tbSub">— respond defensively</span></div>
+        <div class="declare garruk" id="declare">
+          <div class="declare-h" id="declareTitle">Enemy actions</div>
+          <div class="declare-body">
+            <div class="declare-flavor" id="declareFlavor"></div>
+            <div class="declare-mech" id="declareMech"></div>
+          </div>
+        </div>
+        <div class="resp-title" id="respTitle">Your Response</div>
+        <div class="resp-grid contextual-input-host" id="respGrid"></div>
+        <p class="hint sr-only" id="respHint"></p>
+        <div class="turn-actions">
+          <button class="quick-end" id="quickEndBtn" type="button" title="Apply the current entries and skip to the enemy turn" hidden>End Turn Now</button>
+          <button class="endturn" id="endTurnBtn">End Turn ▸</button>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div class="overlay" id="overlay"><div class="modal" id="modal"></div></div>
+
+<div class="overlay" id="inputOverlay">
+  <div class="modal input-modal">
+    <h3 id="inputTitle">Enter a value</h3>
+    <div id="inputBody"></div>
+    <div class="input-actions" id="inputActions">
+      <button class="cta ghost" id="inputCancel">Cancel</button>
+      <button class="cta" id="inputOk">OK</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="infoOverlay">
+  <div class="info-modal" role="dialog" aria-modal="true" aria-labelledby="infoTitle">
+    <div class="info-modal-h"><h2 id="infoTitle">Details</h2><button class="x" id="infoClose" type="button" aria-label="Close details">×</button></div>
+    <div class="info-modal-body" id="infoBody"></div>
+  </div>
+</div>
+
+<div class="overlay" id="logOverlay">
+  <div class="log-modal" role="dialog" aria-modal="true" aria-labelledby="logTitle">
+    <div class="lm-h"><span id="logTitle">Encounter Log</span><button class="x" id="logClose" type="button" aria-label="Close encounter log">×</button></div>
+    <div class="log" id="log"></div>
+  </div>
+</div>
+
+<script src="game.js"></script>
+</body>
+</html>
