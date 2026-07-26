@@ -71,9 +71,9 @@ const CONCLAVE_UNITS = [
 ];
 
 const VOLTRON_COMMANDER = {
-  name:"Rukha, Wildheart Vanguard", ico:"🪓", p:5, t:5,
+  name:"Rukha, Wildheart Vanguard", ico:"🪓", p:4, t:4,
   type:"Legendary Creature — Human Warrior", kws:["Trample"],
-  effect:"Commander — grows through gear and deals commander damage when combat damage reaches you.", cost:4
+  effect:"Commander — grows through gear and deals commander damage when combat damage reaches you.", cost:5
 };
 
 /* =====================================================================
@@ -102,18 +102,18 @@ const VOLTRON_CARDS = {
   ],
   // 12 equipment/aura — the gear pipeline for Rukha
   gear: [
-    {name:"Bonesaw Cleaver",    cost:2, bonus:2, effect:"+2/+2"},
-    {name:"Wildwood Mantle",    cost:2, bonus:2, effect:"+2/+2, trample", kw:"Trample"},
-    {name:"Stonefist Gauntlet", cost:2, bonus:2, effect:"+2/+1, first strike", kw:"First Strike"},
-    {name:"Ironbark Shield",    cost:3, bonus:3, effect:"+1/+3, ward 2", kw:"Ward 2"},
-    {name:"Fang of the Wilds",  cost:3, bonus:3, effect:"+3/+2", kw:null},
-    {name:"Savagecrown Helm",   cost:3, bonus:3, effect:"+3/+3, trample", kw:"Trample"},
-    {name:"Primal Aegis",       cost:4, bonus:4, effect:"+3/+3, hexproof", kw:"Hexproof"},
-    {name:"Bloodforged Plate",  cost:4, bonus:4, effect:"+4/+4", kw:null},
-    {name:"Runic Greatsword",   cost:5, bonus:5, effect:"+5/+3, trample", kw:"Trample"},
-    {name:"Vanguard's Armor",   cost:3, bonus:2, effect:"+2/+2, indestructible", kw:"Indestructible"},
-    {name:"Heartwood Cloak",    cost:2, bonus:2, effect:"+2/+2, hexproof", kw:"Hexproof"},
-    {name:"Wraithbane Edge",    cost:4, bonus:4, effect:"+4/+2, deathtouch", kw:"Deathtouch"}
+    {name:"Bonesaw Cleaver",    cost:2, equip:1, bonus:2, effect:"+2/+2"},
+    {name:"Wildwood Mantle",    cost:2, equip:2, bonus:2, effect:"+2/+2, trample", kw:"Trample"},
+    {name:"Stonefist Gauntlet", cost:2, equip:1, bonus:2, effect:"+2/+1, first strike", kw:"First Strike"},
+    {name:"Ironbark Shield",    cost:3, equip:2, bonus:2, effect:"+1/+3, ward 2", kw:"Ward 2"},
+    {name:"Fang of the Wilds",  cost:3, equip:2, bonus:2, effect:"+2/+2", kw:null},
+    {name:"Savagecrown Helm",   cost:3, equip:3, bonus:3, effect:"+3/+3, trample", kw:"Trample"},
+    {name:"Primal Aegis",       cost:4, equip:3, bonus:2, effect:"+2/+2, hexproof", kw:"Hexproof"},
+    {name:"Bloodforged Plate",  cost:4, equip:2, bonus:3, effect:"+3/+3", kw:null},
+    {name:"Runic Greatsword",   cost:5, equip:3, bonus:3, effect:"+3/+2, trample", kw:"Trample"},
+    {name:"Vanguard's Armor",   cost:3, equip:2, bonus:2, effect:"+2/+2, indestructible", kw:"Indestructible"},
+    {name:"Heartwood Cloak",    cost:2, equip:2, bonus:2, effect:"+2/+2, hexproof", kw:"Hexproof"},
+    {name:"Wraithbane Edge",    cost:4, equip:3, bonus:2, effect:"+2/+1, deathtouch", kw:"Deathtouch"}
   ],
   // 10 protection/interaction instants
   protection: [
@@ -470,17 +470,19 @@ function voltronCastSupportCards(manaAvailable,commanderOnField,maxCasts=99){
   const castIndices=[];
 
   for(const entry of ranked){
-    if(mana<entry.card.cost)continue;
     if(castCount>=maxCasts&&entry.card.ref?.category!=="protection")continue;
     const card=entry.card;
 
     // Protection stays in hand — don't extract it proactively.
-    // It's counted from the typed hand when relevant.
     if(card.ref?.category==="protection"){
       continue;
     }
 
-    mana-=card.cost;
+    // Gear requires cast + equip cost together
+    const effectiveCost=card.ref?.category==="gear"?card.cost+(card.equip||0):card.cost;
+    if(mana<effectiveCost)continue;
+
+    mana-=effectiveCost;
     castCount++;
 
     if(card.ref?.category==="gear"&&commanderOnField){
@@ -492,7 +494,7 @@ function voltronCastSupportCards(manaAvailable,commanderOnField,maxCasts=99){
         S.voltronGear=(S.voltronGear||0)+1;
         if(card.kw&&!commander.kws.includes(card.kw))commander.kws.push(card.kw);
         commander.effect=`Commander — ${S.voltronGear} gear; ${commander.kws.join(", ").toLowerCase()}.`;
-        cast.push({label:`Equip ${card.name} to ${commander.name}`,detail:`${card.effect}. Now ${tokenPower(commander)}/${tokenToughness(commander)}.`});
+        cast.push({label:`Cast + equip ${card.name} to ${commander.name}`,detail:`${card.effect}. Now ${tokenPower(commander)}/${tokenToughness(commander)}.`});
         logG(`equips ${card.name} on ${commander.name}; now ${tokenPower(commander)}/${tokenToughness(commander)}.`);
       }
     }else if(card.ref?.category==="creatures"||(card.ref?.category==="utility"&&card.isCreature)||card.rampValue){
@@ -1021,11 +1023,12 @@ function startVoltronTurn(){
     }
   }else{
     S.commanderZone=false;
-    // Look for gear in the typed hand first
+    // Look for gear in the typed hand first — must pay BOTH cast + equip cost
     const gearInHand=S.voltronTypedHand.filter(c=>c.ref?.category==="gear");
-    const bestGear=gearInHand.filter(c=>c.cost<=S.voltronMana).sort((a,b)=>b.bonus-a.bonus)[0];
+    const bestGear=gearInHand.filter(c=>(c.cost+(c.equip||0))<=S.voltronMana).sort((a,b)=>(b.bonus/(b.cost+(b.equip||0)))-(a.bonus/(a.cost+(a.equip||0))))[0];
     if(bestGear){
-      S.voltronMana-=bestGear.cost;
+      const totalGearCost=bestGear.cost+(bestGear.equip||0);
+      S.voltronMana-=totalGearCost;
       const bonus=bestGear.bonus||2;
       commander.baseP+=bonus;commander.baseT+=bonus;commander.p=commander.baseP;commander.t=commander.baseT;
       S.voltronGear=(S.voltronGear||0)+1;
@@ -1033,7 +1036,7 @@ function startVoltronTurn(){
       commander.effect=`Commander — ${S.voltronGear} gear; ${commander.kws.join(", ").toLowerCase()}.`;
       const gearIdx=S.voltronTypedHand.indexOf(bestGear);
       if(gearIdx>=0)S.voltronTypedHand.splice(gearIdx,1);
-      actions.push({label:`Equip ${bestGear.name} (${bestGear.cost} mana)`,detail:`${bestGear.effect}. Now ${tokenPower(commander)}/${tokenToughness(commander)}.`});
+      actions.push({label:`Cast + equip ${bestGear.name} (${bestGear.cost}+${bestGear.equip||0} mana)`,detail:`${bestGear.effect}. Now ${tokenPower(commander)}/${tokenToughness(commander)}.`});
       logG(`equips ${bestGear.name}; now ${tokenPower(commander)}/${tokenToughness(commander)}.`);
     }
   }
