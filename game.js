@@ -83,22 +83,24 @@ const VOLTRON_COMMANDER = {
    Mana costs determine when the AI can cast them.
    ===================================================================== */
 const VOLTRON_CARDS = {
-  // 14 creatures: mana dorks, utility, and secondary threats
+  // 14 creatures: mostly mana dorks and small utility bodies.
+  // Voltron decks intentionally run SMALL creatures — Rukha is the only real
+  // threat. These exist to ramp, protect, or tutor, not to race the life total.
   creatures: [
     {name:"Llanowar Emissary",     ico:"🌱", p:1, t:1, cost:1, kind:"dork",    effect:"Taps for mana on future turns.", rampValue:1},
     {name:"Fyndhorn Scout",        ico:"🌿", p:1, t:1, cost:1, kind:"dork",    effect:"Taps for mana on future turns.", rampValue:1},
     {name:"Arbor Channeler",       ico:"🌳", p:0, t:3, cost:2, kind:"dork",    effect:"Taps for mana on future turns.", rampValue:1},
-    {name:"Sylvan Reclaimer",      ico:"🍃", p:2, t:2, cost:2, kind:"utility", effect:"Enters: search a land to hand."},
-    {name:"Ironwood Shaman",       ico:"🔨", p:2, t:3, cost:3, kind:"utility", effect:"Enters: tutor an equipment to hand."},
-    {name:"Trailguide Ranger",     ico:"🏹", p:3, t:2, cost:3, kind:"beater",  effect:"Haste. Pressures early.", kws:["Haste"], haste:true},
-    {name:"Territorial Gorger",    ico:"🐗", p:4, t:3, cost:4, kind:"beater",  effect:"Trample. Secondary threat.", kws:["Trample"]},
-    {name:"Stampede Elder",        ico:"🦬", p:3, t:4, cost:4, kind:"utility", effect:"Other creatures get +1/+0."},
-    {name:"Primal Hydra",          ico:"🐉", p:5, t:5, cost:5, kind:"threat",  effect:"Trample. Must be answered.", kws:["Trample"]},
-    {name:"Grove Guardian",        ico:"🌲", p:6, t:6, cost:6, kind:"threat",  effect:"Trample, reach. Major threat.", kws:["Trample","Reach"]},
-    {name:"Rootcoil Serpent",      ico:"🐍", p:2, t:4, cost:3, kind:"utility", effect:"Hexproof. Hard to remove.", kws:["Hexproof"]},
-    {name:"Wildspark Elemental",   ico:"⚡", p:4, t:2, cost:3, kind:"beater",  effect:"Haste. Fast pressure.", kws:["Haste"], haste:true},
-    {name:"Thornhide Brute",       ico:"🦏", p:5, t:4, cost:5, kind:"threat",  effect:"Trample. Solid secondary body.", kws:["Trample"]},
-    {name:"Bloodfern Cultivator",  ico:"🌺", p:1, t:3, cost:2, kind:"dork",    effect:"Taps for mana on future turns.", rampValue:1}
+    {name:"Bloodfern Cultivator",  ico:"🌺", p:1, t:3, cost:2, kind:"dork",    effect:"Taps for mana on future turns.", rampValue:1},
+    {name:"Sylvan Reclaimer",      ico:"🍃", p:1, t:2, cost:2, kind:"utility", effect:"Enters: search a land to hand."},
+    {name:"Ironwood Shaman",       ico:"🔨", p:1, t:3, cost:3, kind:"utility", effect:"Enters: tutor an equipment to hand."},
+    {name:"Rootcoil Serpent",      ico:"🐍", p:1, t:4, cost:3, kind:"utility", effect:"Hexproof. Hard to remove.", kws:["Hexproof"]},
+    {name:"Stampede Elder",        ico:"🦬", p:2, t:3, cost:4, kind:"utility", effect:"Other creatures get +1/+0."},
+    {name:"Trailguide Ranger",     ico:"🏹", p:2, t:1, cost:2, kind:"utility", effect:"Haste. Blocker fodder, not a real clock.", kws:["Haste"], haste:true},
+    {name:"Wildspark Elemental",   ico:"⚡", p:2, t:1, cost:2, kind:"utility", effect:"Haste. Chip damage while Rukha sets up.", kws:["Haste"], haste:true},
+    {name:"Territorial Gorger",    ico:"🐗", p:2, t:2, cost:3, kind:"utility", effect:"Minor secondary body.", kws:[]},
+    {name:"Thornhide Brute",       ico:"🦏", p:2, t:3, cost:3, kind:"utility", effect:"Minor secondary body.", kws:[]},
+    {name:"Primal Hydra",          ico:"🐉", p:2, t:2, cost:4, kind:"utility", effect:"Grows +1/+1 each upkeep, but starts small.", kws:[]},
+    {name:"Grove Guardian",        ico:"🌲", p:1, t:5, cost:4, kind:"utility", effect:"Reach. A wall, not a threat.", kws:["Reach"]}
   ],
   // 12 equipment/aura — the gear pipeline for Rukha
   gear: [
