@@ -21,7 +21,7 @@ function fisherYatesShuffle(arr) {
    DATA — only what commander battle needs (modes list for the setup menu)
    ===================================================================== */
 const MODES = {
-  vanilla:{ id:"vanilla", name:"Vanilla Garruk", icon:"🐺", category:"adventure",
+  vanilla:{ id:"vanilla", name:"Easy Garruk", icon:"🐺", category:"adventure",
     summary:"The baseline hunt: 2/2 Wolves, steady +2 loyalty, and cautious removal after Garruk builds a pack." },
   hard:{ id:"hard", name:"Hard Garruk", icon:"😤", category:"adventure",
     summary:"Escalating hunt: Wolves become 4/4 on turn 5, loyalty income grows every two turns, and emergency removal punishes board deficits." },
@@ -394,10 +394,10 @@ function renderSetupScreen(onStartAdventure, onStartCommander) {
     <div class="big-ico">🎴</div>
     <h2>Magic No Gathering</h2>
     <p class="setup-sub">Solo Commander Encounter Engine</p>
-    <div class="setup-section">
-      <h3 class="setup-section-h commander-h">⚔️ Commander Battle</h3>
-      <p class="setup-section-desc">Face 1–4 CPU commanders with your own deck. They fight each other too.</p>
-      <div class="commander-setup" id="commanderSetup">
+    <div class="setup-columns">
+      <div class="setup-col setup-col-commander">
+        <h3 class="setup-col-h">⚔️ Commander Battle</h3>
+        <p class="setup-col-desc">Face 1–4 CPU commanders with your own deck. They fight each other too.</p>
         <div class="opponent-count">
           <label>Opponents</label>
           <div class="count-row">
@@ -407,17 +407,13 @@ function renderSetupScreen(onStartAdventure, onStartCommander) {
             <button type="button" class="count-btn" data-count="4">4</button>
           </div>
         </div>
-        <button class="cta commander-cta" id="startCommanderBtn">Begin Commander Battle</button>
+        <button class="setup-col-cta commander-cta" id="startCommanderBtn">Begin Commander Battle</button>
       </div>
-    </div>
-    <div class="setup-divider"><span>or</span></div>
-    <div class="setup-section">
-      <h3 class="setup-section-h adventure-h">🌲 Single Player Adventures</h3>
-      <p class="setup-section-desc">Scripted solo encounters — no deck building required.</p>
-      <div class="mode-grid" role="radiogroup" aria-label="Adventure mode">
-        ${adventureModes.map((m,i)=>`<label class="mode-option"><input type="radio" name="encounterMode" value="${m.id}" ${i===0?'checked':''}><div class="mode-card"><div class="mode-title">${m.icon} ${m.name}</div><div class="mode-desc">${m.summary.split('.')[0]}.</div></div></label>`).join('')}
+      <div class="setup-col setup-col-adventure">
+        <h3 class="setup-col-h">🌲 Solo Adventures</h3>
+        <p class="setup-col-desc">Scripted 1v1 encounters — you vs. a single CPU opponent.</p>
+        <button class="setup-col-cta adventure-cta" id="showAdventuresBtn">Choose Adventure</button>
       </div>
-      <button class="cta adventure-cta" id="startAdventureBtn">Begin Adventure</button>
     </div>`;
   overlay.classList.add("show");
 
@@ -426,9 +422,23 @@ function renderSetupScreen(onStartAdventure, onStartCommander) {
     btn.onclick=()=>{modal.querySelectorAll('.count-btn').forEach(b=>b.classList.remove('active'));btn.classList.add('active');selectedCount=parseInt(btn.dataset.count,10);};
   });
   document.getElementById('startCommanderBtn').onclick=()=>{overlay.classList.remove("show");onStartCommander(selectedCount);};
+  document.getElementById('showAdventuresBtn').onclick=()=>renderAdventureSelectScreen(adventureModes,onStartAdventure);
+}
+
+function renderAdventureSelectScreen(adventureModes, onStartAdventure){
+  const modal=document.getElementById('modal');
+  modal.innerHTML=`
+    <button type="button" class="setup-back-btn" id="adventureBackBtn">← Back</button>
+    <h2 class="adventure-select-h">🌲 Solo Adventures</h2>
+    <p class="setup-sub">You vs. CPU — choose your opponent.</p>
+    <div class="mode-grid" role="radiogroup" aria-label="Adventure mode">
+      ${adventureModes.map((m,i)=>`<label class="mode-option"><input type="radio" name="encounterMode" value="${m.id}" ${i===0?'checked':''}><div class="mode-card"><div class="mode-title">${m.icon} ${m.name}</div><div class="mode-desc">${m.summary.split('.')[0]}.</div></div></label>`).join('')}
+    </div>
+    <button class="setup-col-cta adventure-cta" id="startAdventureBtn">Begin Adventure</button>`;
+  document.getElementById('adventureBackBtn').onclick=()=>renderSetupScreen(onStartAdventure, startCommanderBattle);
   document.getElementById('startAdventureBtn').onclick=()=>{
     const chosen=modal.querySelector('input[name="encounterMode"]:checked');
-    overlay.classList.remove("show");
+    document.getElementById('overlay').classList.remove("show");
     onStartAdventure(chosen?chosen.value:"vanilla");
   };
 }
@@ -446,22 +456,22 @@ function renderLifeHud(state){
     if(header&&header.nextSibling)header.parentNode.insertBefore(el,header.nextSibling);
     else document.querySelector('.wrap').prepend(el);
   }
-  let html=`<span class="life-pip player-pip">
-    <button class="life-adj" data-adj="life" data-d="-1">−</button>
+  const playerCd=Object.values(state.player.commanderDamageReceived||{}).reduce((s,v)=>s+v,0);
+  let html=`<button type="button" class="life-pip player-pip life-pip-btn" data-view="-1">
     <span class="life-ico">🗡️</span><span class="life-name">You</span>
     <span class="life-val ${state.player.life<=10?'warn':''}">${state.player.life}</span>
-    <button class="life-adj" data-adj="life" data-d="1">+</button>
+    ${playerCd>0?`<span class="life-cmdr-dmg">⚜${playerCd}</span>`:''}
     <span class="life-creatures">🐾 ${state.player.creatures}</span>
-  </span>`;
+  </button>`;
   html+='<span class="life-divider">|</span>';
   state.opponents.forEach(opp=>{
     const dead=isOpponentDead(opp);const cd=state.player.commanderDamageReceived[opp.id]||0;
     const active=state._activeOppIndex===opp.index&&state.phase==="cpu";
-    html+=`<span class="life-pip ${dead?'dead':''} ${active?'active-opp':''}" style="border-color:${opp.color}"><span class="life-ico">${opp.ico}</span><span class="life-name">${opp.name.split(',')[0]}</span><span class="life-val ${opp.life<=10?'warn':''}">${dead?'☠':opp.life}</span>${cd>0?`<span class="life-cmdr-dmg">⚜${cd}</span>`:''}</span>`;
+    html+=`<button type="button" class="life-pip life-pip-btn ${dead?'dead':''} ${active?'active-opp':''}" data-view="${opp.index}" style="border-color:${opp.color}"><span class="life-ico">${opp.ico}</span><span class="life-name">${opp.name.split(',')[0]}</span><span class="life-val ${opp.life<=10?'warn':''}">${dead?'☠':opp.life}</span>${cd>0?`<span class="life-cmdr-dmg">⚜${cd}</span>`:''}</button>`;
   });
   el.innerHTML=html;
-  el.querySelectorAll('.life-adj').forEach(btn=>{
-    btn.onclick=()=>{ adjustPlayerStat(btn.dataset.adj, parseInt(btn.dataset.d)); };
+  el.querySelectorAll('.life-pip-btn').forEach(btn=>{
+    btn.onclick=()=>{state.viewMode="single";state.viewTarget=parseInt(btn.dataset.view);renderBoardView(state);};
   });
 }
 
@@ -480,15 +490,26 @@ function renderBoardView(state){
 }
 
 function renderSingleView(state,board){
-  const opp=state.opponents[state.viewTarget];if(!opp)return;
+  // viewTarget: -1 = player, 0..N-1 = opponents
+  const totalViews=state.opponents.length+1; // opponents + player
+  const viewIdx=state.viewTarget; // -1 for player, 0+ for opponents
+  const isPlayerView=viewIdx===-1;
+  const canRemove=state.phase==="player";
+
+  if(isPlayerView){
+    renderPlayerBoardView(state,board,totalViews);
+    return;
+  }
+
+  const opp=state.opponents[viewIdx];if(!opp)return;
   const dead=isOpponentDead(opp);
   board.className=`board ${dead?'defeated':''}`;board.style.borderColor=dead?'var(--blood)':opp.color;
-  const commander=commanderOnField(opp);
   const tokensHtml=opp.tokens.length===0?'<div class="empty-field">No creatures</div>':
-    opp.tokens.map(t=>{
+    opp.tokens.map((t,i)=>{
       const kws=t.kws&&t.kws.length?t.kws.join(' · '):'';
       const tooltip=`${t.name} — ${t.p}/${t.t}${t.kws&&t.kws.length?' · '+t.kws.join(', '):''}${t.effect?' — '+t.effect:''}`;
       return `<div class="card ${t.kind==='commander'?'commander':''} ${t.summoningSick?'sick':''} ${t.attacking?'tapped':''}" title="${tooltip.replace(/"/g,'&quot;')}">
+      ${canRemove?`<button type="button" class="c-x" data-opp="${opp.id}" data-rm-idx="${i}" title="Remove ${t.name}" aria-label="Remove ${t.name}">×</button>`:''}
       <span class="c-name"><span>${t.name}</span><span class="mana">${t.kind==='commander'?'⚜':'🌲'}</span></span>
       <span class="c-art">${t.ico}</span>
       ${kws?`<span class="c-kw">${kws}</span>`:''}
@@ -497,27 +518,117 @@ function renderSingleView(state,board){
       ${t.attacking?'<div class="c-atk">⚔️</div><div class="c-tapped-label">TAPPED</div>':''}${t.summoningSick?'<div class="c-sick">💤</div>':''}</div>`;
     }).join('');
 
+  const viewLabel=`${viewIdx+2}/${totalViews}`;
+  const cdFromOpp=state.player.commanderDamageReceived[opp.id]||0;
   board.innerHTML=`<div class="board-h"><span class="ico">${opp.ico}</span><span>${opp.name}</span>
     <span class="atk-note">${opp.currentStrategy?STRATEGY_LABELS[opp.currentStrategy]||'':''}</span>
-    <div class="view-controls"><button class="btn-ghost view-btn" id="prevOppBtn">◂</button><span class="view-counter">${state.viewTarget+1}/${state.opponents.length}</span><button class="btn-ghost view-btn" id="nextOppBtn">▸</button><button class="btn-ghost view-btn" id="allViewBtn">⊞</button></div>
+    <div class="view-controls"><button class="btn-ghost view-btn" id="prevOppBtn">◂</button><span class="view-counter">${viewLabel}</span><button class="btn-ghost view-btn" id="nextOppBtn">▸</button><button class="btn-ghost view-btn" id="allViewBtn">⊞</button></div>
   </div><div class="board-inner commander-board-inner"><div class="garruk-col">
     <div class="commander-board-stats">
-      <div class="cbs-item"><span class="cbs-label">Life</span><span class="cbs-val">${opp.life}</span></div>
+      <div class="cbs-item"><span class="cbs-label">Life</span><div class="cbs-adj"><button type="button" class="cbs-btn" data-opp-stat="life" data-opp-id="${opp.id}" data-d="-1">−</button><span class="cbs-val ${opp.life<=10?'warn':''}">${opp.life}</span><button type="button" class="cbs-btn" data-opp-stat="life" data-opp-id="${opp.id}" data-d="1">+</button></div></div>
+      <div class="cbs-item cbs-cmdr-dmg"><span class="cbs-label">⚜ Cmdr dmg taken</span><div class="cbs-adj"><button type="button" class="cbs-btn" data-cmdr-from="${opp.id}" data-d="-1">−</button><span class="cbs-val ${cdFromOpp>=14?'warn':''}">${cdFromOpp}/21</span><button type="button" class="cbs-btn" data-cmdr-from="${opp.id}" data-d="1">+</button></div></div>
       <div class="cbs-item"><span class="cbs-label">Mana</span><span class="cbs-val">${manaAvailable(opp)}</span></div>
       <div class="cbs-item"><span class="cbs-label">Commander</span><span class="cbs-val">${opp.commanderZone?'Zone (+'+opp.commanderTax+')':'Field'}</span></div>
-      <div class="cbs-item"><span class="cbs-label">Gear</span><span class="cbs-val">${opp.gear}</span></div>
+      <div class="cbs-item"><span class="cbs-label">Artifact — Equipment</span><span class="cbs-val">${opp.gear}</span></div>
     </div></div>
     <div class="field-col"><div class="field-h"><span class="lbl">${opp.name.split(',')[0]}'s creatures</span></div><div class="tokens">${tokensHtml}</div></div></div>`;
 
-  document.getElementById('prevOppBtn').onclick=()=>{state.viewTarget=(state.viewTarget-1+state.opponents.length)%state.opponents.length;renderBoardView(state);};
-  document.getElementById('nextOppBtn').onclick=()=>{state.viewTarget=(state.viewTarget+1)%state.opponents.length;renderBoardView(state);};
+  // Wire view navigation (player is -1, opponents are 0..N-1)
+  document.getElementById('prevOppBtn').onclick=()=>{state.viewTarget=viewIdx===0?-1:(viewIdx-1);renderBoardView(state);};
+  document.getElementById('nextOppBtn').onclick=()=>{state.viewTarget=viewIdx>=state.opponents.length-1?-1:(viewIdx+1);renderBoardView(state);};
   document.getElementById('allViewBtn').onclick=()=>{state.viewMode="all";renderBoardView(state);};
+
+  // Wire opponent life controls
+  board.querySelectorAll('[data-opp-stat]').forEach(btn=>{
+    btn.onclick=()=>{
+      const targetOpp=state.opponents.find(o=>o.id===btn.dataset.oppId);
+      if(!targetOpp)return;
+      const d=parseInt(btn.dataset.d);
+      if(btn.dataset.oppStat==="life")targetOpp.life=Math.max(0,targetOpp.life+d);
+      renderBoardView(state);renderLifeHud(state);saveState();
+    };
+  });
+  // Wire commander damage controls (damage this opp has dealt to you)
+  board.querySelectorAll('[data-cmdr-from]').forEach(btn=>{
+    btn.onclick=()=>{
+      const oppId=btn.dataset.cmdrFrom;
+      const d=parseInt(btn.dataset.d);
+      state.player.commanderDamageReceived[oppId]=Math.max(0,(state.player.commanderDamageReceived[oppId]||0)+d);
+      renderBoardView(state);renderLifeHud(state);saveState();
+    };
+  });
+
+  // Wire remove buttons during player turn
+  if(canRemove){
+    board.querySelectorAll('.c-x[data-rm-idx]').forEach(btn=>{
+      btn.onclick=(e)=>{
+        e.stopPropagation();
+        const targetOpp=state.opponents.find(o=>o.id===btn.dataset.opp);
+        const idx=parseInt(btn.dataset.rmIdx);
+        if(!targetOpp||idx>=targetOpp.tokens.length)return;
+        const token=targetOpp.tokens[idx];
+        targetOpp.tokens.splice(idx,1);
+        if(token.kind==="commander")returnCommanderToZone(targetOpp);
+        if(token.kind==="voltron-support"&&token.effect?.includes("mana"))targetOpp.rampInPlay=Math.max(0,targetOpp.rampInPlay-1);
+        logCommander(`You remove ${token.name} (${targetOpp.name.split(',')[0]}).`);
+        renderBoardView(state);renderLifeHud(state);saveState();
+      };
+    });
+  }
+}
+
+function renderPlayerBoardView(state,board,totalViews){
+  board.className='board';board.style.borderColor='var(--gold-dim)';
+  const p=state.player;
+  const cmdrDmgEntries=Object.entries(p.commanderDamageReceived||{}).filter(([,v])=>v>0);
+  let cmdrDmgHtml='';
+  if(cmdrDmgEntries.length>0){
+    cmdrDmgHtml=cmdrDmgEntries.map(([oppId,dmg])=>{
+      const src=state.opponents.find(o=>o.id===oppId);
+      return `<div class="cbs-item cbs-cmdr-dmg"><span class="cbs-label">${src?src.ico:'⚜'} Cmdr dmg from ${src?src.name.split(',')[0]:'?'}</span><div class="cbs-adj"><button type="button" class="cbs-btn" data-cmdr-from="${oppId}" data-d="-1">−</button><span class="cbs-val ${dmg>=14?'warn':''}">${dmg}/21</span><button type="button" class="cbs-btn" data-cmdr-from="${oppId}" data-d="1">+</button></div></div>`;
+    }).join('');
+  }
+
+  board.innerHTML=`<div class="board-h"><span class="ico">🗡️</span><span>You</span>
+    <span class="atk-note"></span>
+    <div class="view-controls"><button class="btn-ghost view-btn" id="prevOppBtn">◂</button><span class="view-counter">1/${totalViews}</span><button class="btn-ghost view-btn" id="nextOppBtn">▸</button><button class="btn-ghost view-btn" id="allViewBtn">⊞</button></div>
+  </div><div class="board-inner commander-board-inner"><div class="garruk-col">
+    <div class="commander-board-stats">
+      <div class="cbs-item"><span class="cbs-label">Life</span><div class="cbs-adj"><button type="button" class="cbs-btn" data-player-stat="life" data-d="-1">−</button><span class="cbs-val ${p.life<=10?'warn':''}">${p.life}</span><button type="button" class="cbs-btn" data-player-stat="life" data-d="1">+</button></div></div>
+      ${cmdrDmgHtml}
+      <div class="cbs-item"><span class="cbs-label">Creatures</span><div class="cbs-adj"><button type="button" class="cbs-btn" data-player-stat="creatures" data-d="-1">−</button><span class="cbs-val">${p.creatures}</span><button type="button" class="cbs-btn" data-player-stat="creatures" data-d="1">+</button></div></div>
+    </div></div>
+    <div class="field-col"><div class="field-h"><span class="lbl">Your board state</span></div><div class="tokens"><div class="empty-field">${p.creatures} creature${p.creatures!==1?'s':''} on your battlefield</div></div></div></div>`;
+
+  document.getElementById('prevOppBtn').onclick=()=>{state.viewTarget=state.opponents.length-1;renderBoardView(state);};
+  document.getElementById('nextOppBtn').onclick=()=>{state.viewTarget=0;renderBoardView(state);};
+  document.getElementById('allViewBtn').onclick=()=>{state.viewMode="all";renderBoardView(state);};
+
+  // Wire player stat controls
+  board.querySelectorAll('[data-player-stat]').forEach(btn=>{
+    btn.onclick=()=>{
+      const stat=btn.dataset.playerStat;
+      const d=parseInt(btn.dataset.d);
+      if(stat==="life")state.player.life=Math.max(0,state.player.life+d);
+      else if(stat==="creatures")state.player.creatures=Math.max(0,state.player.creatures+d);
+      renderBoardView(state);renderLifeHud(state);saveState();
+    };
+  });
+  // Wire commander damage controls
+  board.querySelectorAll('[data-cmdr-from]').forEach(btn=>{
+    btn.onclick=()=>{
+      const oppId=btn.dataset.cmdrFrom;
+      const d=parseInt(btn.dataset.d);
+      state.player.commanderDamageReceived[oppId]=Math.max(0,(state.player.commanderDamageReceived[oppId]||0)+d);
+      renderBoardView(state);renderLifeHud(state);saveState();
+    };
+  });
 }
 
 function renderAllView(state,board){
   board.className='board all-view';board.style.borderColor='';
   let html=`<div class="board-h"><span class="ico">⊞</span><span>All Opponents</span><div class="view-controls"><button class="btn-ghost view-btn" id="singleViewBtn">◻</button></div></div><div class="all-opponents-grid">`;
-  html+=`<div class="all-opp-card player-card" style="border-color:var(--gold-dim)">
+  html+=`<div class="all-opp-card player-card" data-idx="-1" style="border-color:var(--gold-dim)">
     <div class="all-opp-header"><span>🗡️</span><span class="all-opp-name">You</span><span class="all-opp-life">${state.player.life}</span></div>
     <div class="all-opp-body"><span>${state.player.creatures} creature${state.player.creatures!==1?'s':''}</span></div>
   </div>`;
@@ -652,24 +763,12 @@ function ensureConfirmBar(){
 
 function setConfirmButton(text,className,onclick,showEndTurn){
   const bar=ensureConfirmBar();
-  const creatures=gameState?gameState.player.creatures:0;
-  let html=`<span class="cmd-bar-stat" id="cmdBarCreatures"><span class="cmd-bar-stat-ico">🐾</span><button class="cmd-bar-adj" id="cmdCreatureDec" type="button">−</button><span class="cmd-bar-stat-val" id="cmdBarCreatureVal">${creatures}</span><button class="cmd-bar-adj" id="cmdCreatureInc" type="button">+</button><span class="cmd-bar-stat-lbl">creatures</span></span>`;
-  html+=`<button class="cmd-confirm-btn ${className}" id="cmdConfirmBtn">${text}</button>`;
+  let html=`<button class="cmd-confirm-btn ${className}" id="cmdConfirmBtn">${text}</button>`;
   if(showEndTurn){
-    html+=`<button class="cmd-end-turn-btn" id="cmdEndTurnBtn">End Turn</button>`;
+    html+=`<button class="cmd-confirm-btn cmd-end-turn-btn ${className}" id="cmdEndTurnBtn">End Turn</button>`;
   }
   bar.innerHTML=html;
   document.getElementById('cmdConfirmBtn').onclick=onclick;
-  document.getElementById('cmdCreatureDec').onclick=()=>{
-    gameState.player.creatures=Math.max(0,gameState.player.creatures-1);
-    document.getElementById('cmdBarCreatureVal').textContent=gameState.player.creatures;
-    renderLifeHud(gameState);
-  };
-  document.getElementById('cmdCreatureInc').onclick=()=>{
-    gameState.player.creatures++;
-    document.getElementById('cmdBarCreatureVal').textContent=gameState.player.creatures;
-    renderLifeHud(gameState);
-  };
   if(showEndTurn){
     document.getElementById('cmdEndTurnBtn').onclick=()=>{
       const end=checkCommanderBattleEnd(gameState);
@@ -820,23 +919,48 @@ function showOpponentTurnResponse(opp,result){
 
   // Render the response form
   const panel=document.getElementById('respGrid');
-  document.getElementById('respTitle').textContent="Your Response";
+  const isIntervention=!attacksPlayer&&result.attackPower>0;
+  document.getElementById('respTitle').textContent=attacksPlayer?"Your Response":isIntervention?"Intervene?":"Your Response";
   renderResponseForm(panel,opp,result,attacksPlayer);
 }
 
 function renderResponseForm(panel,opp,result,attacksPlayer){
   const hasCreatures=opp.tokens.length>0;
+  const defenderOpp=(!attacksPlayer&&result.target)?gameState.opponents.find(o=>o.id===result.target):null;
+  const defenderHasCreatures=defenderOpp&&defenderOpp.tokens.length>0;
 
   let html='<div class="context-form commander-form">';
 
-  // Unified creature kill selection — covers both instant-speed removal and combat kills
-  if(hasCreatures){
-    const allTokensHtml=opp.tokens.map((t,i)=>{
-      const isAttacking=!!t.attacking;
-      return `<button type="button" class="kill-btn${isAttacking?' is-tapped':''}" data-idx="${i}"><span class="kill-btn-status">${isAttacking?'⚔':'⬡'}</span> ${t.ico} ${t.name} (${t.p}/${t.t})${isAttacking?' <span class="tapped-label">attacking</span>':''}</button>`;
-    }).join('');
-    html+=`<div class="context-section"><div class="context-section-title">Enemy creatures killed (tap to select)</div>
-      <div class="kill-select" id="combatKillSelect">${allTokensHtml}</div></div>`;
+  // Creature removal section — grouped by owner (attacker and defender)
+  const isIntervention=!attacksPlayer&&result.attackPower>0;
+  const showDefender=isIntervention&&defenderHasCreatures;
+  if(hasCreatures||showDefender){
+    if(isIntervention){
+      html+=`<div class="context-summary intervene-summary"><span class="context-summary-icon">⚡</span><div><strong>Do you wish to intervene?</strong><span>You may use instant-speed removal on any creature involved in this combat.</span></div></div>`;
+    }
+    const sectionTitle="Remove creatures (tap to select)";
+    html+=`<div class="context-section"><div class="context-section-title">${sectionTitle}</div>`;
+
+    // Active opponent's creatures
+    if(hasCreatures){
+      const tappedCount=opp.tokens.filter(t=>t.attacking).length;
+      const roleLabel=isIntervention?" (attacker)":"";
+      html+=`<div class="kill-owner-group"><div class="kill-owner-label" style="border-left-color:${opp.color}">${opp.ico} ${opp.name.split(',')[0]}${roleLabel}${tappedCount?` · ${tappedCount} tapped`:''}</div>
+        <div class="kill-select">${opp.tokens.map((t,i)=>{
+          const isAttacking=!!t.attacking;
+          return `<button type="button" class="kill-btn${isAttacking?' is-tapped':''}" data-opp="${opp.id}" data-idx="${i}"><span class="kill-btn-status">${isAttacking?'⚔':'⬡'}</span> ${t.ico} ${t.name} (${t.p}/${t.t})${isAttacking?' <span class="tapped-label">attacking</span>':''}</button>`;
+        }).join('')}</div></div>`;
+    }
+
+    // Defender's creatures (only when there's actual combat between CPUs)
+    if(showDefender){
+      html+=`<div class="kill-owner-group"><div class="kill-owner-label" style="border-left-color:${defenderOpp.color}">${defenderOpp.ico} ${defenderOpp.name.split(',')[0]} (defender)</div>
+        <div class="kill-select">${defenderOpp.tokens.map((t,i)=>{
+          return `<button type="button" class="kill-btn" data-opp="${defenderOpp.id}" data-idx="${i}"><span class="kill-btn-status">⬡</span> ${t.ico} ${t.name} (${t.p}/${t.t})</button>`;
+        }).join('')}</div></div>`;
+    }
+
+    html+=`</div>`;
   }
 
   // Combat damage inputs (if attacking the player)
@@ -846,26 +970,28 @@ function renderResponseForm(panel,opp,result,attacksPlayer){
     const attackerList=attackers.map(t=>`${t.ico} ${t.name} (${t.p}/${t.t})`).join(', ');
     html+=`<div class="context-section"><div class="context-section-title">Combat — ${opp.name.split(',')[0]} attacks you for ${result.attackPower}</div>
       <div class="cab-attackers">${attackerList}</div>
-      <div class="inline-stepper"><label>Damage getting through</label>
-        <button type="button" data-key="damageThrough" data-delta="-1">−</button>
-        <input type="number" min="0" max="${result.attackPower}" value="${result.attackPower}" data-key="damageThrough">
-        <button type="button" data-key="damageThrough" data-delta="1">+</button>
-      </div>
-      ${cmdDmg>0?`<div class="inline-stepper"><label>Commander damage</label>
-        <button type="button" data-key="cmdrDmgThrough" data-delta="-1">−</button>
-        <input type="number" min="0" max="${cmdDmg}" value="${cmdDmg}" data-key="cmdrDmgThrough">
-        <button type="button" data-key="cmdrDmgThrough" data-delta="1">+</button>
-      </div>`:''}
-      <div class="inline-stepper"><label>Your creatures that died</label>
-        <button type="button" data-key="playerDeaths" data-delta="-1">−</button>
-        <input type="number" min="0" value="0" data-key="playerDeaths">
-        <button type="button" data-key="playerDeaths" data-delta="1">+</button>
+      <div class="commander-player-actions">
+        <div class="inline-stepper"><label>Damage getting through</label>
+          <button type="button" data-key="damageThrough" data-delta="-1">−</button>
+          <input type="number" min="0" max="${result.attackPower}" value="${result.attackPower}" data-key="damageThrough">
+          <button type="button" data-key="damageThrough" data-delta="1">+</button>
+        </div>
+        ${cmdDmg>0?`<div class="inline-stepper"><label>Commander damage</label>
+          <button type="button" data-key="cmdrDmgThrough" data-delta="-1">−</button>
+          <input type="number" min="0" max="${cmdDmg}" value="${cmdDmg}" data-key="cmdrDmgThrough">
+          <button type="button" data-key="cmdrDmgThrough" data-delta="1">+</button>
+        </div>`:''}
+        <div class="inline-stepper"><label>Your creatures that died</label>
+          <button type="button" data-key="playerDeaths" data-delta="-1">−</button>
+          <input type="number" min="0" value="0" data-key="playerDeaths">
+          <button type="button" data-key="playerDeaths" data-delta="1">+</button>
+        </div>
       </div>
     </div>`;
   }
 
   // No interaction needed
-  if(!hasCreatures&&!attacksPlayer){
+  if(!hasCreatures&&!defenderHasCreatures&&!attacksPlayer){
     html+=`<div class="context-summary"><span class="context-summary-icon">✓</span><div><strong>No response needed</strong><span>${opp.name.split(',')[0]} didn't threaten you this turn.</span></div></div>`;
   }
 
@@ -880,23 +1006,17 @@ function renderResponseForm(panel,opp,result,attacksPlayer){
       if(inp.dataset.key==="playerDeaths")updateCreaturePreview();
     };
   });
-  const pdInput=panel.querySelector('input[data-key="playerDeaths"]');
-  if(pdInput)pdInput.oninput=()=>updateCreaturePreview();
-  function updateCreaturePreview(){
-    const deaths=parseInt(panel.querySelector('input[data-key="playerDeaths"]')?.value)||0;
-    const el=document.getElementById('cmdBarCreatureVal');
-    if(el)el.textContent=Math.max(0,gameState.player.creatures-deaths);
-  }
 
-  // Wire unified kill-select buttons
-  const combatKillSet=new Set();
+  // Wire kill-select buttons — keyed by opp id + index
+  const killMap={};  // {oppId: Set of indices}
   function updateDamageFromKills(){
     if(!attacksPlayer)return;
     const attackers=opp.tokens.filter(t=>t.attacking);
+    const attackerKills=killMap[opp.id]||new Set();
     let remaining=0; let cmdAlive=false;
     attackers.forEach((t)=>{
       const realIdx=opp.tokens.indexOf(t);
-      if(!combatKillSet.has(realIdx)){remaining+=t.p; if(t.kind==="commander")cmdAlive=true;}
+      if(!attackerKills.has(realIdx)){remaining+=t.p; if(t.kind==="commander")cmdAlive=true;}
     });
     const dmgInput=panel.querySelector('input[data-key="damageThrough"]');
     if(dmgInput){ dmgInput.value=remaining; dmgInput.max=remaining; }
@@ -908,13 +1028,15 @@ function renderResponseForm(panel,opp,result,attacksPlayer){
   }
   panel.querySelectorAll('.kill-btn').forEach(btn=>{
     btn.onclick=()=>{
+      const oppId=btn.dataset.opp;
       const idx=parseInt(btn.dataset.idx);
-      if(combatKillSet.has(idx)){combatKillSet.delete(idx);btn.classList.remove('selected');}
-      else{combatKillSet.add(idx);btn.classList.add('selected');}
+      if(!killMap[oppId])killMap[oppId]=new Set();
+      if(killMap[oppId].has(idx)){killMap[oppId].delete(idx);btn.classList.remove('selected');}
+      else{killMap[oppId].add(idx);btn.classList.add('selected');}
       updateDamageFromKills();
     };
   });
-  panel._combatKillSet=combatKillSet;
+  panel._killMap=killMap;
 
   // Wire the continue button (fixed position above panel)
   const remaining=cpuQueue.length;
@@ -933,7 +1055,6 @@ function resolveResponseAndContinue(opp,result,attacksPlayer,panel){
   const damageThrough=parseInt(panel.querySelector('input[data-key="damageThrough"]')?.value)||0;
   const cmdrDmgThrough=parseInt(panel.querySelector('input[data-key="cmdrDmgThrough"]')?.value)||0;
   const playerDeaths=parseInt(panel.querySelector('input[data-key="playerDeaths"]')?.value)||0;
-  const combatKillSet=panel._combatKillSet||new Set();
 
   // Apply countered spells
   if(counteredSet.size>0){
@@ -981,16 +1102,20 @@ function resolveResponseAndContinue(opp,result,attacksPlayer,panel){
     });
   }
 
-  // Apply creature kills (unified: both removal and combat)
-  if(combatKillSet.size>0){
-    const indices=Array.from(combatKillSet).sort((a,b)=>b-a);
+  // Apply creature kills (grouped by owner)
+  const killMap=panel._killMap||{};
+  for(const [oppId, kills] of Object.entries(killMap)){
+    if(!kills||kills.size===0)continue;
+    const targetOpp=gameState.opponents.find(o=>o.id===oppId);
+    if(!targetOpp)continue;
+    const indices=Array.from(kills).sort((a,b)=>b-a);
     indices.forEach(idx=>{
-      if(idx<opp.tokens.length){
-        const token=opp.tokens[idx];
-        opp.tokens.splice(idx,1);
-        if(token.kind==="commander")returnCommanderToZone(opp);
-        if(token.kind==="voltron-support"&&token.effect?.includes("mana"))opp.rampInPlay=Math.max(0,opp.rampInPlay-1);
-        logCommander(`You killed ${token.name}.`);
+      if(idx<targetOpp.tokens.length){
+        const token=targetOpp.tokens[idx];
+        targetOpp.tokens.splice(idx,1);
+        if(token.kind==="commander")returnCommanderToZone(targetOpp);
+        if(token.kind==="voltron-support"&&token.effect?.includes("mana"))targetOpp.rampInPlay=Math.max(0,targetOpp.rampInPlay-1);
+        logCommander(`You killed ${token.name} (${targetOpp.name.split(',')[0]}).`);
       }
     });
   }

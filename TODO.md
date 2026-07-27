@@ -1,5 +1,30 @@
 # Magic No Gathering — TODO
 
+## Ship to Steam
+
+Prepare the game for a Steam release with a free-to-play base + paid DLC model.
+
+**Pre-launch blockers:**
+- Rename all MTG IP references (Garruk, Wolf tokens, planeswalker terminology) — WotC will enforce
+- Rename the game itself — "Magic No Gathering" references their trademark
+- Visual polish — card art, layout, animations, overall graphic design pass
+- Wrap in Electron/NW.js for desktop distribution
+
+**Steam setup:**
+- $100 Steamworks fee (one-time)
+- Store page assets: capsule images, 5+ screenshots, short description, tags
+- Free-to-play base game: solo adventures + 1v1 Commander
+- $4.99 DLC: "Commander Rivals Pack" (2–4 CPU opponents)
+- Steamworks SDK integration for DLC gating
+- Review process ~2–4 weeks after submission
+
+**Revenue model:**
+- Steam takes 30% cut
+- Two-build split not needed — Steam DLC system handles gating natively
+- Consider regional pricing for international markets
+
+---
+
 ## Commander Rival: Discard Interaction
 
 Add player-side discard/mill actions that interact with Rukha's finite virtual hand and deck.
