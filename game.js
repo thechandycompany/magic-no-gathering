@@ -376,7 +376,13 @@ function damageLoyalty(n){
   checkPhase();render();
 }
 function gainLoyalty(n){ S.loyalty+=n; if(S.loyalty>S.maxLoyaltySeen)S.maxLoyaltySeen=S.loyalty; render(); }
-function adjust(stat,d){ S.player[stat]=Math.max(0,S.player[stat]+d); render(); }
+function adjust(stat,d){
+  if(!S){
+    if(window._commanderMain&&window._commanderMain.adjust)window._commanderMain.adjust(stat,d);
+    return;
+  }
+  S.player[stat]=Math.max(0,S.player[stat]+d); render();
+}
 function setStat(stat,v){ S.player[stat]=Math.max(0,v); render(); }
 /* Commander life counts down from 21 as the enemy commander's combat damage
    (S.commanderDamage) accumulates — mirrors the 21 commander-damage loss rule.
@@ -617,7 +623,83 @@ function tokenKeywords(t){
   if(S.mode==="conclave"&&t.kind==="synergy"&&t.unitId!=="mirael"&&S.tokens.some(x=>x.unitId==="mirael")&&!kws.includes("Ward 2"))kws.push("Ward 2");
   return kws;
 }
-function totalPower(){return S.tokens.filter(t=>!t.summoningSick).reduce((a,t)=>a+tokenPower(t),0);}
+function totalPower(){return S.tokens.filter(t=>t.attacking).reduce((a,t)=>a+tokenPower(t),0);}
+function readyPowerTotal(){return S.tokens.filter(t=>!t.summoningSick).reduce((a,t)=>a+tokenPower(t),0);}
+
+/* ---------- attack declaration ---------- */
+/**
+ * Declares which tokens are attacking this turn. Sets the `attacking` flag
+ * on each token. Called during the enemy turn before appendAttackStep().
+ */
+function declareAttackers(){
+  // First clear all attack flags
+  S.tokens.forEach(t=>{ t.attacking=false; });
+
+  if(S.mode==="voltron"){
+    declareVoltronAttackers();
+  }else{
+    // Default behavior for vanilla, hard, horde, conclave: all non-sick attack
+    S.tokens.forEach(t=>{ if(!t.summoningSick) t.attacking=true; });
+  }
+}
+
+/**
+ * Voltron-specific attack logic. Rukha's strategy:
+ * - Commander ALWAYS attacks if able (she's the main threat)
+ * - Creatures with haste that just entered attack (aggressive posture)
+ * - Mana dorks (rampValue > 0) stay back — they're more valuable tapping for mana
+ * - Small utility creatures (power <= 1) stay back unless the player has no creatures
+ * - Other combat-relevant creatures attack if the player has blockers to trade with,
+ *   OR if Rukha is ahead on board and can afford to swing wide
+ */
+function declareVoltronAttackers(){
+  const playerCreatures=S.player.creatures;
+  const commander=voltronCommander();
+  const nonSick=S.tokens.filter(t=>!t.summoningSick);
+
+  nonSick.forEach(t=>{
+    // Commander always attacks — that's the whole voltron plan
+    if(t.kind==="commander"){
+      t.attacking=true;
+      return;
+    }
+
+    // Mana dorks never attack — their ramp value exceeds their combat value
+    if(t.kind==="voltron-support" && t.effect && t.effect.includes("mana")){
+      t.attacking=false;
+      return;
+    }
+
+    // Horde-style: haste creatures attack immediately (already not sick)
+    if(t.kws && t.kws.includes("Haste") && tokenPower(t)>=2){
+      t.attacking=true;
+      return;
+    }
+
+    // Tiny creatures (0-1 power) hold back as chump blockers unless player is wide open
+    if(tokenPower(t)<=1){
+      t.attacking=(playerCreatures===0);
+      return;
+    }
+
+    // Medium creatures: attack if commander is out (they support the alpha strike)
+    // or if player has few blockers and we can overwhelm
+    if(commander && !commander.summoningSick){
+      // With commander attacking, send support to force tough blocking decisions
+      t.attacking=true;
+      return;
+    }
+
+    // No commander on field: be more conservative, only attack with decent bodies
+    // if the player doesn't have overwhelming blockers
+    if(playerCreatures<=nonSick.length){
+      t.attacking=(tokenPower(t)>=2);
+    }else{
+      // Player has more creatures than us, hold back for defense
+      t.attacking=false;
+    }
+  });
+}
 
 /* ---------- log ---------- */
 function logG(m){push("garruk",enemyName(),m);} function logP(m){push("player","You",m);}
@@ -818,7 +900,7 @@ function hardGarrukEmergencyDecision(st,p,tokens,readyPower){
 }
 function garrukDecide(){
   const st=S,p=st.player,tokens=st.tokens.length;
-  const readyPower=totalPower();
+  const readyPower=readyPowerTotal();
   st.enraged=st.loyalty<=8;
   S.aiReason="";
 
@@ -890,6 +972,8 @@ function resolveGarrukAction(id){
    ===================================================================== */
 function startGarrukTurn(){
   S.phase="garruk"; S.turnPowerBonus=0; S.spellLock="";
+  // Untap: clear attacking flags from last turn
+  S.tokens.forEach(t=>{ t.attacking=false; });
   if(S.mode==="horde"){startHordeTurn();return;}
   if(S.mode==="conclave"){startConclaveTurn();return;}
   if(S.mode==="voltron"){startVoltronTurn();return;}
@@ -902,6 +986,7 @@ function startHunterTurn(){
   const id=garrukDecide();
   S.pendingDecl=id; S.slayTarget=id==="slay"?garrukSlayTarget():null;
   resolveGarrukAction(id);
+  declareAttackers();
   S.attackPower=totalPower();
   const d=ABILITIES[id];
   S.declFlavor=d.flavor[Math.floor(Math.random()*d.flavor.length)];
@@ -933,6 +1018,7 @@ function startHordeTurn(){
   }else{
     S.actionSteps.push({label:"Relentless advance",detail:"Horde creatures have haste and attack every turn if able."});
   }
+  declareAttackers();
   S.attackPower=totalPower();
   S.declFlavor="The dead pour forward without fear or strategy—only hunger.";
   appendAttackStep();
@@ -974,6 +1060,7 @@ function startConclaveTurn(){
     S.spellLock="You can't cast more than one spell this turn.";
     S.actionSteps.push({label:"Kharos completes the chain",detail:S.spellLock});
   }
+  declareAttackers();
   S.attackPower=totalPower();
   S.declFlavor="Vaelora conducts the battlefield like a living spell.";
   appendAttackStep();
@@ -1064,17 +1151,27 @@ function startVoltronTurn(){
   }
 
   S.actionSteps=actions;
+  declareAttackers();
   S.attackPower=totalPower();
   S.declFlavor=voltronCommander()?"Rukha builds toward a commander-damage strike.":"Rukha develops mana and board presence.";
   appendAttackStep();
   showGarrukTurn();
 }
 function appendAttackStep(){
+  const attackers=S.tokens.filter(t=>t.attacking);
+  const holdingBack=S.tokens.filter(t=>!t.summoningSick&&!t.attacking);
   if(S.attackPower>0){
-    const attackers=S.tokens.filter(t=>!t.summoningSick);
-    S.actionSteps.push({label:`Attack with ${attackers.length} creature(s) for ${S.attackPower}`,detail:`All ready creatures attack for ${S.attackPower} total power.`});
+    const names=attackers.map(t=>`${t.name} (${tokenPower(t)}/${tokenToughness(t)})`).join(", ");
+    let detail=`Attacking: ${names}.`;
+    if(holdingBack.length>0){
+      const heldNames=holdingBack.map(t=>t.name).join(", ");
+      detail+=` Holding back: ${heldNames}.`;
+    }
+    S.actionSteps.push({label:`Attack with ${attackers.length} creature(s) for ${S.attackPower}`,detail});
   }else if(S.tokens.some(t=>t.summoningSick)){
     S.actionSteps.push({label:"Creatures held back",detail:"Newly summoned creatures without haste have summoning sickness."});
+  }else if(holdingBack.length>0){
+    S.actionSteps.push({label:"No attack declared",detail:`${holdingBack.length} creature(s) held back for defense.`});
   }
 }
 function showGarrukTurn(){
@@ -1082,7 +1179,7 @@ function showGarrukTurn(){
   const decl=document.getElementById('declare');
   decl.className="declare garruk compact-declare";
   const actionCount=(S.actionSteps||[]).length;
-  const attackerCount=S.tokens.filter(t=>!t.summoningSick).length;
+  const attackerCount=S.tokens.filter(t=>t.attacking).length;
   document.getElementById('declareTitle').textContent=`${actionCount} enemy action${actionCount===1?"":"s"}`;
   document.getElementById('declareFlavor').textContent=S.attackPower>0?`${attackerCount} attacker${attackerCount===1?"":"s"} · ${S.attackPower} incoming power`:"No incoming combat damage";
   document.getElementById('declareMech').innerHTML=`<button type="button" class="detail-link" id="enemyActionsBtn">Review actions</button>`;
@@ -1102,9 +1199,11 @@ function showPlayerTurn(){
   let mech="";
   if(S.spellLock)mech+=`<span class="lock-note">🔒 ${S.spellLock}</span>`;
   if(S.tokens.length>0 && timing.isCombat){
-    const blockToughness=S.tokens.reduce((a,t)=>a+tokenToughness(t),0);
-    const deathTouchers=S.tokens.filter(t=>t.kws.includes("Deathtouch")).length;
-    mech+=`<span class="combat-outlook">${S.tokens.length} blocker${S.tokens.length===1?"":"s"} · ${blockToughness} toughness${deathTouchers?` · ${deathTouchers} deathtouch`:""}</span>`;
+    const potentialBlockers=S.tokens.filter(t=>!t.attacking&&!t.summoningSick);
+    const blockToughness=potentialBlockers.reduce((a,t)=>a+tokenToughness(t),0);
+    const deathTouchers=potentialBlockers.filter(t=>t.kws.includes("Deathtouch")).length;
+    const tappedCount=S.tokens.filter(t=>t.attacking).length;
+    mech+=`<span class="combat-outlook">${potentialBlockers.length} blocker${potentialBlockers.length===1?"":"s"} · ${blockToughness} toughness${deathTouchers?` · ${deathTouchers} deathtouch`:""}${tappedCount?` · ${tappedCount} tapped out`:""}</span>`;
   }else if(S.tokens.length===0 && timing.isCombat){
     mech+=`<span class="combat-outlook clear">No blockers</span>`;
   }
@@ -1242,9 +1341,8 @@ function ensureTurnInput(){
     key,
     incomingDamage:isEnemy?totalPower():0,
     incomingDamageAuto:isEnemy,
-    commanderDamage:initialCommander&&!initialCommander.summoningSick?tokenPower(initialCommander):0,
+    commanderDamage:initialCommander&&initialCommander.attacking?tokenPower(initialCommander):0,
     commanderDamageAuto:isEnemy&&S.mode==="voltron",
-    blocked:false,
     playerDeaths:0,
     creaturesPlayed:0,
     damageToEnemy:0,
@@ -1281,12 +1379,12 @@ function projectedEnemyAttackPower(input=ensureTurnInput()){
 }
 function projectedEnemyAttackerCount(input=ensureTurnInput()){
   const selected=new Set(selectedEnemyDeathIndices());
-  return S.tokens.filter((token,index)=>!token.summoningSick&&!selected.has(index)).length;
+  return S.tokens.filter((token,index)=>token.attacking&&!selected.has(index)).length;
 }
 function projectedCommanderDamagePower(input=ensureTurnInput()){
   if(S.mode!=="voltron")return 0;
   const selected=new Set(selectedEnemyDeathIndices());
-  const commander=S.tokens.find((token,index)=>token.kind==="commander"&&!token.summoningSick&&!selected.has(index));
+  const commander=S.tokens.find((token,index)=>token.kind==="commander"&&token.attacking&&!selected.has(index));
   return commander?tokenPower(commander):0;
 }
 function syncIncomingDamageToAttack(){
@@ -1480,7 +1578,7 @@ function orderedEnemyStep(number,title,body,modifier=""){
 function renderEnemyTurnInputs(){
   const input=ensureTurnInput();
   const hasActionEffect=S.pendingDecl==="slay"||S.pendingDecl==="wipe"||S.pendingDecl==="conclaveWipe";
-  const initialAttackers=S.tokens.filter(token=>!token.summoningSick).length;
+  const initialAttackers=S.tokens.filter(token=>token.attacking).length;
   const remainingPower=projectedEnemyAttackPower(input);
   const remainingAttackers=projectedEnemyAttackerCount(input);
   let step=1;
@@ -1510,12 +1608,14 @@ function renderEnemyTurnInputs(){
   if(initialAttackers>0){
     let combatHtml;
     if(remainingPower>0){
+      const attackerList=S.tokens.filter((token,index)=>token.attacking&&!new Set(selectedEnemyDeathIndices()).has(index));
+      const attackerNames=attackerList.map(t=>`<span class="atk-tag">${t.ico} ${t.name} (${tokenPower(t)}/${tokenToughness(t)})</span>`).join(" ");
       combatHtml=`<div class="context-summary danger-summary"><span class="context-summary-icon">⚔️</span><div><strong>${remainingAttackers} attacker${remainingAttackers===1?"":"s"} · ${remainingPower} incoming</strong><span>${input.incomingDamageAuto?"Auto-calculated after removals.":"Damage set manually."}</span></div></div>`;
-      combatHtml+=`<label class="context-toggle"><input type="checkbox" data-toggle-key="blocked" ${input.blocked?"checked":""}><span class="toggle-track"></span><span><strong>I blocked</strong><small>Track combat losses</small></span></label>`;
+      combatHtml+=`<div class="attacker-list">${attackerNames}</div>`;
       combatHtml+=numberFieldHtml("incomingDamage","Damage reaching you","Adjust for blocks or prevention.",remainingPower);
       const commanderPower=projectedCommanderDamagePower(input);
       if(commanderPower>0)combatHtml+=numberFieldHtml("commanderDamage","Commander damage reaching you","Only unblocked damage from Rukha counts toward 21.",Math.min(commanderPower,input.incomingDamage));
-      if(input.blocked)combatHtml+=numberFieldHtml("playerDeaths","Your creatures that died","Reduces your creature total.",S.player.creatures);
+      combatHtml+=numberFieldHtml("playerDeaths","Your creatures that died","Reduces your creature total.",S.player.creatures);
     }else{
       combatHtml=`<div class="context-summary"><span class="context-summary-icon">✓</span><div><strong>No attackers remain</strong><span>Combat deals no damage.</span></div></div>`;
     }
@@ -1626,7 +1726,7 @@ function resolveEnemyTurnInputs(input){
   const remainingAttackPower=totalPower();
   const damage=Math.min(input.incomingDamage,remainingAttackPower);
   const commander=voltronCommander();
-  const commanderCombatDamage=S.mode==="voltron"&&commander&&!commander.summoningSick
+  const commanderCombatDamage=S.mode==="voltron"&&commander&&commander.attacking
     ?Math.min(input.commanderDamage||0,damage,tokenPower(commander)):0;
   if(remainingAttackPower>0){
     if(damage>0)adjust("life",-damage);
@@ -1634,12 +1734,11 @@ function resolveEnemyTurnInputs(input){
       S.commanderDamage+=commanderCombatDamage;
       logG(`${commander.name} deals ${commanderCombatDamage} commander damage (${S.commanderDamage}/21).`);
     }
-    if(input.blocked)logP(`You block; ${damage} combat damage gets through. Life → ${S.player.life}.`);
-    else if(damage>0)logP(`You take ${damage} combat damage. Life → ${S.player.life}.`);
+    if(damage>0)logP(`You take ${damage} combat damage. Life → ${S.player.life}.`);
     else logP("No combat damage gets through.");
-    if(input.blocked&&input.playerDeaths>0){
+    if(input.playerDeaths>0){
       adjust("creatures",-input.playerDeaths);
-      logP(`${input.playerDeaths} of your creature(s) die blocking.`);
+      logP(`${input.playerDeaths} of your creature(s) died in combat.`);
     }
   }else if(S.attackPower>0){
     logP("No enemy attackers remain, so combat deals no damage.");
@@ -1677,6 +1776,7 @@ function resolvePlayerTurnInputs(input){
   }
 }
 function resolveTurn(){
+  if(!S)return;
   snapshot();
   const isEnemyTurn=S.phase==="garruk";
   const input=ensureTurnInput();
@@ -1807,6 +1907,7 @@ function updateModePresentation(){
   document.getElementById('addWolfBtn').textContent=S.mode==="conclave"?"+ Conclave":S.mode==="horde"?"+ Horde":S.mode==="voltron"?"+ Drawn Ramp":"+ Wolf";
 }
 function render(){
+  if(!S)return;
   updateModePresentation();
   document.getElementById('turnNum').textContent=S.turn;
   document.getElementById('phasePill').textContent=S.phase==="garruk"?`${enemyName()}'s Turn`:"Your Turn";
@@ -1841,7 +1942,10 @@ function render(){
     cmdrLifeStat.hidden=true;
   }
   const readyCount=S.tokens.filter(t=>!t.summoningSick).length,sickCount=S.tokens.length-readyCount;
-  let atkText=readyCount?`Attack power: ${totalPower()} (${readyCount} ready)`:"";
+  const attackerCount=S.tokens.filter(t=>t.attacking).length;
+  const holdingBackCount=readyCount-attackerCount;
+  let atkText=attackerCount?`Attacking: ${attackerCount} for ${totalPower()}`:"";
+  if(holdingBackCount>0)atkText+=`${atkText?" · ":""}${holdingBackCount} holding back`;
   if(sickCount)atkText+=`${atkText?" · ":""}${sickCount} summoning sick`;
   document.getElementById('atkNote').textContent=atkText;
   renderTokens();updateUndoBtn();
@@ -1854,11 +1958,13 @@ function renderTokens(){
   S.tokens.forEach((t,i)=>{
     const d=document.createElement('div');
     const selectedCasualty=casualtyMode&&turnInput.enemyDeaths.has(i);
-    d.className="card"+(t.kind==="commander"?" commander":t.kind==="synergy"?" synergy":t.kind==="horde"?" horde":t.kind==="beast"?" beast":t.kind==="voltron-creature"?" voltron-creature":"")+(t.summoningSick?" sick":"")+(casualtyMode?" casualty-selectable":"")+(selectedCasualty?" casualty-selected":"");
+    const isAttacking=!!t.attacking;
+    d.className="card"+(t.kind==="commander"?" commander":t.kind==="synergy"?" synergy":t.kind==="horde"?" horde":t.kind==="beast"?" beast":t.kind==="voltron-creature"?" voltron-creature":"")+(t.summoningSick?" sick":"")+(isAttacking?" tapped":"")+(casualtyMode?" casualty-selectable":"")+(selectedCasualty?" casualty-selected":"");
     const p=tokenPower(t),toughness=tokenToughness(t);
     const primaryLabel=casualtyMode?`${selectedCasualty?"Unmark":"Mark"} ${t.name} as dead`:`View details for ${t.name}`;
+    const statusBadge=selectedCasualty?'<div class="c-casualty">✓ Dies</div>':isAttacking?'<div class="c-atk">⚔️</div>':t.summoningSick?'<div class="c-sick">💤</div>':'';
     d.innerHTML=`
-      ${selectedCasualty?'<div class="c-casualty">✓ Dies</div>':t.summoningSick?'<div class="c-sick">💤</div>':''}
+      ${statusBadge}
       <button type="button" class="card-main" aria-label="${primaryLabel}"${casualtyMode?` aria-pressed="${selectedCasualty?"true":"false"}"`:""}>
         <span class="c-name"><span>${t.name}</span><span class="mana">${t.kind==="commander"?"⚜":t.kind==="voltron-creature"||t.kind==="voltron-support"?"🌲":t.kind==="synergy"?"✦":t.kind==="horde"?"☠":"🌲"}</span></span>
         <span class="c-art">${t.ico}</span>
@@ -1940,6 +2046,7 @@ function renderPhaseBar(){
 }
 
 function renderLog(){
+  if(!S)return;
   const l=document.getElementById('log'); if(!l)return; l.innerHTML="";
   S.log.forEach(e=>{ const d=document.createElement('div'); d.className="log-e "+e.cls; d.innerHTML=(e.who?`<span class="who">${e.who} · T${e.turn}</span>`:"")+e.msg; l.appendChild(d); });
   const cnt=document.getElementById('logCount'); if(cnt) cnt.textContent=S.log.length;
@@ -1949,6 +2056,12 @@ function renderLog(){
    SETUP / INIT
    ===================================================================== */
 function showSetup(){
+  // If the commander module is loaded, it provides the split menu
+  if(window._commanderMain){
+    window._commanderMain.showSetup();
+    return;
+  }
+  // Fallback: original setup (should not normally be reached)
   const m=document.getElementById('modal'),o=document.getElementById('overlay');
   m.className="modal setup-modal";
   m.innerHTML=`
@@ -2038,9 +2151,35 @@ function wire(){
   });
 }
 
+/* ---------- adventure engine interface (for commander module integration) ---------- */
+window._adventureEngine = {
+  start: function(mode) {
+    S=freshState(mode);turnInput=null;gameOver=false;undoStack=[];updateUndoBtn();
+    document.getElementById('overlay').classList.remove("show");
+    logBig(`${modeConfig().name} begins. ${enemyName()} enters with ${S.loyalty} ${modeConfig().resource.toLowerCase()}.`);
+    logSys(`${modeConfig().summary} Starting life: ${S.player.life}.`);
+    startGarrukTurn();
+  },
+  resume: function(savedState) {
+    S=normalizeState(savedState);gameOver=false;undoStack=[];
+    turnInput=restoreTurnInput(S.pendingTurnInput);S.pendingTurnInput=null;
+    render();renderLog();
+    if(S.phase==="player")showPlayerTurn();
+    else if(S.pendingDecl)showGarrukTurn();
+    else startGarrukTurn();
+    updateUndoBtn();logSys(`${modeConfig().name} resumed from save.`);
+  },
+  isActive: function() { return S !== null && S.turn > 0 && !gameOver; }
+};
+
 /* ---------- boot ---------- */
 wire();
 const saved=load();
+// If this is a commander battle save, defer to the module system
+const isCommanderSave = saved && saved._type === "commander";
+if(isCommanderSave){
+  // The module (src/main.js) handles commander saves — do nothing here
+}else{
 const commanderDamageDefeat=saved&&saved.mode==="voltron"&&saved.commanderDamage>=21;
 const resumable=!commanderDamageDefeat&&saved&&saved.player&&saved.player.life>0&&(saved.mode==="horde"?(saved.loyalty>0||saved.tokens.length>0):saved.loyalty>0);
 if(commanderDamageDefeat){
@@ -2055,5 +2194,7 @@ if(commanderDamageDefeat){
   else startGarrukTurn();
   updateUndoBtn();logSys(`${modeConfig().name} resumed from save.`);
 }else{
-  S=freshState("vanilla");render();renderLog();showSetup();
+  // Let the module system (src/main.js) handle showing the setup screen.
+  // Don't set S — leave it null so the module knows no game is active.
 }
+} // end isCommanderSave else block
