@@ -17,6 +17,28 @@ function fisherYatesShuffle(arr) {
   return a;
 }
 
+/* ===== THEME SYSTEM ===== */
+const THEME_KEY="mng_theme";
+function applyTheme(theme){
+  document.documentElement.setAttribute('data-theme',theme);
+  try{localStorage.setItem(THEME_KEY,theme);}catch(e){}
+}
+function loadSavedTheme(){
+  try{const t=localStorage.getItem(THEME_KEY);if(t)applyTheme(t);}catch(e){}
+}
+function wireThemePicker(){
+  const current=(document.documentElement.getAttribute('data-theme'))||"classic";
+  const btns=document.querySelectorAll('.theme-btn');
+  btns.forEach(btn=>{
+    btn.classList.toggle('active',btn.dataset.theme===current);
+    btn.onclick=()=>{
+      applyTheme(btn.dataset.theme);
+      btns.forEach(b=>b.classList.toggle('active',b.dataset.theme===btn.dataset.theme));
+    };
+  });
+}
+loadSavedTheme();
+
 /* =====================================================================
    DATA — only what commander battle needs (modes list for the setup menu)
    ===================================================================== */
@@ -108,6 +130,7 @@ const CPU_NAMES = [
 ];
 
 const COMMANDER_BASE = { p:4, t:4, kws:["Trample"], cost:5 };
+const MAX_CPU_HAND_SIZE = 7;
 
 const STRATEGIES = {
   LAST_HITTER:"lastHitter", MOST_DAMAGE:"mostDamage", GRUDGE:"grudge",
@@ -160,13 +183,15 @@ function createOpponent(index) {
     id:`cpu_${index}`, index, name:id.name, ico:id.ico, color:id.color, archetype:"voltron",
     life:40, commanderDamageReceived:{}, commanderDamageDealt:{},
     commanderZone:true, commanderTax:0,
-    deck, otherDeck, hand, typedHand:[], landsInPlay:0, rampInPlay:0, explosiveInPlay:0, gear:0,
+    deck, otherDeck, hand, typedHand:[], landsInPlay:0, rampInPlay:0, explosiveInPlay:0, gear:0, attachedGear:[], graveyardCount:0, graveyard:[], nextGraveyardCardId:0, discardHistory:[], exileCount:0,
     tokens:[], damageLog:{}, lastAttacker:null, grudge:null,
     currentStrategy:STRATEGIES.THREAT, actionSteps:[], attackTarget:null, attackPower:0,
   };
 }
 
 function manaAvailable(opp) { return opp.landsInPlay+opp.rampInPlay+(opp.explosiveInPlay*2); }
+function opponentHandSize(opp){return Object.values(opp.hand||{}).reduce((total,count)=>total+(count||0),0);}
+function opponentDeckSize(opp){return Object.values(opp.deck||{}).reduce((total,count)=>total+(count||0),0);}
 function commanderCost(opp) { return COMMANDER_BASE.cost+(opp.commanderTax||0); }
 function commanderOnField(opp) { return opp.tokens.find(t=>t.kind==="commander")||null; }
 function isOpponentDead(opp) {
@@ -184,7 +209,19 @@ function deployCommander(opp) {
     kws:[...COMMANDER_BASE.kws],effect:"Commander",summoningSick:true,owner:opp.id});
   return true;
 }
-function returnCommanderToZone(opp){opp.tokens=opp.tokens.filter(t=>t.kind!=="commander");opp.commanderZone=true;opp.commanderTax+=2;opp.gear=0;}
+function refreshCommanderGear(opp){
+  const commander=commanderOnField(opp);
+  opp.attachedGear=opp.attachedGear||[];
+  opp.gear=opp.attachedGear.length;
+  if(!commander)return;
+  const bonus=opp.attachedGear.reduce((total,gear)=>total+(gear.bonus||0),0);
+  commander.baseP=COMMANDER_BASE.p+bonus;
+  commander.baseT=COMMANDER_BASE.t+bonus;
+  commander.p=commander.baseP;commander.t=commander.baseT;
+  commander.kws=[...new Set([...COMMANDER_BASE.kws,...opp.attachedGear.map(gear=>gear.kw).filter(Boolean)])];
+  commander.effect=opp.gear?`Commander — ${opp.gear} gear.`:"Commander";
+}
+function returnCommanderToZone(opp){opp.tokens=opp.tokens.filter(t=>t.kind!=="commander");opp.commanderZone=true;opp.commanderTax+=2;opp.gear=0;opp.attachedGear=[];}
 
 /* ---------- targeting ---------- */
 function threatScore(p){
@@ -238,7 +275,13 @@ function executeOpponentTurn(opp, allPlayers) {
   const actions=[];
   let commander=commanderOnField(opp);
 
-  // Draw
+  // Draw. A CPU that cannot complete its required draw loses the game.
+  if(opponentDeckSize(opp)===0){
+    opp.life=0;
+    actions.push({label:"Decked out",detail:"Cannot draw from an empty deck. Life → 0.",deckOut:true});
+    opp.actionSteps=actions;
+    return {target:null,attackPower:0,commanderAttacking:false,actions};
+  }
   const drawn=drawCard(opp.deck,opp.hand);
   if(drawn==="other"&&opp.otherDeck.length>0){const ref=opp.otherDeck.pop();opp.typedHand.push({...resolveCard(ref),ref});}
   if(drawn!=="none")actions.push({label:"Draw",detail:"Draws a card."});
@@ -259,10 +302,9 @@ function executeOpponentTurn(opp, allPlayers) {
     const best=gearInHand.filter(c=>(c.cost+(c.equip||0))<=mana).sort((a,b)=>(b.bonus/(b.cost+(b.equip||0)))-(a.bonus/(a.cost+(a.equip||0))))[0];
     if(best){
       mana-=best.cost+(best.equip||0);
-      commander.baseP+=best.bonus;commander.baseT+=best.bonus;commander.p=commander.baseP;commander.t=commander.baseT;
-      opp.gear++;if(best.kw&&!commander.kws.includes(best.kw))commander.kws.push(best.kw);
-      commander.effect=`Commander — ${opp.gear} gear.`;
-      opp.typedHand=opp.typedHand.filter(c=>c!==best);
+      opp.attachedGear=(opp.attachedGear||[]).concat({name:best.name,bonus:best.bonus||0,kw:best.kw||null});
+      refreshCommanderGear(opp);
+      opp.typedHand=opp.typedHand.filter(c=>c!==best);opp.hand.other=Math.max(0,opp.hand.other-1);
       actions.push({label:`Equip ${best.name}`,detail:`${best.effect}. Now ${commander.p}/${commander.t}.`});
     }
   }
@@ -278,7 +320,7 @@ function executeOpponentTurn(opp, allPlayers) {
     opp.tokens.push({name:toCast.name,ico:toCast.ico||"🐾",kind:toCast.rampValue?"voltron-support":"voltron-creature",
       type:"Creature",p,t,baseP:p,baseT:t,kws:toCast.kws?[...toCast.kws]:[],effect:toCast.effect||"",summoningSick:!toCast.haste,owner:opp.id});
     if(toCast.rampValue)opp.rampInPlay+=toCast.rampValue;
-    opp.typedHand=opp.typedHand.filter(c=>c!==toCast);
+    opp.typedHand=opp.typedHand.filter(c=>c!==toCast);opp.hand.other=Math.max(0,opp.hand.other-1);
     actions.push({label:`Cast ${toCast.name}`,detail:`${p}/${t} enters.`});
     castCount++;
   }
@@ -308,6 +350,15 @@ function executeOpponentTurn(opp, allPlayers) {
     actions.push({label:`Attack ${tn?tn.name.split(',')[0]:"?"} for ${attackPower}`,detail:`${opp.tokens.filter(t=>t.attacking).length} attacker(s). Strategy: ${STRATEGY_LABELS[opp.currentStrategy]}.`});
   }
 
+  // End step: CPU cannot retain more than seven cards. It keeps the most useful cards.
+  const excessCards=Math.max(0,opponentHandSize(opp)-MAX_CPU_HAND_SIZE);
+  if(excessCards>0){
+    const discarded=discardFromOpponent(opp,excessCards);
+    const details=discarded.map(discardedCardText).join(", ");
+    const typeSummary=discardedTypeSummary(discarded);
+    actions.push({label:"Discard to hand size",detail:`Discards ${details}. Types: ${typeSummary}. Keeps ${opponentHandSize(opp)} card${opponentHandSize(opp)===1?"":"s"}.`,discarded});
+  }
+
   opp.tokens.forEach(t=>{t.summoningSick=false;});
   opp.actionSteps=actions;
   return {target,attackPower,commanderAttacking,actions};
@@ -321,8 +372,8 @@ function createCommanderBattle(numOpponents) {
   for(let i=0;i<Math.min(4,Math.max(1,numOpponents));i++) opponents.push(createOpponent(i));
   return {
     gameMode:"commanderBattle", turn:1, phase:"cpu", cpuTurnIndex:0,
-    opponents, player:{id:"player",name:"You",life:40,creatures:0,commanderDamageReceived:{},commanderDamageDealt:{},tokens:[]},
-    log:[], viewMode:"single", viewTarget:0, gameOver:false, winner:null,
+    opponents, player:{id:"player",name:"You",life:40,creatures:0,handSize:7,librarySize:92,graveyardCount:0,graveyard:[],nextGraveyardCardId:0,discardHistory:[],exileCount:0,commanderDamageReceived:{},commanderDamageDealt:{},tokens:[]},
+    discardHistory:[], log:[], viewMode:"single", viewTarget:0, gameOver:false, winner:null,
   };
 }
 
@@ -355,8 +406,8 @@ function executeCpuTurnCycle(state) {
           if(cmdDmg>0)tgt.commanderDamageReceived[opp.id]=(tgt.commanderDamageReceived[opp.id]||0)+cmdDmg;
           if(result.attackPower>=5&&tgt.tokens.length>0&&Math.random()<0.4){
             const vi=Math.floor(Math.random()*tgt.tokens.length);
-            const dead=tgt.tokens[vi];tgt.tokens.splice(vi,1);
-            if(dead&&dead.kind==="commander")returnCommanderToZone(tgt);
+            const moved=removeOpponentPermanent(tgt,`token:${vi}`,"graveyard");
+            if(moved)logCommander(`${opp.name.split(',')[0]}'s attack destroys ${movementCardText(moved)} from ${tgt.name.split(',')[0]}. Types: ${discardedTypeSummary([moved])}.`);
           }
         }
       }
@@ -375,6 +426,349 @@ function checkCommanderBattleEnd(state){
   if(isPlayerDead(state))return {over:true,won:false,reason:"You were eliminated."};
   if(aliveOpponents(state).length===0)return {over:true,won:true,reason:"All opponents eliminated!"};
   return {over:false};
+}
+
+/* =====================================================================
+   PLAYER ACTIONS — direct instantiation against Commander Battle state
+   ===================================================================== */
+const PLAYER_ACTION_SCOPES=[
+  {value:"target",label:"Target player"},
+  {value:"each",label:"Each player"},
+  {value:"eachOpponent",label:"Each opponent"}
+];
+const PLAYER_ACTIONS=[
+  {value:"discard",label:"Discard cards"},
+  {value:"mill",label:"Mill cards"},
+  {value:"destroy",label:"Destroy permanents"},
+  {value:"sacrifice",label:"Sacrifice permanents"},
+  {value:"exile",label:"Exile permanents"},
+  {value:"reanimate",label:"Reanimate creature"},
+  {value:"draw",label:"Draw cards"},
+  {value:"loseLife",label:"Lose life"},
+  {value:"gainLife",label:"Gain life"}
+];
+const PLAYER_ACTION_CARD_TYPES=["creature","artifact","land","permanent"];
+let commanderEffectDraft=null;
+
+function ensureCommanderEffectState(state){
+  if(!state||!state.player)return;
+  const player=state.player;
+  if(player.handSize==null)player.handSize=7;
+  if(player.librarySize==null)player.librarySize=92;
+  if(player.graveyardCount==null)player.graveyardCount=0;
+  player.graveyard=player.graveyard||[];
+  player.nextGraveyardCardId=player.nextGraveyardCardId||player.graveyard.length;
+  player.discardHistory=player.discardHistory||[];
+  if(player.exileCount==null)player.exileCount=0;
+  state.discardHistory=state.discardHistory||[];
+  (state.opponents||[]).forEach(opp=>{
+    opp.typedHand=opp.typedHand||[];
+    opp.graveyardCount=opp.graveyardCount||0;
+    opp.graveyard=opp.graveyard||[];
+    opp.nextGraveyardCardId=opp.nextGraveyardCardId||opp.graveyard.length;
+    opp.discardHistory=opp.discardHistory||[];
+    opp.exileCount=opp.exileCount||0;
+    opp.attachedGear=opp.attachedGear||[];
+    if(opp.attachedGear.length===0&&opp.gear>0){
+      opp.attachedGear=Array.from({length:opp.gear},(_,index)=>({name:`Equipment ${index+1}`,bonus:0,kw:null}));
+    }
+    opp.gear=opp.attachedGear.length;
+  });
+}
+
+function createPlayerEffect(draft){
+  return {
+    scope:draft.scope,
+    action:draft.action,
+    count:Math.max(1,parseInt(draft.count)||1),
+    cardType:(draft.action==="destroy"||draft.action==="sacrifice"||draft.action==="exile")?draft.cardType:draft.action==="reanimate"?"creature":null
+  };
+}
+
+function effectTargets(state,effect,targetId){
+  const all=[state.player,...aliveOpponents(state)];
+  if(effect.scope==="each")return all;
+  if(effect.scope==="eachOpponent")return aliveOpponents(state);
+  return all.filter(player=>player.id===targetId);
+}
+function effectTargetName(target){return target.id==="player"?"You":target.name.split(",")[0];}
+function drawForOpponent(opp){
+  const drawn=drawCard(opp.deck,opp.hand);
+  if(drawn==="other"&&opp.otherDeck.length>0){const ref=opp.otherDeck.pop();opp.typedHand.push({...resolveCard(ref),ref});}
+  return drawn;
+}
+function typedCardTypes(card){
+  const category=card.ref?.category;
+  if(category==="creatures"||card.isCreature||card.rampValue)return ["Creature"];
+  if(category==="gear")return ["Artifact","Equipment"];
+  if(category==="protection")return ["Instant"];
+  if(category==="utility")return ["Enchantment"];
+  return ["Sorcery"];
+}
+function virtualGraveyardCard(category){
+  const cards={
+    lands:{name:"Basic Land",ico:"🌲",types:["Land"]},
+    ramp:{name:"Ramp spell",ico:"🌱",types:["Sorcery"]},
+    explosive:{name:"Fast mana",ico:"⚙",types:["Artifact"]},
+    other:{name:"Unknown spell",ico:"🃏",types:["Sorcery"]}
+  };
+  return {...(cards[category]||cards.other),virtual:true};
+}
+function typedGraveyardCard(card){
+  return {name:card.name,ico:card.ico||"🃏",types:typedCardTypes(card),p:card.p,t:card.t,kws:card.kws?[...card.kws]:[],effect:card.effect||"",ref:card.ref||null,virtual:false};
+}
+function battlefieldGraveyardCard(token){
+  return {name:token.name,ico:token.ico||"🐾",types:(token.type||"Creature").includes("Creature")?["Creature"]:[token.type||"Permanent"],p:token.p,t:token.t,kws:token.kws?[...token.kws]:[],effect:token.effect||"",virtual:false,isToken:!!token.isToken};
+}
+function addOpponentGraveyardCard(opp,card){
+  if(card.isToken)return null;
+  opp.graveyard=opp.graveyard||[];
+  opp.nextGraveyardCardId=(opp.nextGraveyardCardId||0)+1;
+  const entry={id:`${opp.id}:gy:${opp.nextGraveyardCardId}`,ownerId:opp.id,...card};
+  opp.graveyard.push(entry);opp.graveyardCount++;
+  return entry;
+}
+function addPlayerGraveyardCard(player,card){
+  if(card.isToken)return null;
+  player.graveyard=player.graveyard||[];
+  player.nextGraveyardCardId=(player.nextGraveyardCardId||0)+1;
+  const entry={id:`${player.id}:gy:${player.nextGraveyardCardId}`,ownerId:player.id,...card};
+  player.graveyard.push(entry);player.graveyardCount++;
+  return entry;
+}
+function cardTypeText(card){return card.types&&card.types.length?card.types.join(" · "):"Unknown";}
+function discardedCardText(card){return `${card.ico||"🃏"} ${card.name} (${cardTypeText(card)})`;}
+function discardedTypeSummary(cards){
+  const counts={};
+  cards.forEach(card=>(card.types||["Unknown"]).forEach(type=>{counts[type]=(counts[type]||0)+1;}));
+  return Object.entries(counts).map(([type,count])=>`${type} ${count}`).join(" · ");
+}
+function movementCardText(card){return `${discardedCardText(card)} → ${card.destination||"graveyard"}`;}
+function recordDiscardedCards(owner,cards){
+  const entries=cards.filter(Boolean);
+  if(entries.length===0)return entries;
+  const turn=typeof gameState!=="undefined"&&gameState?gameState.turn:null;
+  const records=entries.map(card=>({id:card.id,name:card.name,ico:card.ico||"🃏",types:[...(card.types||["Unknown"])],ownerId:owner.id,turn}));
+  owner.discardHistory=(owner.discardHistory||[]).concat(records).slice(-100);
+  if(typeof gameState!=="undefined"&&gameState)gameState.discardHistory=(gameState.discardHistory||[]).concat(records).slice(-250);
+  return entries;
+}
+function unmaterializedGraveyardCount(owner){return Math.max(0,(owner.graveyardCount||0)-(owner.graveyard||[]).length);}
+function graveyardCreatureCards(player){return (player.graveyard||[]).filter(card=>!card.isToken&&card.types?.includes("Creature"));}
+function reanimateGraveyardCard(owner,cardId){
+  const index=(owner.graveyard||[]).findIndex(card=>card.id===cardId&&card.types?.includes("Creature")&&!card.isToken);
+  if(index<0)return null;
+  const [card]=owner.graveyard.splice(index,1);
+  owner.graveyardCount=Math.max(0,(owner.graveyardCount||0)-1);
+  const player=gameState.player;
+  player.tokens=player.tokens||[];
+  player.tokens.push({name:card.name,ico:card.ico||"🐾",kind:"reanimated-creature",type:"Creature",p:card.p||1,t:card.t||1,baseP:card.p||1,baseT:card.t||1,kws:card.kws?[...card.kws]:[],effect:card.effect||`Reanimated from ${effectTargetName(owner)}'s graveyard.`,summoningSick:true,owner:card.ownerId||owner.id,controller:"player",isToken:false});
+  player.creatures++;
+  return card;
+}
+function cpuDiscardPriority(opp,option){
+  if(option.kind==="hand"){
+    if(option.category==="lands")return opp.landsInPlay<3?80:10;
+    if(option.category==="ramp")return commanderOnField(opp)?35:75;
+    return 55; // Explosive mana stays useful but is less critical than development.
+  }
+  const card=option.card,category=card.ref?.category;
+  if(category==="gear")return commanderOnField(opp)?85:15;
+  if(category==="protection")return 80;
+  if(category==="creatures")return (card.p||1)+(card.t||1)+(card.rampValue?30:0);
+  if(category==="draw")return 45;
+  if(category==="haymakers")return 60;
+  return card.rampValue?70:30;
+}
+function discardFromOpponent(opp,count){
+  const discarded=[];
+  for(let i=0;i<count;i++){
+    const options=[];
+    ["lands","ramp","explosive"].forEach(category=>{for(let index=0;index<opp.hand[category];index++)options.push({kind:"hand",category});});
+    const genericOtherCards=Math.max(0,opp.hand.other-opp.typedHand.length);
+    for(let index=0;index<genericOtherCards;index++)options.push({kind:"hand",category:"other"});
+    opp.typedHand.forEach((card,index)=>options.push({kind:"typed",index,card}));
+    if(options.length===0)break;
+    const choice=options.sort((left,right)=>cpuDiscardPriority(opp,left)-cpuDiscardPriority(opp,right))[0];
+    if(choice.kind==="hand"){
+      opp.hand[choice.category]--;
+      const entry=addOpponentGraveyardCard(opp,virtualGraveyardCard(choice.category));if(entry)discarded.push(entry);
+    }else{
+      const [card]=opp.typedHand.splice(choice.index,1);opp.hand.other=Math.max(0,opp.hand.other-1);
+      const entry=addOpponentGraveyardCard(opp,typedGraveyardCard(card));if(entry)discarded.push(entry);
+    }
+  }
+  return recordDiscardedCards(opp,discarded);
+}
+function millOpponent(opp,count){
+  const milled=[];
+  for(let i=0;i<count;i++){
+    const entries=Object.entries(opp.deck).filter(([,remaining])=>remaining>0);
+    const total=entries.reduce((sum,[,remaining])=>sum+remaining,0);
+    if(total===0)break;
+    let roll=Math.floor(Math.random()*total),category=entries[0][0];
+    for(const [name,remaining] of entries){roll-=remaining;if(roll<0){category=name;break;}}
+    opp.deck[category]--;
+    let card=virtualGraveyardCard(category);
+    if(category==="other"&&opp.otherDeck.length>0){const ref=opp.otherDeck.pop();card=typedGraveyardCard({...resolveCard(ref),ref});}
+    const entry=addOpponentGraveyardCard(opp,card);if(entry)milled.push(entry);
+  }
+  return milled;
+}
+function opponentPermanentOptions(opp,type){
+  const options=[];
+  const includes=kind=>type==="permanent"||type===kind;
+  if(includes("creature"))opp.tokens.forEach((token,index)=>options.push({key:`token:${index}`,label:`${token.ico} ${token.name}`,type:"creature"}));
+  if(includes("artifact")){
+    (opp.attachedGear||[]).forEach((gear,index)=>options.push({key:`gear:${index}`,label:`⚙ ${gear.name}`,type:"artifact"}));
+    for(let index=0;index<opp.explosiveInPlay;index++)options.push({key:`fastMana:${index}`,label:"⚙ Fast mana",type:"artifact"});
+  }
+  if(includes("land"))for(let index=0;index<opp.landsInPlay;index++)options.push({key:`land:${index}`,label:"🌲 Land",type:"land"});
+  return options;
+}
+function cpuPermanentPriority(opp,option){
+  const [kind,indexText]=option.key.split(":"),index=parseInt(indexText);
+  if(kind==="token"){
+    const token=opp.tokens[index];
+    if(!token)return Infinity;
+    if(token.kind==="commander")return 10000;
+    return (token.p||0)+(token.t||0)+(token.kind==="voltron-support"&&token.effect?.includes("mana")?30:0);
+  }
+  if(kind==="gear"){
+    const gear=opp.attachedGear[index];
+    return (gear?.bonus||0)+(gear?.kw?8:0)+20;
+  }
+  if(kind==="fastMana")return 40;
+  if(kind==="land")return opp.landsInPlay<=3?70:5;
+  return Infinity;
+}
+function chooseCpuPermanents(opp,type,count){
+  return opponentPermanentOptions(opp,type)
+    .sort((left,right)=>cpuPermanentPriority(opp,left)-cpuPermanentPriority(opp,right))
+    .slice(0,count)
+    .map(option=>option.key);
+}
+function recordOpponentPermanentZone(opp,destination,card){
+  if(destination==="exile"){
+    opp.exileCount=(opp.exileCount||0)+1;
+    return {...card,destination:"exile"};
+  }
+  const entry=card&&addOpponentGraveyardCard(opp,card);
+  return entry?{...entry,destination:"graveyard"}:null;
+}
+function removeOpponentPermanent(opp,key,destination="graveyard"){
+  const [kind,indexText]=key.split(":"),index=parseInt(indexText);
+  if(kind==="token"&&opp.tokens[index]){
+    const [token]=opp.tokens.splice(index,1);
+    if(token.kind==="commander"){
+      returnCommanderToZone(opp);
+      return {name:token.name,ico:token.ico||opp.ico,types:["Legendary","Creature"],destination:"command zone"};
+    }
+    if(token.kind==="voltron-support"&&token.effect?.includes("mana"))opp.rampInPlay=Math.max(0,opp.rampInPlay-1);
+    return recordOpponentPermanentZone(opp,destination,battlefieldGraveyardCard(token));
+  }
+  if(kind==="gear"&&opp.attachedGear[index]){
+    const [gear]=opp.attachedGear.splice(index,1);refreshCommanderGear(opp);
+    return recordOpponentPermanentZone(opp,destination,{name:gear.name,ico:"⚙",types:["Artifact","Equipment"],effect:gear.kw||""});
+  }
+  if(kind==="fastMana"&&opp.explosiveInPlay>0){opp.explosiveInPlay--;return recordOpponentPermanentZone(opp,destination,virtualGraveyardCard("explosive"));}
+  if(kind==="land"&&opp.landsInPlay>0){opp.landsInPlay--;return recordOpponentPermanentZone(opp,destination,virtualGraveyardCard("lands"));}
+  return null;
+}
+function canResolvePlayerEffect(effect,draft){
+  if(effect.scope==="target"&&!draft.targetId)return false;
+  if(effect.action!=="reanimate")return true;
+  return effectTargets(gameState,effect,draft.targetId).every(owner=>{
+    const cards=graveyardCreatureCards(owner);
+    const selected=draft.choices[owner.id]||[];
+    return cards.length===0||selected.length>=Math.min(effect.count,cards.length);
+  });
+}
+function resolvePlayerEffect(effect,draft){
+  const targets=effectTargets(gameState,effect,draft.targetId);
+  if(targets.length===0)return;
+  cmdSnapshot();
+  targets.forEach(target=>{
+    const name=effectTargetName(target);
+    if(effect.action==="reanimate"){
+      const cardIds=(draft.choices[target.id]||[]).slice(0,effect.count);
+      const reanimated=cardIds.map(cardId=>reanimateGraveyardCard(target,cardId)).filter(Boolean);
+      if(reanimated.length)logCommander(`You reanimate ${reanimated.map(discardedCardText).join(", ")} from ${name}'s graveyard.`);
+      else logCommander(`${name}'s graveyard has no selected creature to reanimate.`);
+    }else if(effect.action==="discard"){
+      if(target.id==="player"){
+        const amount=Math.min(effect.count,target.handSize);target.handSize-=amount;
+        const discarded=Array.from({length:amount},()=>addPlayerGraveyardCard(target,{name:"Unrevealed discarded card",ico:"🃏",types:["Unknown"],virtual:true})).filter(Boolean);
+        recordDiscardedCards(target,discarded);
+        logCommander(`${name} discards ${discarded.length?discarded.map(discardedCardText).join(", "):"no cards"}. Types: ${discardedTypeSummary(discarded)}. The physical-hand model does not reveal their actual identities.`);
+      }else{
+        const discarded=discardFromOpponent(target,effect.count);
+        logCommander(`${name} chooses to discard ${discarded.length?discarded.map(discardedCardText).join(", "):"no cards"}.${discarded.length?` Types: ${discardedTypeSummary(discarded)}.`:""}`);
+      }
+    }else if(effect.action==="mill"){
+      if(target.id==="player"){
+        const amount=Math.min(effect.count,target.librarySize);target.librarySize-=amount;
+        const milled=Array.from({length:amount},()=>addPlayerGraveyardCard(target,{name:"Unrevealed milled card",ico:"📚",types:["Unknown"],virtual:true})).filter(Boolean);
+        logCommander(`${name} mills ${milled.length?milled.map(discardedCardText).join(", "):"no cards"}. Types: ${discardedTypeSummary(milled)}. The physical-library model does not reveal their actual identities.`);
+      }else{
+        const milled=millOpponent(target,effect.count);
+        logCommander(`${name} mills ${milled.length?milled.map(discardedCardText).join(", "):"no cards"}.${milled.length?` Types: ${discardedTypeSummary(milled)}.`:""}`);
+      }
+    }else if(effect.action==="draw"){
+      if(target.id==="player"){
+        const amount=Math.min(effect.count,target.librarySize);target.librarySize-=amount;target.handSize+=amount;
+        logCommander(`${name} draws ${amount} card${amount===1?"":"s"}.`);
+      }else{
+        let drawn=0;for(let i=0;i<effect.count;i++)if(drawForOpponent(target)!=="none")drawn++;
+        logCommander(`${name} draws ${drawn} card${drawn===1?"":"s"}.`);
+      }
+    }else if(effect.action==="loseLife"||effect.action==="gainLife"){
+      const direction=effect.action==="loseLife"?-1:1;target.life=Math.max(0,target.life+(direction*effect.count));
+      logCommander(`${name} ${effect.action==="loseLife"?"loses":"gains"} ${effect.count} life. (Life → ${target.life})`);
+    }else if(target.id==="player"){
+      if(effect.action==="exile")target.exileCount+=effect.count;
+      logCommander(`${effect.action==="exile"?"Exile":"Resolve"} ${effect.count} ${effect.cardType} card${effect.count===1?"":"s"} you control.`);
+    }else{
+      const selections=chooseCpuPermanents(target,effect.cardType,effect.count).sort((left,right)=>{
+        const [leftKind,leftIndex]=left.split(":"),[rightKind,rightIndex]=right.split(":");
+        return leftKind===rightKind?parseInt(rightIndex)-parseInt(leftIndex):leftKind.localeCompare(rightKind);
+      });
+      const destination=effect.action==="exile"?"exile":"graveyard";
+      const moved=selections.map(key=>removeOpponentPermanent(target,key,destination)).filter(Boolean);
+      const verb={destroy:"destroys",sacrifice:"sacrifices",exile:"exiles"}[effect.action];
+      if(moved.length)logCommander(`${name} ${verb} ${moved.map(movementCardText).join(", ")}. Types: ${discardedTypeSummary(moved)}.`);
+      else logCommander(`${name} has no ${effect.cardType} to ${effect.action}.`);
+    }
+  });
+  commanderEffectDraft={scope:draft.scope,action:draft.action,count:draft.count,cardType:draft.cardType,targetId:null,choices:{},creaturesPlayed:draft.creaturesPlayed||0};
+  ensureCommanderEffectState(gameState);saveState();showCommanderGame();
+}
+function isPermanentPlayerAction(effect){return effect.action==="destroy"||effect.action==="sacrifice"||effect.action==="exile";}
+async function confirmAndResolvePlayerEffect(effect,draft){
+  const targets=effectTargets(gameState,effect,draft.targetId);
+  const affectsPlayer=effect.action==="reanimate"?false:targets.some(target=>target.id==="player");
+  const cpuTargets=targets.filter(target=>target.id!=="player");
+  const playerInstruction=affectsPlayer
+    ?`Complete your physical action now, then confirm it: ${playerEffectSummary(effect)}`
+    :`No physical action is required from you.`;
+  const cpuInstruction=effect.action==="reanimate"
+    ?"Selected creature cards will enter your battlefield under your control."
+    :cpuTargets.length
+    ?isPermanentPlayerAction(effect)
+      ?"Each affected CPU will automatically choose its least valuable eligible permanent."
+      :effect.action==="discard"
+        ?"Each affected CPU will automatically discard its least valuable card."
+        :"CPU state will resolve automatically."
+    :"";
+  const message=`<strong>${playerEffectSummary(effect)}</strong><br><br>${playerInstruction}${cpuInstruction?`<br><br>${cpuInstruction}`:""}`;
+  const confirmed=typeof askConfirm==="function"
+    ?await askConfirm("Confirm action resolution",message,affectsPlayer?"I completed my action":"Resolve action")
+    :window.confirm(`${playerEffectSummary(effect)}\n\n${playerInstruction}\n${cpuInstruction}`);
+  if(!confirmed)return false;
+  resolvePlayerEffect(effect,draft);
+  logCommander("Action confirmed and resolved.");
+  saveState();
+  return true;
 }
 
 /* =====================================================================
@@ -414,6 +808,14 @@ function renderSetupScreen(onStartAdventure, onStartCommander) {
         <p class="setup-col-desc">Scripted 1v1 encounters — you vs. a single CPU opponent.</p>
         <button class="setup-col-cta adventure-cta" id="showAdventuresBtn">Choose Adventure</button>
       </div>
+    </div>
+    <div class="theme-picker">
+      <label>Theme</label>
+      <div class="theme-btns" id="themeBtns">
+        <button type="button" class="theme-btn" data-theme="classic"><span class="theme-swatch theme-swatch-classic"></span>Classic</button>
+        <button type="button" class="theme-btn" data-theme="fantasy"><span class="theme-swatch theme-swatch-fantasy"></span>Dark Fantasy</button>
+        <button type="button" class="theme-btn" data-theme="poker"><span class="theme-swatch theme-swatch-poker"></span>Poker</button>
+      </div>
     </div>`;
   overlay.classList.add("show");
 
@@ -423,6 +825,7 @@ function renderSetupScreen(onStartAdventure, onStartCommander) {
   });
   document.getElementById('startCommanderBtn').onclick=()=>{overlay.classList.remove("show");onStartCommander(selectedCount);};
   document.getElementById('showAdventuresBtn').onclick=()=>renderAdventureSelectScreen(adventureModes,onStartAdventure);
+  wireThemePicker();
 }
 
 function renderAdventureSelectScreen(adventureModes, onStartAdventure){
@@ -449,6 +852,36 @@ function getTargetName(state,targetId){
   return o?o.name.split(',')[0]:"???";
 }
 
+function findGraveyardOwner(state,ownerId){
+  return ownerId==="player"?state.player:state.opponents.find(opp=>opp.id===ownerId)||null;
+}
+function escapeHtml(value){return String(value??"").replace(/[&<>"']/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[char]));}
+function showGraveyardViewer(state,ownerId){
+  const owner=findGraveyardOwner(state,ownerId);
+  const overlay=document.getElementById('overlay'),modal=document.getElementById('modal');
+  if(!owner||!overlay||!modal)return;
+  const cards=owner.graveyard||[];
+  const unmaterialized=unmaterializedGraveyardCount(owner);
+  const ownerName=owner.id==="player"?"Your":`${owner.name.split(",")[0]}'s`;
+  const cardsHtml=cards.length?cards.map(card=>`<li class="graveyard-card ${card.virtual?"virtual":""}">
+    <span class="graveyard-card-icon">${escapeHtml(card.ico||"🃏")}</span><div class="graveyard-card-info"><strong>${escapeHtml(card.name)}</strong><span>${escapeHtml(cardTypeText(card))}${card.p!=null&&card.t!=null?` · ${card.p}/${card.t}`:""}</span>${card.effect?`<small>${escapeHtml(card.effect)}</small>`:""}</div>
+  </li>`).join(""):"<li class=\"graveyard-empty\">No materialized cards yet.</li>";
+  const historicalNote=unmaterialized?`<p class="graveyard-untracked">${unmaterialized} earlier card${unmaterialized===1?" was":"s were"} counted but not materialized, so ${unmaterialized===1?"it":"their identities"} cannot be shown.</p>`:"";
+  modal.className="modal graveyard-modal";
+  modal.innerHTML=`<div class="graveyard-modal-head"><div><span class="big-ico">⚰</span><h2>${escapeHtml(ownerName)} Graveyard</h2></div><button type="button" class="graveyard-close" aria-label="Close graveyard">×</button></div><p class="graveyard-summary">${owner.graveyardCount||0} card${owner.graveyardCount===1?"":"s"} · ${cards.length} materialized</p><ul class="graveyard-card-list">${cardsHtml}</ul>${historicalNote}<button type="button" class="cta ghost" id="closeGraveyardViewer">Close</button>`;
+  overlay.classList.add("show");
+  const close=()=>{overlay.classList.remove("show");modal.innerHTML="";};
+  document.getElementById("closeGraveyardViewer").onclick=close;
+  modal.querySelector(".graveyard-close").onclick=close;
+}
+function wireGraveyardViewerControls(root,state){
+  root.querySelectorAll("[data-graveyard-owner]").forEach(control=>{
+    const open=event=>{event.preventDefault();event.stopPropagation();showGraveyardViewer(state,control.dataset.graveyardOwner);};
+    control.onclick=open;
+    control.onkeydown=event=>{if(event.key==="Enter"||event.key===" ")open(event);};
+  });
+}
+
 function renderLifeHud(state){
   let el=document.getElementById('commanderLifeHud');
   if(!el){el=document.createElement('div');el.id='commanderLifeHud';el.className='commander-life-hud';
@@ -456,23 +889,21 @@ function renderLifeHud(state){
     if(header&&header.nextSibling)header.parentNode.insertBefore(el,header.nextSibling);
     else document.querySelector('.wrap').prepend(el);
   }
-  const playerCd=Object.values(state.player.commanderDamageReceived||{}).reduce((s,v)=>s+v,0);
   let html=`<button type="button" class="life-pip player-pip life-pip-btn" data-view="-1">
     <span class="life-ico">🗡️</span><span class="life-name">You</span>
     <span class="life-val ${state.player.life<=10?'warn':''}">${state.player.life}</span>
-    ${playerCd>0?`<span class="life-cmdr-dmg">⚜${playerCd}</span>`:''}
-    <span class="life-creatures">🐾 ${state.player.creatures}</span>
   </button>`;
   html+='<span class="life-divider">|</span>';
   state.opponents.forEach(opp=>{
     const dead=isOpponentDead(opp);const cd=state.player.commanderDamageReceived[opp.id]||0;
     const active=state._activeOppIndex===opp.index&&state.phase==="cpu";
-    html+=`<button type="button" class="life-pip life-pip-btn ${dead?'dead':''} ${active?'active-opp':''}" data-view="${opp.index}" style="border-color:${opp.color}"><span class="life-ico">${opp.ico}</span><span class="life-name">${opp.name.split(',')[0]}</span><span class="life-val ${opp.life<=10?'warn':''}">${dead?'☠':opp.life}</span>${cd>0?`<span class="life-cmdr-dmg">⚜${cd}</span>`:''}</button>`;
+    html+=`<button type="button" class="life-pip life-pip-btn ${dead?'dead':''} ${active?'active-opp':''}" data-view="${opp.index}" style="border-color:${opp.color}"><span class="life-ico">${opp.ico}</span><span class="life-name">${opp.name.split(',')[0]}</span><span class="life-val ${opp.life<=10?'warn':''}">${dead?'☠':opp.life}</span><span class="life-creatures">🃏 ${opponentHandSize(opp)} · 📚 ${opponentDeckSize(opp)} · <span class="life-graveyard" role="button" tabindex="0" data-graveyard-owner="${opp.id}">⚰ ${opp.graveyardCount}</span></span>${cd>0?`<span class="life-cmdr-dmg">⚜${cd}</span>`:''}</button>`;
   });
   el.innerHTML=html;
   el.querySelectorAll('.life-pip-btn').forEach(btn=>{
     btn.onclick=()=>{state.viewMode="single";state.viewTarget=parseInt(btn.dataset.view);renderBoardView(state);};
   });
+  wireGraveyardViewerControls(el,state);
 }
 
 function renderBoardView(state){
@@ -528,8 +959,12 @@ function renderSingleView(state,board){
       <div class="cbs-item"><span class="cbs-label">Life</span><div class="cbs-adj"><button type="button" class="cbs-btn" data-opp-stat="life" data-opp-id="${opp.id}" data-d="-1">−</button><span class="cbs-val ${opp.life<=10?'warn':''}">${opp.life}</span><button type="button" class="cbs-btn" data-opp-stat="life" data-opp-id="${opp.id}" data-d="1">+</button></div></div>
       <div class="cbs-item cbs-cmdr-dmg"><span class="cbs-label">⚜ Cmdr dmg taken</span><div class="cbs-adj"><button type="button" class="cbs-btn" data-cmdr-from="${opp.id}" data-d="-1">−</button><span class="cbs-val ${cdFromOpp>=14?'warn':''}">${cdFromOpp}/21</span><button type="button" class="cbs-btn" data-cmdr-from="${opp.id}" data-d="1">+</button></div></div>
       <div class="cbs-item"><span class="cbs-label">Mana</span><span class="cbs-val">${manaAvailable(opp)}</span></div>
+      <div class="cbs-item"><span class="cbs-label">Hand</span><span class="cbs-val">🃏 ${opponentHandSize(opp)}/${MAX_CPU_HAND_SIZE}</span></div>
+      <div class="cbs-item"><span class="cbs-label">Deck</span><span class="cbs-val">📚 ${opponentDeckSize(opp)}</span></div>
       <div class="cbs-item"><span class="cbs-label">Commander</span><span class="cbs-val">${opp.commanderZone?'Zone (+'+opp.commanderTax+')':'Field'}</span></div>
       <div class="cbs-item"><span class="cbs-label">Artifact — Equipment</span><span class="cbs-val">${opp.gear}</span></div>
+      <div class="cbs-item"><span class="cbs-label">Graveyard</span><button type="button" class="cbs-zone-btn" data-graveyard-owner="${opp.id}">⚰ ${opp.graveyardCount}</button></div>
+      <div class="cbs-item"><span class="cbs-label">Exile</span><span class="cbs-val">🌀 ${opp.exileCount}</span></div>
     </div></div>
     <div class="field-col"><div class="field-h"><span class="lbl">${opp.name.split(',')[0]}'s creatures</span></div><div class="tokens">${tokensHtml}</div></div></div>`;
 
@@ -537,6 +972,7 @@ function renderSingleView(state,board){
   document.getElementById('prevOppBtn').onclick=()=>{state.viewTarget=viewIdx===0?-1:(viewIdx-1);renderBoardView(state);};
   document.getElementById('nextOppBtn').onclick=()=>{state.viewTarget=viewIdx>=state.opponents.length-1?-1:(viewIdx+1);renderBoardView(state);};
   document.getElementById('allViewBtn').onclick=()=>{state.viewMode="all";renderBoardView(state);};
+  wireGraveyardViewerControls(board,state);
 
   // Wire opponent life controls
   board.querySelectorAll('[data-opp-stat]').forEach(btn=>{
@@ -566,11 +1002,8 @@ function renderSingleView(state,board){
         const targetOpp=state.opponents.find(o=>o.id===btn.dataset.opp);
         const idx=parseInt(btn.dataset.rmIdx);
         if(!targetOpp||idx>=targetOpp.tokens.length)return;
-        const token=targetOpp.tokens[idx];
-        targetOpp.tokens.splice(idx,1);
-        if(token.kind==="commander")returnCommanderToZone(targetOpp);
-        if(token.kind==="voltron-support"&&token.effect?.includes("mana"))targetOpp.rampInPlay=Math.max(0,targetOpp.rampInPlay-1);
-        logCommander(`You remove ${token.name} (${targetOpp.name.split(',')[0]}).`);
+        const moved=removeOpponentPermanent(targetOpp,`token:${idx}`,"graveyard");
+        if(moved)logCommander(`You destroy ${movementCardText(moved)} from ${targetOpp.name.split(',')[0]}. Types: ${discardedTypeSummary([moved])}.`);
         renderBoardView(state);renderLifeHud(state);saveState();
       };
     });
@@ -589,6 +1022,9 @@ function renderPlayerBoardView(state,board,totalViews){
     }).join('');
   }
 
+  const playerCreatureCards=(p.tokens||[]).filter(token=>token.kind==="reanimated-creature");
+  const playerTokensHtml=playerCreatureCards.length?playerCreatureCards.map(token=>`<div class="card voltron-creature reanimated" title="Reanimated from ${token.owner}"><span class="c-name"><span>${token.name}</span><span class="mana">↩</span></span><span class="c-art">${token.ico}</span>${token.kws?.length?`<span class="c-kw">${token.kws.join(" · ")}</span>`:""}${token.effect?`<span class="c-effect">${token.effect}</span>`:""}<span class="c-pt">${token.p}/${token.t}</span>${token.summoningSick?'<div class="c-sick">💤</div>':''}</div>`).join(""):`<div class="empty-field">${p.creatures} creature${p.creatures!==1?'s':''} on your battlefield</div>`;
+
   board.innerHTML=`<div class="board-h"><span class="ico">🗡️</span><span>You</span>
     <span class="atk-note"></span>
     <div class="view-controls"><button class="btn-ghost view-btn" id="prevOppBtn">◂</button><span class="view-counter">1/${totalViews}</span><button class="btn-ghost view-btn" id="nextOppBtn">▸</button><button class="btn-ghost view-btn" id="allViewBtn">⊞</button></div>
@@ -597,12 +1033,15 @@ function renderPlayerBoardView(state,board,totalViews){
       <div class="cbs-item"><span class="cbs-label">Life</span><div class="cbs-adj"><button type="button" class="cbs-btn" data-player-stat="life" data-d="-1">−</button><span class="cbs-val ${p.life<=10?'warn':''}">${p.life}</span><button type="button" class="cbs-btn" data-player-stat="life" data-d="1">+</button></div></div>
       ${cmdrDmgHtml}
       <div class="cbs-item"><span class="cbs-label">Creatures</span><div class="cbs-adj"><button type="button" class="cbs-btn" data-player-stat="creatures" data-d="-1">−</button><span class="cbs-val">${p.creatures}</span><button type="button" class="cbs-btn" data-player-stat="creatures" data-d="1">+</button></div></div>
+      <div class="cbs-item"><span class="cbs-label">Graveyard</span><button type="button" class="cbs-zone-btn" data-graveyard-owner="player">⚰ ${p.graveyardCount}</button></div>
+      <div class="cbs-item"><span class="cbs-label">Exile</span><span class="cbs-val">🌀 ${p.exileCount}</span></div>
     </div></div>
-    <div class="field-col"><div class="field-h"><span class="lbl">Your board state</span></div><div class="tokens"><div class="empty-field">${p.creatures} creature${p.creatures!==1?'s':''} on your battlefield</div></div></div></div>`;
+    <div class="field-col"><div class="field-h"><span class="lbl">Your board state</span></div><div class="tokens">${playerTokensHtml}</div></div></div></div>`;
 
   document.getElementById('prevOppBtn').onclick=()=>{state.viewTarget=state.opponents.length-1;renderBoardView(state);};
   document.getElementById('nextOppBtn').onclick=()=>{state.viewTarget=0;renderBoardView(state);};
   document.getElementById('allViewBtn').onclick=()=>{state.viewMode="all";renderBoardView(state);};
+  wireGraveyardViewerControls(board,state);
 
   // Wire player stat controls
   board.querySelectorAll('[data-player-stat]').forEach(btn=>{
@@ -636,7 +1075,7 @@ function renderAllView(state,board){
     const dead=isOpponentDead(opp);const commander=commanderOnField(opp);
     html+=`<div class="all-opp-card ${dead?'dead':''}" data-idx="${i}" style="border-color:${opp.color}">
       <div class="all-opp-header"><span>${opp.ico}</span><span class="all-opp-name">${opp.name.split(',')[0]}</span><span class="all-opp-life">${dead?'☠':opp.life}</span></div>
-      <div class="all-opp-body"><span>${opp.tokens.length} creature${opp.tokens.length!==1?'s':''}</span>${commander?`<span>⚔ ${commander.p}/${commander.t}</span>`:'<span>Cmdr in zone</span>'}<span>${opp.landsInPlay+opp.rampInPlay} mana</span></div>
+      <div class="all-opp-body"><span>${opp.tokens.length} creature${opp.tokens.length!==1?'s':''}</span>${commander?`<span>⚔ ${commander.p}/${commander.t}</span>`:'<span>Cmdr in zone</span>'}<span>${opp.landsInPlay+opp.rampInPlay} mana</span><span>📚 ${opponentDeckSize(opp)}</span></div>
       ${opp.attackTarget?`<div class="all-opp-target">→ ${getTargetName(state,opp.attackTarget)}</div>`:''}
     </div>`;
   });
@@ -731,6 +1170,7 @@ function cleanupCommanderUI(){
 function saveState(){safeSet(SAVE_KEY,JSON.stringify({...gameState,_type:"commander"}));}
 
 function showCommanderGame(){
+  ensureCommanderEffectState(gameState);
   document.getElementById('modePill').textContent=`Commander Battle`;
   document.getElementById('turnNum').textContent=gameState.turn;
   document.getElementById('phasePill').textContent=gameState.phase==="cpu"?"Opponents' Turn":"Your Turn";
@@ -771,11 +1211,58 @@ function setConfirmButton(text,className,onclick,showEndTurn){
   document.getElementById('cmdConfirmBtn').onclick=onclick;
   if(showEndTurn){
     document.getElementById('cmdEndTurnBtn').onclick=()=>{
+      // Resolve current step inputs before ending
+      resolveCurrentStepInputs();
       const end=checkCommanderBattleEnd(gameState);
       if(end.over){endCommanderGame(end.won,end.reason);return;}
       gameState.turn++;collectInputsFn=null;saveState();runCpuPhase();
     };
   }
+}
+
+function resolveCurrentStepInputs(){
+  const panel=document.getElementById('respGrid');
+  if(!panel)return;
+  if(playerStep==="main1"){
+    const played=parseInt(panel.querySelector('input[data-key="creaturesPlayed"]')?.value)||0;
+    if(played>0){gameState.player.creatures+=played;logCommander(`You play ${played} creature(s).`);}
+  }else if(playerStep==="combat"){
+    // Resolve combat damage if any was entered
+    const alive=aliveOpponents(gameState);
+    const killMap=panel._killMap||{};
+    const playerDeaths=parseInt(panel.querySelector('input[data-key="playerDeaths"]')?.value)||0;
+    alive.forEach(opp=>{
+      const damage=parseInt(panel.querySelector(`input[data-opp="${opp.id}"][data-key="damage"]`)?.value)||0;
+      const cmdrDmg=parseInt(panel.querySelector(`input[data-opp="${opp.id}"][data-key="cmdrDmg"]`)?.value)||0;
+      if(damage>0){
+        opp.life=Math.max(0,opp.life-damage);
+        opp.damageLog["player"]=(opp.damageLog["player"]||0)+damage;
+        opp.lastAttacker="player";
+        logCommander(`You deal ${damage} to ${opp.name.split(',')[0]}. (Life → ${opp.life})`);
+      }
+      if(cmdrDmg>0){
+        const applied=Math.min(cmdrDmg,damage||cmdrDmg);
+        opp.commanderDamageReceived["player"]=(opp.commanderDamageReceived["player"]||0)+applied;
+        gameState.player.commanderDamageDealt[opp.id]=(gameState.player.commanderDamageDealt[opp.id]||0)+applied;
+        logCommander(`${applied} commander damage to ${opp.name.split(',')[0]} (${opp.commanderDamageReceived["player"]}/21).`);
+      }
+      const kills=killMap[opp.id];
+      if(kills&&kills.size>0){
+        Array.from(kills).sort((a,b)=>b-a).forEach(idx=>{
+          if(idx<opp.tokens.length){
+            const moved=removeOpponentPermanent(opp,`token:${idx}`,"graveyard");
+            if(moved)logCommander(`You destroy ${movementCardText(moved)} from ${opp.name.split(',')[0]}. Types: ${discardedTypeSummary([moved])}.`);
+          }
+        });
+      }
+      if(isOpponentDead(opp)&&!opp._eliminated){opp._eliminated=true;logCommander(`${opp.ico} ${opp.name.split(',')[0]} has been eliminated!`);}
+    });
+    if(playerDeaths>0){
+      gameState.player.creatures=Math.max(0,gameState.player.creatures-playerDeaths);
+      logCommander(`${playerDeaths} of your creature(s) died in combat.`);
+    }
+  }
+  showCommanderGame();
 }
 
 function ensureLastTurnSection(){
@@ -871,8 +1358,8 @@ function advanceCpuQueue(){
       if(cmdDmg>0)tgt.commanderDamageReceived[opp.id]=(tgt.commanderDamageReceived[opp.id]||0)+cmdDmg;
       if(result.attackPower>=5&&tgt.tokens.length>0&&Math.random()<0.4){
         const vi=Math.floor(Math.random()*tgt.tokens.length);
-        const dead=tgt.tokens[vi];tgt.tokens.splice(vi,1);
-        if(dead&&dead.kind==="commander")returnCommanderToZone(tgt);
+        const moved=removeOpponentPermanent(tgt,`token:${vi}`,"graveyard");
+        if(moved)logCommander(`${opp.name.split(',')[0]}'s attack destroys ${movementCardText(moved)} from ${tgt.name.split(',')[0]}. Types: ${discardedTypeSummary([moved])}.`);
       }
     }
   }
@@ -895,6 +1382,9 @@ function pickFlavor(type){const pool=CPU_FLAVOR[type]||CPU_FLAVOR.draw;return po
 
 function showOpponentTurnResponse(opp,result){
   showCommanderGame();
+  result.actions.filter(action=>(action.discarded&&action.discarded.length)||action.deckOut).forEach(action=>{
+    logCommander(`${opp.name.split(',')[0]} ${action.detail}`);
+  });
   gameState._activeOppIndex=opp.index;
   if(gameState.viewMode==="single")gameState.viewTarget=opp.index;
   renderBoardView(gameState);
@@ -1077,13 +1567,11 @@ function resolveResponseAndContinue(opp,result,attacksPlayer,panel){
           // Find the gear bonus from the action detail (look for +X pattern)
           const gearCard=VOLTRON_CARDS.gear.find(g=>action.label.includes(g.name));
           if(gearCard){
-            commander.baseP=Math.max(COMMANDER_BASE.p,commander.baseP-gearCard.bonus);
-            commander.baseT=Math.max(COMMANDER_BASE.t,commander.baseT-gearCard.bonus);
-            commander.p=commander.baseP;commander.t=commander.baseT;
-            opp.gear=Math.max(0,opp.gear-1);
-            if(gearCard.kw)commander.kws=commander.kws.filter(k=>k!==gearCard.kw);
-            commander.effect=opp.gear>0?`Commander — ${opp.gear} gear.`:"Commander";
-            logCommander(`${gearCard.name} is countered — ${commander.name} reverts to ${commander.p}/${commander.t}.`);
+            const gearIndex=(opp.attachedGear||[]).findIndex(gear=>gear.name===gearCard.name);
+            const [removedGear]=gearIndex>=0?opp.attachedGear.splice(gearIndex,1):[];
+            refreshCommanderGear(opp);
+            const moved=removedGear&&recordOpponentPermanentZone(opp,"graveyard",{name:removedGear.name,ico:"⚙",types:["Artifact","Equipment"],effect:removedGear.kw||""});
+            logCommander(moved?`${gearCard.name} is countered: ${movementCardText(moved)}. Types: ${discardedTypeSummary([moved])}. ${commander.name} reverts to ${commander.p}/${commander.t}.`:`${gearCard.name} is countered — ${commander.name} reverts to ${commander.p}/${commander.t}.`);
           }
         }
       }
@@ -1093,10 +1581,8 @@ function resolveResponseAndContinue(opp,result,attacksPlayer,panel){
         const castName=action.label.replace(/^Cast /,'').replace(/ \(.*$/,'');
         const tokenIdx=opp.tokens.findIndex(t=>t.name===castName&&t.summoningSick);
         if(tokenIdx>=0){
-          const token=opp.tokens[tokenIdx];
-          opp.tokens.splice(tokenIdx,1);
-          if(token.kind==="voltron-support"&&token.effect?.includes("mana"))opp.rampInPlay=Math.max(0,opp.rampInPlay-1);
-          logCommander(`${castName} is countered and removed.`);
+          const moved=removeOpponentPermanent(opp,`token:${tokenIdx}`,"graveyard");
+          if(moved)logCommander(`${castName} is countered: ${movementCardText(moved)}. Types: ${discardedTypeSummary([moved])}.`);
         }
       }
     });
@@ -1111,11 +1597,8 @@ function resolveResponseAndContinue(opp,result,attacksPlayer,panel){
     const indices=Array.from(kills).sort((a,b)=>b-a);
     indices.forEach(idx=>{
       if(idx<targetOpp.tokens.length){
-        const token=targetOpp.tokens[idx];
-        targetOpp.tokens.splice(idx,1);
-        if(token.kind==="commander")returnCommanderToZone(targetOpp);
-        if(token.kind==="voltron-support"&&token.effect?.includes("mana"))targetOpp.rampInPlay=Math.max(0,targetOpp.rampInPlay-1);
-        logCommander(`You killed ${token.name} (${targetOpp.name.split(',')[0]}).`);
+        const moved=removeOpponentPermanent(targetOpp,`token:${idx}`,"graveyard");
+        if(moved)logCommander(`You destroy ${movementCardText(moved)} from ${targetOpp.name.split(',')[0]}. Types: ${discardedTypeSummary([moved])}.`);
       }
     });
   }
@@ -1207,31 +1690,96 @@ function showDrawStep(){
   setConfirmButton("I Drew a Card ▸","",()=>{playerStep="main1";showPlayerStep();},true);
 }
 
+function commanderEffectDraftForPanel(panel){
+  const played=parseInt(panel?.querySelector('input[data-key="creaturesPlayed"]')?.value)||0;
+  if(!commanderEffectDraft){
+    commanderEffectDraft={scope:"target",action:"discard",count:1,cardType:"creature",targetId:null,choices:{},creaturesPlayed:played};
+  }
+  commanderEffectDraft.creaturesPlayed=played||commanderEffectDraft.creaturesPlayed||0;
+  return commanderEffectDraft;
+}
+function playerEffectSummary(effect){
+  const scope={each:"Each player",eachOpponent:"Each opponent",target:"Target player"}[effect.scope];
+  if(effect.action==="reanimate")return `Reanimate ${effect.count} creature${effect.count===1?"":"s"} from ${scope.toLowerCase()}'s graveyard under your control.`;
+  const action={discard:"discards",mill:"mills",draw:"draws",loseLife:"loses",gainLife:"gains",destroy:"destroys",sacrifice:"sacrifices",exile:"exiles"}[effect.action];
+  const subject=(effect.action==="destroy"||effect.action==="sacrifice"||effect.action==="exile")?`${effect.count} ${effect.cardType}${effect.count===1?"":"s"}`:effect.action.includes("Life")?`${effect.count} life`:`${effect.count} card${effect.count===1?"":"s"}`;
+  return `${scope} ${action} ${subject}.`;
+}
+function renderCommanderMainPhasePanel(){
+  const panel=document.getElementById('respGrid');if(!panel)return;
+  const draft=commanderEffectDraftForPanel(panel),effect=createPlayerEffect(draft);
+  const scopeOptions=PLAYER_ACTION_SCOPES.map(scope=>`<option value="${scope.value}" ${scope.value===draft.scope?"selected":""}>${scope.label}</option>`).join("");
+  const actionOptions=PLAYER_ACTIONS.map(action=>`<option value="${action.value}" ${action.value===draft.action?"selected":""}>${action.label}</option>`).join("");
+  const countOptions=[1,2,3,4,5].map(count=>`<option value="${count}" ${count===effect.count?"selected":""}>${count}</option>`).join("");
+  const needsCardType=effect.action==="destroy"||effect.action==="sacrifice"||effect.action==="exile";
+  const cardTypeOptions=PLAYER_ACTION_CARD_TYPES.map(type=>`<option value="${type}" ${type===draft.cardType?"selected":""}>${type[0].toUpperCase()+type.slice(1)}</option>`).join("");
+  let actionHtml=`<div class="context-section player-effect-section"><div class="context-section-title">Create player action</div>
+    <div class="player-action-grid">
+      <label>Scope<select id="playerActionScope">${scopeOptions}</select></label>
+      <label>Action<select id="playerActionType">${actionOptions}</select></label>
+      <label>Amount<select id="playerActionCount">${countOptions}</select></label>
+      ${needsCardType?`<label>Card type<select id="playerActionCardType">${cardTypeOptions}</select></label>`:""}
+    </div>
+    <span class="player-effect-help">Uses the existing CPU hand, library, battlefield, and permanent-removal simulation.</span>
+    <div class="player-effect-preview"><strong>${playerEffectSummary(effect)}</strong></div>`;
+  if(effect.scope==="target"){
+    actionHtml+=`<div class="target-buttons player-effect-targets">${[gameState.player,...aliveOpponents(gameState)].map(target=>`<button type="button" class="target-btn ${draft.targetId===target.id?"active":""}" data-action-target-id="${target.id}">${target.id==="player"?"🗡️":target.ico} ${effectTargetName(target)}</button>`).join("")}</div>`;
+  }
+  const targets=effectTargets(gameState,effect,draft.targetId);
+  if(effect.action==="reanimate"&&targets.length>0){
+    actionHtml+='<div class="player-effect-choices"><span>Select creature cards from the chosen graveyard.</span>';
+    targets.forEach(owner=>{
+      const cards=graveyardCreatureCards(owner);
+      actionHtml+=`<div class="player-effect-owner"><span>${owner.id==="player"?"🗡️":owner.ico} ${effectTargetName(owner)}'s graveyard</span>${cards.length?`<div class="kill-select">${cards.map(card=>`<button type="button" class="kill-btn ${(draft.choices[owner.id]||[]).includes(card.id)?"selected":""}" data-reanimate-owner="${owner.id}" data-reanimate-card="${card.id}">${card.ico||"🐾"} ${card.name} (${card.p||1}/${card.t||1})</button>`).join("")}</div>`:"<small>No materialized creature cards.</small>"}</div>`;
+    });
+    actionHtml+="</div>";
+  }
+  if(needsCardType&&targets.length>0){
+    const cpuTargets=targets.filter(target=>target.id!=="player");
+    actionHtml+='<div class="player-effect-choices">';
+    if(cpuTargets.length)actionHtml+=`<span>Each affected CPU chooses its least valuable ${effect.cardType} automatically.</span>`;
+    if(targets.some(target=>target.id==="player"))actionHtml+=`<div class="player-effect-manual">🗡️ Complete your own ${effect.cardType} selection at the table, then confirm resolution.</div>`;
+    actionHtml+="</div>";
+  }
+  const ready=canResolvePlayerEffect(effect,draft);
+  actionHtml+=`<button type="button" class="target-btn player-effect-resolve" id="resolvePlayerAction" ${ready?"":"disabled"}>Resolve action</button></div>`;
+  panel.innerHTML=`<div class="context-form commander-form"><div class="context-section"><div class="commander-player-actions"><div class="inline-stepper"><label>Creatures I played</label><button type="button" data-key="creaturesPlayed" data-delta="-1">−</button><input type="number" min="0" value="${draft.creaturesPlayed}" data-key="creaturesPlayed"><button type="button" data-key="creaturesPlayed" data-delta="1">+</button></div></div></div>${actionHtml}</div>`;
+  wireSteppers(panel);
+  const updateAction=(field,value,resetTarget=false)=>{
+    draft.creaturesPlayed=parseInt(panel.querySelector('input[data-key="creaturesPlayed"]')?.value)||0;
+    draft[field]=value;draft.choices={};if(resetTarget)draft.targetId=null;renderCommanderMainPhasePanel();
+  };
+  panel.querySelector('#playerActionScope').onchange=event=>updateAction("scope",event.target.value,true);
+  panel.querySelector('#playerActionType').onchange=event=>updateAction("action",event.target.value);
+  panel.querySelector('#playerActionCount').onchange=event=>updateAction("count",parseInt(event.target.value));
+  const cardType=panel.querySelector('#playerActionCardType');
+  if(cardType)cardType.onchange=event=>updateAction("cardType",event.target.value);
+  panel.querySelectorAll('[data-action-target-id]').forEach(button=>{button.onclick=()=>{draft.targetId=button.dataset.actionTargetId;draft.choices={};renderCommanderMainPhasePanel();};});
+  panel.querySelectorAll('[data-reanimate-owner]').forEach(button=>{button.onclick=()=>{
+    const owner=button.dataset.reanimateOwner,cardId=button.dataset.reanimateCard;
+    const selected=draft.choices[owner]||[];
+    draft.choices[owner]=selected.includes(cardId)?selected.filter(id=>id!==cardId):[...selected,cardId];
+    renderCommanderMainPhasePanel();
+  };});
+  panel.querySelector('#resolvePlayerAction').onclick=async()=>{
+    if(!canResolvePlayerEffect(effect,draft))return;
+    const resolved=await confirmAndResolvePlayerEffect(effect,draft);
+    if(resolved)renderCommanderMainPhasePanel();
+  };
+}
+
 /* --- MAIN PHASE 1 (Develop) --- */
 function showMainStep(){
   document.getElementById('huntTitle').textContent="Your Turn · Main Phase";
   document.getElementById('declareTitle').textContent="Main Phase";
-  document.getElementById('declareFlavor').textContent="Play lands, cast creatures and spells.";
+  document.getElementById('declareFlavor').textContent="Play lands, cast creatures, and resolve player-targeting effects.";
   document.getElementById('declareMech').innerHTML='';
   document.getElementById('respTitle').textContent="Develop Your Board";
-
-  const panel=document.getElementById('respGrid');
-  panel.innerHTML=`<div class="context-form commander-form">
-    <div class="context-section">
-      <div class="commander-player-actions">
-        <div class="inline-stepper"><label>Creatures I played</label>
-          <button type="button" data-key="creaturesPlayed" data-delta="-1">−</button>
-          <input type="number" min="0" value="0" data-key="creaturesPlayed">
-          <button type="button" data-key="creaturesPlayed" data-delta="1">+</button>
-        </div>
-      </div>
-    </div>
-  </div>`;
-
-  wireSteppers(panel);
-
+  commanderEffectDraft=null;
+  renderCommanderMainPhasePanel();
   setConfirmButton("Go to Combat ▸","",()=>{
     cmdSnapshot();
+    const panel=document.getElementById('respGrid');
     const played=parseInt(panel.querySelector('input[data-key="creaturesPlayed"]')?.value)||0;
     if(played>0){gameState.player.creatures+=played;logCommander(`You play ${played} creature(s).`);}
     showCommanderGame();
@@ -1346,11 +1894,8 @@ function resolveFullCombat(panel,alive){
       const indices=Array.from(kills).sort((a,b)=>b-a);
       indices.forEach(idx=>{
         if(idx<opp.tokens.length){
-          const token=opp.tokens[idx];
-          opp.tokens.splice(idx,1);
-          if(token.kind==="commander")returnCommanderToZone(opp);
-          if(token.kind==="voltron-support"&&token.effect?.includes("mana"))opp.rampInPlay=Math.max(0,opp.rampInPlay-1);
-          logCommander(`You killed ${token.name} (${opp.name.split(',')[0]}).`);
+          const moved=removeOpponentPermanent(opp,`token:${idx}`,"graveyard");
+          if(moved)logCommander(`You destroy ${movementCardText(moved)} from ${opp.name.split(',')[0]}. Types: ${discardedTypeSummary([moved])}.`);
         }
       });
     }
@@ -1375,20 +1920,23 @@ function resolveFullCombat(panel,alive){
   playerStep="end";showPlayerStep();
 }
 
-/* --- END STEP --- */
+/* --- POST-COMBAT MAIN PHASE / END STEP --- */
 function finishPlayerTurn(){
-  document.getElementById('huntTitle').textContent="Your Turn · End Step";
-  document.getElementById('declareTitle').textContent="End Step";
-  document.getElementById('declareFlavor').textContent="Discard to hand size. End-of-turn triggers resolve.";
+  document.getElementById('huntTitle').textContent="Your Turn · Main Phase 2";
+  document.getElementById('declareTitle').textContent="Post-combat Main Phase";
+  document.getElementById('declareFlavor').textContent="Cast spells, resolve player actions, then complete your end step.";
   document.getElementById('declareMech').innerHTML='';
-  document.getElementById('respTitle').textContent="End Step";
+  document.getElementById('respTitle').textContent="Post-combat Actions";
 
-  const panel=document.getElementById('respGrid');
-  panel.innerHTML=`<div class="context-form commander-form">
-    <div class="context-summary"><span class="context-summary-icon">✓</span><div><strong>Pass turn to opponents</strong><span>Your turn is complete.</span></div></div>
-  </div>`;
+  // This phase has its own action draft, separate from actions and creatures tracked before combat.
+  commanderEffectDraft=null;
+  renderCommanderMainPhasePanel();
 
   setConfirmButton("End Turn ▸","",()=>{
+    cmdSnapshot();
+    const panel=document.getElementById('respGrid');
+    const played=parseInt(panel.querySelector('input[data-key="creaturesPlayed"]')?.value)||0;
+    if(played>0){gameState.player.creatures+=played;logCommander(`You play ${played} creature(s) after combat.`);}
     const end=checkCommanderBattleEnd(gameState);
     if(end.over){endCommanderGame(end.won,end.reason);return;}
     gameState.turn++;collectInputsFn=null;saveState();runCpuPhase();
