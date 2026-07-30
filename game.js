@@ -280,6 +280,8 @@ function freshState(mode){
     difficulty:cfg.id, enraged:false, player:{life:cfg.life,creatures:0}, tokens:[], pendingDecl:null,
     attackPower:0, slayTarget:null, declFlavor:"", actionSteps:[], log:[], turnPowerBonus:0,
     spellLock:"", lastPlayerDamage:0, conclaveAscension:0, conclaveRoster:shuffled(CONCLAVE_UNITS.map(c=>c.id)), lastConclaveId:null,
+    enemyGraveyard:[], enemyGraveyardCount:0,
+    enemyExile:[], enemyExileCount:0,
     commanderDamage:0, commanderDamageToEnemy:0, commanderTax:0, commanderZone:cfg.id==="voltron", voltronMana:0, voltronGear:0,
     voltronDeck:null, voltronHand:{lands:0,ramp:0,explosive:0,other:0}, voltronBottom:{lands:0,ramp:0,explosive:0,other:0}, voltronLandsInPlay:0, voltronRampInPlay:0, voltronExplosiveInPlay:0, voltronMulligans:0,
     voltronOtherDeck:null, voltronTypedHand:[], voltronProtectionHeld:0,
@@ -310,6 +312,10 @@ function normalizeState(state){
   state.voltronTypedHand=state.voltronTypedHand||[];
   state.voltronProtectionHeld=state.voltronProtectionHeld||0;
   state.pendingTurnInput=state.pendingTurnInput||null;
+  state.enemyGraveyard=state.enemyGraveyard||[];
+  state.enemyGraveyardCount=state.enemyGraveyardCount||0;
+  state.enemyExile=state.enemyExile||[];
+  state.enemyExileCount=state.enemyExileCount||0;
   if(state.mode==="voltron"&&state.commanderZone==null)state.commanderZone=!state.tokens.some(token=>token.kind==="commander");
   state.tokens.forEach(t=>{ if(t.baseP==null)t.baseP=t.p; if(t.baseT==null)t.baseT=t.t; });
   // Phase tracking defaults (for saves before this system existed)
@@ -335,12 +341,12 @@ function safeSet(k,v){ try{ localStorage.setItem(k,v); }catch(e){ memStore[k]=v;
 function safeRemove(k){ try{ localStorage.removeItem(k); }catch(e){ delete memStore[k]; } }
 function serializeTurnInput(){
   if(!turnInput)return null;
-  return {...turnInput,enemyDeaths:Array.from(turnInput.enemyDeaths||[])};
+  return {...turnInput,enemyDeaths:Array.from(turnInput.enemyDeaths||[]),blockedCreatures:Array.from(turnInput.blockedCreatures||[])};
 }
 function restoreTurnInput(savedInput){
   if(!savedInput||savedInput.key!==currentTurnInputKey())return null;
-  const {enemyDeaths,...rest}=savedInput;
-  return {...rest,enemyDeaths:new Set(Array.isArray(enemyDeaths)?enemyDeaths:[])};
+  const {enemyDeaths,blockedCreatures,...rest}=savedInput;
+  return {...rest,enemyDeaths:new Set(Array.isArray(enemyDeaths)?enemyDeaths:[]),blockedCreatures:new Set(Array.isArray(blockedCreatures)?blockedCreatures:[])};
 }
 function save(){ safeSet(SAVE_KEY, JSON.stringify({...S,pendingTurnInput:serializeTurnInput()})); flashSave(); }
 function load(){
@@ -576,6 +582,36 @@ function removeEnemyBattlefieldToken(index){
   if(S.mode==="voltron"&&token.kind==="voltron-support")S.voltronRampInPlay=Math.max(0,(S.voltronRampInPlay||0)-1);
   return {token, commanderReturn:S.mode==="voltron"&&token.kind==="commander"?returnVoltronCommanderToZone(token):""};
 }
+/** Send a removed enemy token to the graveyard (unless it's a commander returning to zone) */
+function sendToEnemyGraveyard(token){
+  if(!token||token.kind==="commander")return; // commanders go to command zone, not graveyard
+  S.enemyGraveyard=S.enemyGraveyard||[];
+  S.enemyGraveyardCount=(S.enemyGraveyardCount||0)+1;
+  S.enemyGraveyard.push({
+    id:`gy:${S.enemyGraveyardCount}`,
+    name:token.name, ico:token.ico||"🐾",
+    type:token.type||"Creature",
+    p:token.baseP||token.p, t:token.baseT||token.t,
+    kws:token.kws?[...token.kws]:[],
+    kind:token.kind, effect:token.effect||"",
+    turn:S.turn
+  });
+}
+/** Send a removed enemy token to exile */
+function sendToEnemyExile(token){
+  if(!token||token.kind==="commander")return;
+  S.enemyExile=S.enemyExile||[];
+  S.enemyExileCount=(S.enemyExileCount||0)+1;
+  S.enemyExile.push({
+    id:`ex:${S.enemyExileCount}`,
+    name:token.name, ico:token.ico||"🐾",
+    type:token.type||"Creature",
+    p:token.baseP||token.p, t:token.baseT||token.t,
+    kws:token.kws?[...token.kws]:[],
+    kind:token.kind, effect:token.effect||"",
+    turn:S.turn
+  });
+}
 function addHordeUnit(){
   const eligible=HORDE_UNITS.filter(u=>(u.minTurn||1)<=S.turn);
   const u=eligible[Math.floor(Math.random()*eligible.length)];
@@ -801,6 +837,74 @@ function askConfirm(title, msg, okLabel){
     document.getElementById('inputOverlay').classList.add('show');
   });
 }
+/**
+ * Combat interaction popup — when a player clicks an attacking creature,
+ * ask whether they just blocked it (stopped damage) or killed it (dies → graveyard).
+ * Returns "blocked" | "dies" | null (cancelled).
+ */
+function askCombatChoice(token){
+  const p=tokenPower(token),t=tokenToughness(token);
+  const kws=tokenKeywords(token);
+  return new Promise(res=>{
+    inputResolver=res;
+    document.getElementById('inputTitle').textContent=`${token.name} (${p}/${t})`;
+    const body=document.getElementById('inputBody');
+    body.innerHTML=`<div class="combat-choice-body">
+      <div class="combat-choice-card">${token.ico} <b>${token.name}</b>${kws.length?' · '+kws.join(', '):''}</div>
+      <div class="combat-choice-btns">
+        <button type="button" class="combat-choice-btn choice-blocked" id="choiceBlocked">
+          <span class="choice-ico">🛡️</span>
+          <span class="choice-label">Blocked</span>
+          <span class="choice-desc">Stop ${p} damage · creature survives</span>
+        </button>
+        <button type="button" class="combat-choice-btn choice-dies" id="choiceDies">
+          <span class="choice-ico">💀</span>
+          <span class="choice-label">Dies</span>
+          <span class="choice-desc">Creature is destroyed → graveyard</span>
+        </button>
+      </div>
+    </div>`;
+    const acts=document.getElementById('inputActions'); acts.className="input-actions hide-ok";
+    document.getElementById('inputCancel').onclick=()=>{ closeInput(); res(null); };
+    document.getElementById('choiceBlocked').onclick=()=>{ closeInput(); res("blocked"); };
+    document.getElementById('choiceDies').onclick=()=>{ closeInput(); res("dies"); };
+    document.getElementById('inputOverlay').classList.add('show');
+  });
+}
+/**
+ * Removal destination popup — when removing a card from the battlefield,
+ * ask whether it goes to the graveyard or exile.
+ * Returns "graveyard" | "exile" | null (cancelled).
+ */
+function askRemovalDestination(token){
+  const p=tokenPower(token),t=tokenToughness(token);
+  const kws=tokenKeywords(token);
+  return new Promise(res=>{
+    inputResolver=res;
+    document.getElementById('inputTitle').textContent=`Remove ${token.name}`;
+    const body=document.getElementById('inputBody');
+    body.innerHTML=`<div class="combat-choice-body">
+      <div class="combat-choice-card">${token.ico} <b>${token.name}</b> (${p}/${t})${kws.length?' · '+kws.join(', '):''}</div>
+      <div class="combat-choice-btns">
+        <button type="button" class="combat-choice-btn choice-graveyard" id="choiceGraveyard">
+          <span class="choice-ico">☠</span>
+          <span class="choice-label">Graveyard</span>
+          <span class="choice-desc">Destroyed, sacrificed, or died</span>
+        </button>
+        <button type="button" class="combat-choice-btn choice-exile" id="choiceExile">
+          <span class="choice-ico">✦</span>
+          <span class="choice-label">Exile</span>
+          <span class="choice-desc">Removed from the game entirely</span>
+        </button>
+      </div>
+    </div>`;
+    const acts=document.getElementById('inputActions'); acts.className="input-actions hide-ok";
+    document.getElementById('inputCancel').onclick=()=>{ closeInput(); res(null); };
+    document.getElementById('choiceGraveyard').onclick=()=>{ closeInput(); res("graveyard"); };
+    document.getElementById('choiceExile').onclick=()=>{ closeInput(); res("exile"); };
+    document.getElementById('inputOverlay').classList.add('show');
+  });
+}
 
 /* ---------- contextual detail pop-up ---------- */
 let infoReturnFocus=null;
@@ -853,6 +957,40 @@ function showTokenDetails(index){
     ${keywords.length?`<div class="token-detail-tags">${keywords.map(keyword=>`<span>${keyword}</span>`).join("")}</div>`:""}
     ${token.summoningSick?'<div class="token-detail-note">Summoning sick · cannot attack this turn</div>':""}
   </div>`);
+}
+function showEnemyGraveyard(){
+  const gy=S.enemyGraveyard||[];
+  const count=S.enemyGraveyardCount||0;
+  let html='<div class="enemy-graveyard-viewer">';
+  html+=`<p class="graveyard-summary">${count} card${count===1?"":"s"} in ${enemyName()}'s graveyard.</p>`;
+  if(gy.length===0){
+    html+=`<div class="graveyard-empty">The graveyard is empty.</div>`;
+  }else{
+    html+=`<ul class="graveyard-card-list">`;
+    gy.slice().reverse().forEach(card=>{
+      html+=`<li class="graveyard-card"><span class="graveyard-card-icon">${card.ico||"🐾"}</span><div class="graveyard-card-info"><strong>${card.name}</strong><span>${card.type||"Creature"} · ${card.p||0}/${card.t||0}${card.kws&&card.kws.length?" · "+card.kws.join(", "):""}</span><small>Died turn ${card.turn||"?"}</small></div></li>`;
+    });
+    html+=`</ul>`;
+  }
+  html+='</div>';
+  openInfoModal(`☠ ${enemyName()}'s Graveyard`,html);
+}
+function showEnemyExile(){
+  const ex=S.enemyExile||[];
+  const count=S.enemyExileCount||0;
+  let html='<div class="enemy-graveyard-viewer">';
+  html+=`<p class="graveyard-summary">${count} card${count===1?"":"s"} in ${enemyName()}'s exile.</p>`;
+  if(ex.length===0){
+    html+=`<div class="graveyard-empty">Exile is empty.</div>`;
+  }else{
+    html+=`<ul class="graveyard-card-list">`;
+    ex.slice().reverse().forEach(card=>{
+      html+=`<li class="graveyard-card exile-card"><span class="graveyard-card-icon">${card.ico||"🐾"}</span><div class="graveyard-card-info"><strong>${card.name}</strong><span>${card.type||"Creature"} · ${card.p||0}/${card.t||0}${card.kws&&card.kws.length?" · "+card.kws.join(", "):""}</span><small>Exiled turn ${card.turn||"?"}</small></div></li>`;
+    });
+    html+=`</ul>`;
+  }
+  html+='</div>';
+  openInfoModal(`✦ ${enemyName()}'s Exile`,html);
 }
 
 /* =====================================================================
@@ -1348,6 +1486,7 @@ function ensureTurnInput(){
     damageToEnemy:0,
     commanderDamageToEnemy:0,
     enemyDeaths:new Set(),
+    blockedCreatures:new Set(),
     allowEnemyDeaths:S.tokens.length>0&&(isEnemy||timing.canCastInstant),
     slayOutcome:isEnemy&&S.pendingDecl==="slay"?"dies":null,
     slayToughness:1,
@@ -1370,21 +1509,31 @@ function selectedEnemyDeathIndices(){
 }
 function projectedEnemyAttackPower(input=ensureTurnInput()){
   const selected=new Set(selectedEnemyDeathIndices());
-  if(selected.size===0)return totalPower();
+  const blocked=input?.blockedCreatures||new Set();
+  if(selected.size===0&&blocked.size===0)return totalPower();
   const originalTokens=S.tokens;
   S.tokens=originalTokens.filter((_,index)=>!selected.has(index));
-  const projected=totalPower();
+  let projected=totalPower();
+  // Subtract power of blocked creatures (they still exist, damage just prevented)
+  blocked.forEach(index=>{
+    if(!selected.has(index)&&index<originalTokens.length){
+      const t=originalTokens[index];
+      if(t&&t.attacking)projected-=tokenPower(t);
+    }
+  });
   S.tokens=originalTokens;
-  return projected;
+  return Math.max(0,projected);
 }
 function projectedEnemyAttackerCount(input=ensureTurnInput()){
   const selected=new Set(selectedEnemyDeathIndices());
-  return S.tokens.filter((token,index)=>token.attacking&&!selected.has(index)).length;
+  const blocked=input?.blockedCreatures||new Set();
+  return S.tokens.filter((token,index)=>token.attacking&&!selected.has(index)&&!blocked.has(index)).length;
 }
 function projectedCommanderDamagePower(input=ensureTurnInput()){
   if(S.mode!=="voltron")return 0;
   const selected=new Set(selectedEnemyDeathIndices());
-  const commander=S.tokens.find((token,index)=>token.kind==="commander"&&token.attacking&&!selected.has(index));
+  const blocked=input?.blockedCreatures||new Set();
+  const commander=S.tokens.find((token,index)=>token.kind==="commander"&&token.attacking&&!selected.has(index)&&!blocked.has(index));
   return commander?tokenPower(commander):0;
 }
 function syncIncomingDamageToAttack(){
@@ -1408,6 +1557,43 @@ function toggleEnemyCasualty(index){
   syncIncomingDamageToAttack();
   renderContextualInputs();
 }
+/**
+ * When clicking an attacking creature during enemy combat, present a choice:
+ * block it (stop damage, creature lives) or kill it (goes to graveyard).
+ * For non-attacking creatures or non-combat situations, fall back to toggle.
+ */
+async function handleCombatCreatureClick(index){
+  if(!canSelectEnemyCasualties())return;
+  const token=S.tokens[index];
+  if(!token)return;
+
+  // If already marked, clicking again resets it
+  if(turnInput.enemyDeaths.has(index)||turnInput.blockedCreatures.has(index)){
+    turnInput.enemyDeaths.delete(index);
+    turnInput.blockedCreatures.delete(index);
+    syncIncomingDamageToAttack();
+    renderContextualInputs();
+    return;
+  }
+
+  // Non-attacking creatures can only die (pre-combat removal), no block option
+  if(!token.attacking){
+    toggleEnemyCasualty(index);
+    return;
+  }
+
+  // Show the combat choice popup
+  const choice=await askCombatChoice(token);
+  if(!choice)return; // cancelled
+
+  if(choice==="blocked"){
+    turnInput.blockedCreatures.add(index);
+  }else{
+    turnInput.enemyDeaths.add(index);
+  }
+  syncIncomingDamageToAttack();
+  renderContextualInputs();
+}
 function applyEnemyCasualties(context){
   const indices=selectedEnemyDeathIndices().sort((a,b)=>b-a);
   if(indices.length===0)return;
@@ -1416,16 +1602,23 @@ function applyEnemyCasualties(context){
     const outcome=removeEnemyBattlefieldToken(index);
     if(!outcome)return;
     if(outcome.commanderReturn)returned.push(outcome.commanderReturn);
-    else destroyed.push(outcome.token.name);
+    else{ destroyed.push(outcome.token.name); sendToEnemyGraveyard(outcome.token); }
   });
   if(destroyed.length)logP(`You destroy ${destroyed.join(", ")}${context?` ${context}`:""}.`);
   returned.forEach(message=>logP(message));
 }
 function reindexSelectedCasualties(removedIndex){
-  if(!turnInput?.enemyDeaths)return;
-  turnInput.enemyDeaths=new Set(Array.from(turnInput.enemyDeaths)
-    .filter(index=>index!==removedIndex)
-    .map(index=>index>removedIndex?index-1:index));
+  if(!turnInput)return;
+  if(turnInput.enemyDeaths){
+    turnInput.enemyDeaths=new Set(Array.from(turnInput.enemyDeaths)
+      .filter(index=>index!==removedIndex)
+      .map(index=>index>removedIndex?index-1:index));
+  }
+  if(turnInput.blockedCreatures){
+    turnInput.blockedCreatures=new Set(Array.from(turnInput.blockedCreatures)
+      .filter(index=>index!==removedIndex)
+      .map(index=>index>removedIndex?index-1:index));
+  }
 }
 
 /* =====================================================================
@@ -1558,10 +1751,19 @@ function numberFieldHtml(key,label,help,max){
   </div>`;
 }
 function casualtyFieldHtml(label,help){
-  const count=selectedEnemyDeathIndices().length;
-  return `<div class="casualty-field${count?" has-selection":""}">
+  const deathCount=selectedEnemyDeathIndices().length;
+  const blockedCount=turnInput?.blockedCreatures?turnInput.blockedCreatures.size:0;
+  const totalCount=deathCount+blockedCount;
+  let countText="None";
+  if(totalCount){
+    const parts=[];
+    if(deathCount)parts.push(`${deathCount} dying`);
+    if(blockedCount)parts.push(`${blockedCount} blocked`);
+    countText=parts.join(", ");
+  }
+  return `<div class="casualty-field${totalCount?" has-selection":""}">
     <div><strong>${label}</strong><span>${help}</span></div>
-    <span class="casualty-count">${count?`${count} selected`:"None selected"}</span>
+    <span class="casualty-count">${countText}</span>
   </div>`;
 }
 function outcomeChoiceHtml(key,options){
@@ -1601,8 +1803,16 @@ function renderEnemyTurnInputs(){
 
   if(input.allowEnemyDeaths){
     const selectedCount=selectedEnemyDeathIndices().length;
-    const removalHtml=casualtyFieldHtml("Enemy creatures removed","Select cards above before combat.")+`<div class="resolution-note">${selectedCount?`${selectedCount} removed · attack now ${remainingPower}`:"No removals selected"}</div>`;
-    html+=orderedEnemyStep(step++,"Remove creatures before combat",removalHtml,"precombat-removal");
+    const blockedCount=input.blockedCreatures?input.blockedCreatures.size:0;
+    let noteText="";
+    if(selectedCount||blockedCount){
+      const parts=[];
+      if(selectedCount)parts.push(`${selectedCount} dying`);
+      if(blockedCount)parts.push(`${blockedCount} blocked`);
+      noteText=`${parts.join(" · ")} · attack now ${remainingPower}`;
+    }else{noteText="Tap creatures above to block or kill them";}
+    const removalHtml=casualtyFieldHtml("Combat interactions","Tap attacking creatures above.")+`<div class="resolution-note">${noteText}</div>`;
+    html+=orderedEnemyStep(step++,"Block / remove creatures",removalHtml,"precombat-removal");
   }
 
   if(initialAttackers>0){
@@ -1930,6 +2140,13 @@ function render(){
     const protectionInHand=(S.voltronTypedHand||[]).filter(c=>c.ref?.category==="protection").length;
     commanderStatus.innerHTML=`<span>${commander?"On field":"Command zone"}</span><span>Tax +${S.commanderTax}</span><span>${S.voltronLandsInPlay||0} lands + ${rampInPlay} ramp</span><span>Hand ${handSize}</span>${protectionInHand?`<span>🛡 ${protectionInHand}</span>`:""}<span>Cmdr dmg dealt ${S.commanderDamage}/21</span><span>Cmdr dmg taken ${S.commanderDamageToEnemy}/21</span>`;
   }else{commanderStatus.hidden=true;commanderStatus.textContent="";}
+  // Graveyard counter
+  const gyBtn=document.getElementById('graveyardBtn');
+  const gyCount=S.enemyGraveyardCount||0;
+  if(gyBtn){gyBtn.hidden=gyCount===0;document.getElementById('graveyardCount').textContent=gyCount;}
+  const exBtn=document.getElementById('exileBtn');
+  const exCount=S.enemyExileCount||0;
+  if(exBtn){exBtn.hidden=exCount===0;document.getElementById('exileCount').textContent=exCount;}
   document.getElementById('pLife').textContent=S.player.life;document.getElementById('pCreatures').textContent=S.player.creatures;
   document.getElementById('lifeStat').classList.toggle('warn',S.player.life<=10);
   const cmdrLifeStat=document.getElementById('cmdrLifeStat');
@@ -1958,31 +2175,60 @@ function renderTokens(){
   S.tokens.forEach((t,i)=>{
     const d=document.createElement('div');
     const selectedCasualty=casualtyMode&&turnInput.enemyDeaths.has(i);
+    const isBlocked=casualtyMode&&turnInput.blockedCreatures&&turnInput.blockedCreatures.has(i);
     const isAttacking=!!t.attacking;
-    d.className="card"+(t.kind==="commander"?" commander":t.kind==="synergy"?" synergy":t.kind==="horde"?" horde":t.kind==="beast"?" beast":t.kind==="voltron-creature"?" voltron-creature":"")+(t.summoningSick?" sick":"")+(isAttacking?" tapped":"")+(casualtyMode?" casualty-selectable":"")+(selectedCasualty?" casualty-selected":"");
+    d.className="card"+(t.kind==="commander"?" commander":t.kind==="synergy"?" synergy":t.kind==="horde"?" horde":t.kind==="beast"?" beast":t.kind==="voltron-creature"?" voltron-creature":"")+(t.summoningSick?" sick":"")+(isAttacking?" tapped":"")+(casualtyMode?" casualty-selectable":"")+(selectedCasualty?" casualty-selected":"")+(isBlocked?" casualty-blocked":"");
     const p=tokenPower(t),toughness=tokenToughness(t);
-    const primaryLabel=casualtyMode?`${selectedCasualty?"Unmark":"Mark"} ${t.name} as dead`:`View details for ${t.name}`;
-    const statusBadge=selectedCasualty?'<div class="c-casualty">✓ Dies</div>':isAttacking?'<div class="c-atk">⚔️</div>':t.summoningSick?'<div class="c-sick">💤</div>':'';
+    const primaryLabel=casualtyMode?(selectedCasualty||isBlocked?`Reset ${t.name}`:`Choose block or kill for ${t.name}`):`View details for ${t.name}`;
+    const statusBadge=selectedCasualty?'<div class="c-casualty">✓ Dies</div>':isBlocked?'<div class="c-blocked">🛡️ Blocked</div>':isAttacking?'<div class="c-atk">⚔️</div>':t.summoningSick?'<div class="c-sick">💤</div>':'';
     d.innerHTML=`
       ${statusBadge}
-      <button type="button" class="card-main" aria-label="${primaryLabel}"${casualtyMode?` aria-pressed="${selectedCasualty?"true":"false"}"`:""}>
+      <button type="button" class="card-main" aria-label="${primaryLabel}"${casualtyMode?` aria-pressed="${selectedCasualty||isBlocked?"true":"false"}"`:""}>
         <span class="c-name"><span>${t.name}</span><span class="mana">${t.kind==="commander"?"⚜":t.kind==="voltron-creature"||t.kind==="voltron-support"?"🌲":t.kind==="synergy"?"✦":t.kind==="horde"?"☠":"🌲"}</span></span>
         <span class="c-art">${t.ico}</span>
         <span class="c-pt">${p}/${toughness}</span>
       </button>
       ${casualtyMode?`<button type="button" class="c-info" aria-label="View details for ${t.name}" title="View details">i</button>`:""}
-      <button type="button" class="c-x" title="Remove ${t.name}" aria-label="Remove ${t.name}">×</button>`;
-    d.querySelector('.card-main').onclick=()=>casualtyMode?toggleEnemyCasualty(i):showTokenDetails(i);
+      <button type="button" class="c-remove" title="Remove ${t.name}" aria-label="Remove ${t.name}">↗</button>`;
+    d.querySelector('.card-main').onclick=()=>casualtyMode?handleCombatCreatureClick(i):showTokenDetails(i);
     const info=d.querySelector('.c-info');if(info)info.onclick=()=>showTokenDetails(i);
-    d.querySelector('.c-x').onclick=()=>manualRemove(i);
+    d.querySelector('.c-remove').onclick=()=>manualRemove(i);
     c.appendChild(d);
   });
 }
-function manualRemove(i){
+async function manualRemove(i){
+  const token=S.tokens[i];
+  if(!token)return;
+
+  // Commanders always go back to command zone, no choice needed
+  if(S.mode==="voltron"&&token.kind==="commander"){
+    const outcome=removeEnemyBattlefieldToken(i);if(!outcome)return;
+    reindexSelectedCasualties(i);
+    logP(outcome.commanderReturn);
+    render();
+    if(turnInput){
+      const timing=S.phase==="player"?currentTimingInfo():null;
+      turnInput.allowEnemyDeaths=S.tokens.length>0&&(S.phase==="garruk"||timing.canCastInstant);
+      syncIncomingDamageToAttack();
+      renderContextualInputs();
+    }
+    checkEnd();
+    return;
+  }
+
+  // Ask where the card goes
+  const dest=await askRemovalDestination(token);
+  if(!dest)return; // cancelled
+
   const outcome=removeEnemyBattlefieldToken(i);if(!outcome)return;
   reindexSelectedCasualties(i);
-  if(outcome.commanderReturn)logP(outcome.commanderReturn);
-  else logP(`You remove ${outcome.token.name}.`);
+  if(dest==="exile"){
+    sendToEnemyExile(outcome.token);
+    logP(`You exile ${outcome.token.name}.`);
+  }else{
+    sendToEnemyGraveyard(outcome.token);
+    logP(`You destroy ${outcome.token.name}.`);
+  }
   render();
   if(turnInput){
     const timing=S.phase==="player"?currentTimingInfo():null;
@@ -2128,11 +2374,21 @@ function wire(){
   document.getElementById('utilityMenu').onclick=event=>event.stopPropagation();
   document.addEventListener('click',()=>setUtilityMenu(false));
   document.getElementById('rulesBtn').onclick=showModeRules;
+  document.getElementById('graveyardBtn').onclick=showEnemyGraveyard;
+  document.getElementById('exileBtn').onclick=showEnemyExile;
   document.getElementById('portrait').onclick=showModeRules;
   document.getElementById('portrait').onkeydown=event=>{if(event.key==="Enter"||event.key===" "){event.preventDefault();showModeRules();}};
   document.getElementById('infoClose').onclick=closeInfoModal;
   document.getElementById('infoOverlay').onclick=event=>{if(event.target.id==='infoOverlay')closeInfoModal();};
   document.getElementById('logBtn').onclick=()=>{setUtilityMenu(false);openLog();};
+  document.getElementById('themeToggleBtn').onclick=()=>{
+    setUtilityMenu(false);
+    const themes=["classic","fantasy","poker"];
+    const current=document.documentElement.getAttribute('data-theme')||"classic";
+    const next=themes[(themes.indexOf(current)+1)%themes.length];
+    document.documentElement.setAttribute('data-theme',next);
+    try{localStorage.setItem('mng_theme',next);}catch(e){}
+  };
   document.getElementById('logClose').onclick=closeLog;
   document.getElementById('logOverlay').onclick=event=>{if(event.target.id==='logOverlay')closeLog();};
   document.addEventListener('keydown',event=>{

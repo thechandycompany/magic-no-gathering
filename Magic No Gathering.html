@@ -5,8 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Magic No Gathering — Solo Encounter Engine</title>
 <link rel="stylesheet" href="styles.css">
+<style>body{background:#0d0b07;color:#f2e9d8;}.wrap{opacity:0;transition:opacity .15s;}</style>
 </head>
-<body>
+<body style="background:#0d0b07;">
 <div class="wrap">
 
   <header class="app-bar">
@@ -27,6 +28,7 @@
       <div class="utility-menu" id="utilityMenu">
         <button class="utility-item" id="logBtn">Encounter Log <span class="badge" id="logCount">0</span></button>
         <button class="utility-item" id="saveBtn">Save Encounter</button>
+        <button class="utility-item" id="themeToggleBtn">Theme</button>
         <button class="utility-item danger" id="resetBtn">Restart Encounter</button>
       </div>
     </div>
@@ -70,6 +72,8 @@
               <span class="phase-tag" id="phaseTag">Hunt Phase</span>
               <div class="commander-status" id="commanderStatus" aria-live="polite" hidden></div>
               <button class="btn-quiet" id="rulesBtn" type="button">Rules</button>
+              <button class="btn-quiet graveyard-btn" id="graveyardBtn" type="button" hidden>☠ Graveyard <span id="graveyardCount">0</span></button>
+              <button class="btn-quiet exile-btn" id="exileBtn" type="button" hidden>✦ Exile <span id="exileCount">0</span></button>
             </div>
           </div>
         </div>
@@ -141,5 +145,6 @@
 
 <script src="game.js"></script>
 <script src="commander.js"></script>
+<script>document.querySelector('.wrap').style.opacity='1';</script>
 </body>
 </html>

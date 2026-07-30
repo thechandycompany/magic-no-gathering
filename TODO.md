@@ -1,5 +1,27 @@
 # Magic No Gathering — TODO
 
+## Player Attack Declaration
+
+Add a step during the player's combat phase where the player explicitly declares which of their creatures are attacking (and optionally which opponent they're attacking in Commander).
+
+**Planned:**
+- During the player's combat step, present a moment to select which creatures are attacking
+- CPU opponent(s) then decide whether to block or let the damage through, based on the current board state
+- AI blocking logic considers: lethal threats, creature value trades, life total safety margins
+- If the CPU blocks, it chooses strategically (e.g. chump-block a trampler vs. double-block to kill a big threat)
+- If the CPU lets damage through, it accepts the life loss to preserve board presence
+- UI: show a creature picker (similar to the kill-select buttons) for declaring attackers
+- After declaration, a brief CPU decision phase resolves blocking before damage is applied
+- In Commander mode, allow targeting a specific opponent with each attacker
+
+**Design notes:**
+- This mirrors the existing enemy attack declaration logic (declareAttackers / declareVoltronAttackers) but for the player side
+- CPU blocking AI should factor in: remaining life, creature count advantage, keyword interactions (deathtouch, first strike, trample)
+- A "swing all" shortcut should exist for when the player wants to attack with everything
+- The CPU's decision adds strategic depth without requiring the player to manually resolve every block
+
+---
+
 ## Ship to Steam
 
 Prepare the game for a Steam release with a free-to-play base + paid DLC model.
@@ -22,6 +44,20 @@ Prepare the game for a Steam release with a free-to-play base + paid DLC model.
 - Steam takes 30% cut
 - Two-build split not needed — Steam DLC system handles gating natively
 - Consider regional pricing for international markets
+
+---
+
+## Commander Action: Exile All Graveyards
+
+Add an "Exile all graveyards" player action to the structured action builder.
+
+**Planned:**
+- New action option in the player-action dropdown (alongside discard, mill, destroy, etc.)
+- Moves all materialized graveyard entries from every player/opponent to exile
+- Increments each owner's exileCount by the number of cards removed
+- Resets graveyardCount and graveyard arrays to zero/empty
+- Event log records each owner's exiled card count and types
+- Useful for cards like Tormod's Crypt, Rest in Peace, Bojuka Bog, etc.
 
 ---
 

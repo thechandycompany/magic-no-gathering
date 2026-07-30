@@ -183,7 +183,7 @@ function createOpponent(index) {
     id:`cpu_${index}`, index, name:id.name, ico:id.ico, color:id.color, archetype:"voltron",
     life:40, commanderDamageReceived:{}, commanderDamageDealt:{},
     commanderZone:true, commanderTax:0,
-    deck, otherDeck, hand, typedHand:[], landsInPlay:0, rampInPlay:0, explosiveInPlay:0, gear:0, attachedGear:[], graveyardCount:0, graveyard:[], nextGraveyardCardId:0, discardHistory:[], exileCount:0,
+    deck, otherDeck, hand, typedHand:[], landsInPlay:0, rampInPlay:0, explosiveInPlay:0, gear:0, attachedGear:[], graveyardCount:0, graveyard:[], nextGraveyardCardId:0, discardHistory:[], exileCount:0, exile:[], nextExileCardId:0,
     tokens:[], damageLog:{}, lastAttacker:null, grudge:null,
     currentStrategy:STRATEGIES.THREAT, actionSteps:[], attackTarget:null, attackPower:0,
   };
@@ -206,7 +206,7 @@ function deployCommander(opp) {
   opp.commanderZone=false;
   opp.tokens.push({name:opp.name,ico:opp.ico,kind:"commander",type:"Legendary Creature",
     p:COMMANDER_BASE.p,t:COMMANDER_BASE.t,baseP:COMMANDER_BASE.p,baseT:COMMANDER_BASE.t,
-    kws:[...COMMANDER_BASE.kws],effect:"Commander",summoningSick:true,owner:opp.id});
+    kws:[...COMMANDER_BASE.kws],baseKws:[...COMMANDER_BASE.kws],effect:"Commander",summoningSick:true,owner:opp.id});
   return true;
 }
 function refreshCommanderGear(opp){
@@ -218,8 +218,10 @@ function refreshCommanderGear(opp){
   commander.baseP=COMMANDER_BASE.p+bonus;
   commander.baseT=COMMANDER_BASE.t+bonus;
   commander.p=commander.baseP;commander.t=commander.baseT;
-  commander.kws=[...new Set([...COMMANDER_BASE.kws,...opp.attachedGear.map(gear=>gear.kw).filter(Boolean)])];
+  commander.baseKws=[...new Set([...COMMANDER_BASE.kws,...opp.attachedGear.map(gear=>gear.kw).filter(Boolean)])];
+  commander.kws=[...commander.baseKws];
   commander.effect=opp.gear?`Commander — ${opp.gear} gear.`:"Commander";
+  if(typeof gameState!=="undefined"&&gameState)applyBattlefieldRuleModifiers();
 }
 function returnCommanderToZone(opp){opp.tokens=opp.tokens.filter(t=>t.kind!=="commander");opp.commanderZone=true;opp.commanderTax+=2;opp.gear=0;opp.attachedGear=[];}
 
@@ -273,6 +275,7 @@ function chooseTarget(opp, allPlayers) {
 /* ---------- turn execution ---------- */
 function executeOpponentTurn(opp, allPlayers) {
   const actions=[];
+  const turnSpellState={spellsCast:0};
   let commander=commanderOnField(opp);
 
   // Draw. A CPU that cannot complete its required draw loses the game.
@@ -290,59 +293,111 @@ function executeOpponentTurn(opp, allPlayers) {
   if(opp.hand.lands>0){opp.hand.lands--;opp.landsInPlay++;actions.push({label:"Land drop",detail:`${opp.landsInPlay} lands in play.`});}
 
   let mana=manaAvailable(opp);
+  applyBattlefieldRuleModifiers();
+  mana=tryCpuRemoveBattlefieldRule(opp,mana,actions,turnSpellState);
 
   // Primary action
   if(!commander){
     const cost=commanderCost(opp);
-    if(mana>=cost&&deployCommander(opp)){mana-=cost;actions.push({label:`Cast ${opp.name}`,detail:"Commander enters."});commander=commanderOnField(opp);}
-    else if(opp.hand.explosive>0&&mana>=1){opp.hand.explosive--;opp.explosiveInPlay++;mana--;actions.push({label:"Fast mana",detail:"+2 mana next turn."});}
-    else if(opp.hand.ramp>0&&mana>=2){opp.hand.ramp--;opp.rampInPlay++;mana-=2;actions.push({label:"Ramp",detail:"+1 mana next turn."});}
+    const commanderCasting=cpuCanCast(null,cost,mana,"commander",turnSpellState);
+    const explosiveCasting=cpuCanCast(null,1,mana,"explosive",turnSpellState);
+    const rampCasting=cpuCanCast(null,2,mana,"ramp",turnSpellState);
+    if(commanderCasting.canCast&&deployCommander(opp)){
+      mana-=commanderCasting.cost;
+      recordCpuSpellCast(turnSpellState);
+      actions.push({label:`Cast ${opp.name}`,detail:"Commander enters."+(commanderCasting.additional?" Creature tax paid: "+commanderCasting.additional+".":"")});
+      commander=commanderOnField(opp);
+    }else if(opp.hand.explosive>0&&explosiveCasting.canCast){
+      opp.hand.explosive--;opp.explosiveInPlay++;mana-=explosiveCasting.cost;
+      recordCpuSpellCast(turnSpellState);
+      actions.push({label:"Fast mana",detail:"+2 mana next turn."+(explosiveCasting.additional?" Noncreature tax paid: "+explosiveCasting.additional+".":"")});
+    }else if(opp.hand.ramp>0&&rampCasting.canCast){
+      opp.hand.ramp--;opp.rampInPlay++;mana-=rampCasting.cost;
+      recordCpuSpellCast(turnSpellState);
+      actions.push({label:"Ramp",detail:"+1 mana next turn."+(rampCasting.additional?" Noncreature tax paid: "+rampCasting.additional+".":"")});
+    }
   } else {
     const gearInHand=opp.typedHand.filter(c=>c.ref?.category==="gear");
-    const best=gearInHand.filter(c=>(c.cost+(c.equip||0))<=mana).sort((a,b)=>(b.bonus/(b.cost+(b.equip||0)))-(a.bonus/(a.cost+(a.equip||0))))[0];
+    const best=gearInHand
+      .map(card=>({card,casting:cpuCanCast(card,card.cost,mana,"gear",turnSpellState)}))
+      .filter(({card,casting})=>casting.canCast&&casting.cost+(card.equip||0)<=mana)
+      .sort((left,right)=>(right.card.bonus/(right.casting.cost+(right.card.equip||0)))-(left.card.bonus/(left.casting.cost+(left.card.equip||0))))[0];
     if(best){
-      mana-=best.cost+(best.equip||0);
-      opp.attachedGear=(opp.attachedGear||[]).concat({name:best.name,bonus:best.bonus||0,kw:best.kw||null});
+      const gear=best.card;
+      mana-=best.casting.cost+(gear.equip||0);
+      opp.attachedGear=(opp.attachedGear||[]).concat({name:gear.name,bonus:gear.bonus||0,kw:gear.kw||null});
       refreshCommanderGear(opp);
-      opp.typedHand=opp.typedHand.filter(c=>c!==best);opp.hand.other=Math.max(0,opp.hand.other-1);
-      actions.push({label:`Equip ${best.name}`,detail:`${best.effect}. Now ${commander.p}/${commander.t}.`});
+      opp.typedHand=opp.typedHand.filter(c=>c!==gear);opp.hand.other=Math.max(0,opp.hand.other-1);
+      recordCpuSpellCast(turnSpellState);
+      actions.push({label:`Equip ${gear.name}`,detail:gear.effect+". Now "+commander.p+"/"+commander.t+"."+(best.casting.additional?" Noncreature tax paid: "+best.casting.additional+".":"")});
     }
   }
 
-  // Secondary: cast creatures with remaining mana (multiple if possible)
+  // Secondary: cast creatures with remaining mana (multiple if possible).
   let castCount=0;
   while(mana>=1&&castCount<3){
-    const castable=opp.typedHand.filter(c=>(c.ref?.category==="creatures"||c.rampValue)&&c.cost<=mana).sort((a,b)=>b.cost-a.cost);
-    const toCast=castable[0];
-    if(!toCast)break;
-    mana-=toCast.cost;
+    const castable=opp.typedHand
+      .filter(card=>card.ref?.category==="creatures"||card.rampValue)
+      .map(card=>({card,casting:cpuCanCast(card,card.cost,mana,"creatures",turnSpellState)}))
+      .filter(({casting})=>casting.canCast)
+      .sort((left,right)=>right.card.cost-left.card.cost);
+    const selected=castable[0];
+    if(!selected)break;
+    const toCast=selected.card;
+    mana-=selected.casting.cost;
     const p=toCast.p||1,t=toCast.t||1;
+    const baseKws=toCast.kws?[...toCast.kws]:[];
     opp.tokens.push({name:toCast.name,ico:toCast.ico||"🐾",kind:toCast.rampValue?"voltron-support":"voltron-creature",
-      type:"Creature",p,t,baseP:p,baseT:t,kws:toCast.kws?[...toCast.kws]:[],effect:toCast.effect||"",summoningSick:!toCast.haste,owner:opp.id});
+      type:"Creature",p,t,baseP:p,baseT:t,kws:[...baseKws],baseKws,effect:toCast.effect||"",summoningSick:!toCast.haste,owner:opp.id});
     if(toCast.rampValue)opp.rampInPlay+=toCast.rampValue;
     opp.typedHand=opp.typedHand.filter(c=>c!==toCast);opp.hand.other=Math.max(0,opp.hand.other-1);
-    actions.push({label:`Cast ${toCast.name}`,detail:`${p}/${t} enters.`});
+    recordCpuSpellCast(turnSpellState);
+    actions.push({label:`Cast ${toCast.name}`,detail:`${p}/${t} enters.`+(selected.casting.additional?" Creature tax paid: "+selected.casting.additional+".":"")});
     castCount++;
   }
-  // Fallback: spend remaining ramp hand slots as generic creatures if hand has them
-  if(castCount===0&&mana>=2&&opp.hand.ramp>0&&!commander){
+  // Fallback: spend remaining ramp hand slots as a modeled creature if hand has them.
+  const fallbackRampCasting=cpuCanCast(null,2,mana,"creatures",turnSpellState);
+  if(castCount===0&&opp.hand.ramp>0&&!commander&&fallbackRampCasting.canCast){
     opp.hand.ramp--;opp.rampInPlay++;
-    opp.tokens.push({name:"Wilds Guide",ico:"🌿",kind:"voltron-support",type:"Creature — Shaman",p:2,t:2,baseP:2,baseT:2,kws:[],effect:"Taps for mana.",summoningSick:true,owner:opp.id});
-    mana-=2;
-    actions.push({label:"Cast Wilds Guide",detail:"2/2 ramp creature enters."});
+    opp.tokens.push({name:"Wilds Guide",ico:"🌿",kind:"voltron-support",type:"Creature — Shaman",p:2,t:2,baseP:2,baseT:2,kws:[],baseKws:[],effect:"Taps for mana.",summoningSick:true,owner:opp.id});
+    mana-=fallbackRampCasting.cost;
+    recordCpuSpellCast(turnSpellState);
+    actions.push({label:"Cast Wilds Guide",detail:"2/2 ramp creature enters."+(fallbackRampCasting.additional?" Creature tax paid: "+fallbackRampCasting.additional+".":"")});
   }
+  applyBattlefieldRuleModifiers();
 
   // Choose target & declare attackers
   const target=chooseTarget(opp,allPlayers);
   opp.attackTarget=target;
   let attackPower=0; let commanderAttacking=false;
-  opp.tokens.forEach(t=>{
-    t.attacking=false;
-    if(t.summoningSick)return;
-    if(t.kind==="commander"){t.attacking=true;commanderAttacking=true;attackPower+=t.p;return;}
-    if(t.kind==="voltron-support"&&t.effect&&t.effect.includes("mana"))return;
-    if(t.p>=2){t.attacking=true;attackPower+=t.p;}
-  });
+
+  // Get defender's tokens for smart attack evaluation (only for CPU targets)
+  const defenderOpp=target&&target!=="player"?allPlayers.find(p=>p.id===target):null;
+  const defenderTokens=defenderOpp&&defenderOpp.tokens?defenderOpp.tokens:[];
+
+  if(cpuCreaturesCannotAttack()){
+    opp.tokens.forEach(token=>{token.attacking=false;});
+    const restriction=activeBattlefieldRules("cpuCreatureAttackBan")[0];
+    actions.push({label:"Combat restricted",detail:`${restriction.sourceName||"A battlefield rule"} prevents CPU creatures from attacking.`});
+  }else if(target==="player"||defenderTokens.length===0){
+    // Attacking player or an opponent with no blockers: be aggressive
+    opp.tokens.forEach(t=>{
+      t.attacking=false;
+      if(t.summoningSick)return;
+      if(t.kind==="commander"){t.attacking=true;commanderAttacking=true;attackPower+=t.p;return;}
+      if(t.kind==="voltron-support"&&t.effect&&t.effect.includes("mana"))return;
+      if(t.p>=2){t.attacking=true;attackPower+=t.p;}
+    });
+  }else{
+    // Attacking another CPU: evaluate each creature's profitability
+    opp.tokens.forEach(t=>{t.attacking=false;});
+    const smartAttackers=smartDeclareAttackers(opp, defenderTokens);
+    smartAttackers.forEach(t=>{
+      t.attacking=true;
+      attackPower+=t.p;
+      if(t.kind==="commander")commanderAttacking=true;
+    });
+  }
   opp.attackPower=attackPower;
 
   if(attackPower>0&&target){
@@ -372,7 +427,8 @@ function createCommanderBattle(numOpponents) {
   for(let i=0;i<Math.min(4,Math.max(1,numOpponents));i++) opponents.push(createOpponent(i));
   return {
     gameMode:"commanderBattle", turn:1, phase:"cpu", cpuTurnIndex:0,
-    opponents, player:{id:"player",name:"You",life:40,creatures:0,handSize:7,librarySize:92,graveyardCount:0,graveyard:[],nextGraveyardCardId:0,discardHistory:[],exileCount:0,commanderDamageReceived:{},commanderDamageDealt:{},tokens:[]},
+    opponents, player:{id:"player",name:"You",life:40,creatures:0,handSize:7,librarySize:92,graveyardCount:0,graveyard:[],nextGraveyardCardId:0,discardHistory:[],exileCount:0,exile:[],nextExileCardId:0,commanderDamageReceived:{},commanderDamageDealt:{},tokens:[]},
+    battlefieldRules:[], nextBattlefieldRuleId:0,
     discardHistory:[], log:[], viewMode:"single", viewTarget:0, gameOver:false, winner:null,
   };
 }
@@ -384,6 +440,258 @@ function isPlayerDead(state){
   if(state.player.life<=0)return true;
   for(const[,dmg]of Object.entries(state.player.commanderDamageReceived)){if(dmg>=21)return true;}
   return false;
+}
+
+/* =====================================================================
+   CPU-vs-CPU COMBAT SYSTEM
+   Strategic attack decisions and blocking logic.
+   ===================================================================== */
+
+function hasKeyword(creature,keyword){
+  return (creature.kws||[]).some(value=>String(value).toLowerCase()===keyword.toLowerCase());
+}
+function creatureCombatValue(creature){
+  return (creature.p||0)+(creature.t||0)+(hasKeyword(creature,"Deathtouch")?3:0)+(hasKeyword(creature,"Trample")?2:0);
+}
+function combatDamageKills(source,target){
+  if(hasKeyword(target,"Indestructible"))return false;
+  if(hasKeyword(source,"Deathtouch"))return (source.p||0)>0;
+  return (source.p||0)>=(target.t||0);
+}
+function creatureSurvivesCombat(creature,opponent){return !combatDamageKills(opponent,creature);}
+function trampleOverflow(attacker,blocker){
+  if(!hasKeyword(attacker,"Trample"))return 0;
+  const lethal=hasKeyword(attacker,"Deathtouch")?1:Math.max(0,blocker.t||0);
+  return Math.max(0,(attacker.p||0)-lethal);
+}
+function resolveSingleBlock(attacker,blocker){
+  const attackerStrikesFirst=hasKeyword(attacker,"First Strike")||hasKeyword(attacker,"Double Strike");
+  const blockerStrikesFirst=hasKeyword(blocker,"First Strike")||hasKeyword(blocker,"Double Strike");
+  let attackerDies=false,blockerDies=false;
+  if(attackerStrikesFirst&&!blockerStrikesFirst){
+    blockerDies=combatDamageKills(attacker,blocker);
+    if(!blockerDies)attackerDies=combatDamageKills(blocker,attacker);
+  }else if(blockerStrikesFirst&&!attackerStrikesFirst){
+    attackerDies=combatDamageKills(blocker,attacker);
+    if(!attackerDies)blockerDies=combatDamageKills(attacker,blocker);
+  }else{
+    attackerDies=combatDamageKills(blocker,attacker);
+    blockerDies=combatDamageKills(attacker,blocker);
+  }
+  return {attackerDies,blockerDies,trampleDamage:trampleOverflow(attacker,blocker)};
+}
+
+/**
+ * Evaluate if an attacker would survive or trade favorably against the
+ * defender's available blockers. Returns a score:
+ *  > 0  = profitable (attacker likely gets through or wins the trade)
+ *  <= 0 = bad trade (attacker would die to a cheaper/equal blocker)
+ */
+function evaluateAttackProfitability(attacker, defenderTokens){
+  // No blockers = free damage
+  if(defenderTokens.length===0)return 10;
+
+  // Find the best blocker the defender could assign (highest power that survives or trades)
+  const possibleBlockers=defenderTokens.filter(t=>!t.summoningSick);
+  if(possibleBlockers.length===0)return 10;
+
+  const killsAttacker=possibleBlockers.filter(b=>combatDamageKills(b,attacker));
+  // Check if attacker can kill the blocker it fights
+  const attackerKills=possibleBlockers.filter(b=>combatDamageKills(attacker,b));
+
+  // Commander always attacks — voltron pressure is worth the risk
+  if(attacker.kind==="commander")return 8;
+
+  // Attacker has trample — even if blocked, damage gets through
+  if(attacker.kws&&attacker.kws.includes("Trample"))return 5;
+
+  // If nobody can kill the attacker, it's always profitable
+  if(killsAttacker.length===0)return 7;
+
+  // If attacker would die but can't kill anything back — terrible trade
+  if(killsAttacker.length>0&&attackerKills.length===0)return -5;
+
+  // Mutual trade: evaluate if the trade is worth it
+  // Attacker is worth more if it has higher power (it threatens more)
+  // Blocker assigned will be the smallest that can kill the attacker
+  const cheapestKiller=killsAttacker.sort((a,b)=>(a.p+a.t)-(b.p+b.t))[0];
+
+  // If attacker can kill the blocker that would kill it — mutual trade
+  if(combatDamageKills(attacker,cheapestKiller)){
+    // Trade up: our creature is smaller/equal → good trade if their creature is bigger
+    const attackerValue=creatureCombatValue(attacker);
+    const blockerValue=creatureCombatValue(cheapestKiller);
+    if(blockerValue>attackerValue)return 3; // we trade a smaller creature for a bigger one
+    if(blockerValue===attackerValue)return 1; // even trade, slightly positive (pressure)
+    return -2; // we lose a bigger creature for their smaller one
+  }
+
+  // Attacker dies, can't kill the blocker — bad
+  return -4;
+}
+
+/**
+ * Smart attack declaration for CPU-vs-CPU.
+ * Evaluates each creature's profitability against the defender's board.
+ * Returns array of tokens that should attack.
+ */
+function smartDeclareAttackers(opp, defenderTokens){
+  const candidates=opp.tokens.filter(t=>!t.summoningSick);
+  const attackers=[];
+
+  for(const t of candidates){
+    // Mana dorks never attack — their ramp value exceeds combat value
+    if(t.kind==="voltron-support"&&t.effect&&t.effect.includes("mana"))continue;
+
+    // Commander always attacks
+    if(t.kind==="commander"){attackers.push(t);continue;}
+
+    // Evaluate profitability
+    const score=evaluateAttackProfitability(t, defenderTokens);
+
+    // Only attack if the trade is at least neutral
+    if(score>0){
+      attackers.push(t);
+    }
+  }
+
+  return attackers;
+}
+
+/**
+ * CPU blocking logic: defender assigns blockers strategically.
+ * Returns an array of {attacker, blocker} pairs and unblocked attackers.
+ *
+ * Strategy:
+ * - Block lethal threats (commander, big hitters) if we can trade favorably
+ * - Chump-block (sacrifice a small creature) if life is critical
+ * - Let small damage through to preserve board if life is healthy
+ * - Never block if the blocker would die without killing the attacker AND life is safe
+ */
+function cpuAssignBlockers(defender, attackers){
+  if(cpuCreaturesCannotBlock())return {assignments:[],unblocked:[...attackers]};
+  const available=defender.tokens.filter(t=>!t.summoningSick&&!t.attacking);
+  const assignments=[]; // {attacker, blocker}
+  const used=new Set();
+  const defenderLife=defender.life;
+
+  // Total incoming if we block nothing
+  const totalIncoming=attackers.reduce((s,a)=>s+a.p,0);
+
+  // Sort attackers by threat: commander first, then by power descending
+  const sorted=[...attackers].sort((a,b)=>{
+    if(a.kind==="commander"&&b.kind!=="commander")return -1;
+    if(b.kind==="commander"&&a.kind!=="commander")return 1;
+    return b.p-a.p;
+  });
+
+  for(const attacker of sorted){
+    // Find blockers that can kill this attacker, survive it, or do both.
+    const canKill=available.filter(b=>!used.has(b)&&combatDamageKills(b,attacker));
+    const survives=available.filter(b=>!used.has(b)&&creatureSurvivesCombat(b,attacker));
+    const perfectBlocks=available.filter(b=>!used.has(b)&&combatDamageKills(b,attacker)&&creatureSurvivesCombat(b,attacker));
+
+    // Priority 1: Perfect block (we kill their creature, ours lives)
+    if(perfectBlocks.length>0){
+      // Use the smallest perfect blocker (preserve big creatures for later)
+      const best=perfectBlocks.sort((a,b)=>(a.p+a.t)-(b.p+b.t))[0];
+      assignments.push({attacker,blocker:best});
+      used.add(best);
+      continue;
+    }
+
+    // Priority 2: Favorable trade (we both die, but their creature is more valuable)
+    const favorableTrades=canKill.filter(b=>creatureCombatValue(attacker)>creatureCombatValue(b));
+    if(favorableTrades.length>0){
+      const best=favorableTrades.sort((a,b)=>(a.p+a.t)-(b.p+b.t))[0];
+      assignments.push({attacker,blocker:best});
+      used.add(best);
+      continue;
+    }
+
+    // Priority 3: Even trade — block commander or big threats to prevent damage
+    if(attacker.kind==="commander"||attacker.p>=5){
+      const evenTrades=canKill.filter(b=>creatureCombatValue(attacker)>=creatureCombatValue(b));
+      if(evenTrades.length>0){
+        const best=evenTrades.sort((a,b)=>(a.p+a.t)-(b.p+b.t))[0];
+        assignments.push({attacker,blocker:best});
+        used.add(best);
+        continue;
+      }
+    }
+
+    // Priority 4: Chump block if life is critical (<=15) and attacker is big
+    if(defenderLife<=15&&attacker.p>=4){
+      const chumps=available.filter(b=>!used.has(b)&&b.kind!=="commander").sort((a,b)=>(a.p+a.t)-(b.p+b.t));
+      if(chumps.length>0){
+        assignments.push({attacker,blocker:chumps[0]});
+        used.add(chumps[0]);
+        continue;
+      }
+    }
+
+    // Priority 5: Block with a surviving creature to prevent damage (no trade)
+    // Only if this attacker's damage is significant relative to our life
+    if(attacker.p>=3&&defenderLife<=25&&survives.length>0){
+      const best=survives.filter(b=>!used.has(b)).sort((a,b)=>(a.p+a.t)-(b.p+b.t))[0];
+      if(best){
+        assignments.push({attacker,blocker:best});
+        used.add(best);
+        continue;
+      }
+    }
+
+    // Otherwise: let it through — we'd rather preserve our board than chump
+  }
+
+  // Determine unblocked attackers
+  const blockedSet=new Set(assignments.map(a=>a.attacker));
+  const unblocked=attackers.filter(a=>!blockedSet.has(a));
+
+  return {assignments, unblocked};
+}
+
+/**
+ * Resolve combat between CPU attacker and CPU defender.
+ * Returns { damageToDefender, defenderCreaturesKilled[], attackerCreaturesKilled[], blocked[] }
+ */
+function resolveCpuCombat(attackerOpp, defenderOpp, attackers){
+  const {assignments,unblocked}=cpuAssignBlockers(defenderOpp,attackers);
+  const defenderCreaturesKilled=[];
+  const attackerCreaturesKilled=[];
+  const blockedDescriptions=[];
+  let trampleDamage=0;
+  let commanderDamage=0;
+
+  for(const {attacker,blocker} of assignments){
+    const outcome=resolveSingleBlock(attacker,blocker);
+    if(outcome.blockerDies)defenderCreaturesKilled.push(blocker);
+    if(outcome.attackerDies)attackerCreaturesKilled.push(attacker);
+    trampleDamage+=outcome.trampleDamage;
+    if(attacker.kind==="commander")commanderDamage+=outcome.trampleDamage;
+    blockedDescriptions.push({
+      attacker:attacker.name,
+      blocker:blocker.name,
+      attackerDies:outcome.attackerDies,
+      blockerDies:outcome.blockerDies,
+      trampleDamage:outcome.trampleDamage
+    });
+  }
+
+  const unblockedDamage=unblocked.reduce((sum,attacker)=>sum+(attacker.p||0),0);
+  const unblockedCommanderDamage=unblocked
+    .filter(attacker=>attacker.kind==="commander")
+    .reduce((sum,attacker)=>sum+(attacker.p||0),0);
+  commanderDamage+=unblockedCommanderDamage;
+
+  return {
+    damageToDefender:unblockedDamage+trampleDamage,
+    commanderDamage,
+    defenderCreaturesKilled,
+    attackerCreaturesKilled,
+    blockedDescriptions,
+    unblocked
+  };
 }
 
 function executeCpuTurnCycle(state) {
@@ -400,14 +708,55 @@ function executeCpuTurnCycle(state) {
       } else {
         const tgt=state.opponents.find(p=>p.id===result.target);
         if(tgt&&!isOpponentDead(tgt)){
-          tgt.life=Math.max(0,tgt.life-result.attackPower);
-          tgt.damageLog[opp.id]=(tgt.damageLog[opp.id]||0)+result.attackPower;
-          tgt.lastAttacker=opp.id;
-          if(cmdDmg>0)tgt.commanderDamageReceived[opp.id]=(tgt.commanderDamageReceived[opp.id]||0)+cmdDmg;
-          if(result.attackPower>=5&&tgt.tokens.length>0&&Math.random()<0.4){
-            const vi=Math.floor(Math.random()*tgt.tokens.length);
-            const moved=removeOpponentPermanent(tgt,`token:${vi}`,"graveyard");
-            if(moved)logCommander(`${opp.name.split(',')[0]}'s attack destroys ${movementCardText(moved)} from ${tgt.name.split(',')[0]}. Types: ${discardedTypeSummary([moved])}.`);
+          // Full combat resolution with blocking
+          const attackers=opp.tokens.filter(t=>t.attacking);
+          const combat=resolveCpuCombat(opp, tgt, attackers);
+          const prevention=applyCpuDamagePrevention(combat.damageToDefender,combat.commanderDamage);
+
+          // Apply life damage
+          if(prevention.damage>0){
+            tgt.life=Math.max(0,tgt.life-prevention.damage);
+            tgt.damageLog[opp.id]=(tgt.damageLog[opp.id]||0)+prevention.damage;
+            tgt.lastAttacker=opp.id;
+          }
+          // Commander damage
+          if(prevention.commanderDamage>0){
+            tgt.commanderDamageReceived[opp.id]=(tgt.commanderDamageReceived[opp.id]||0)+prevention.commanderDamage;
+          }
+          if(prevention.reduced)logCommander(`Battlefield damage reduction lowers ${opp.name.split(',')[0]}'s combat damage by ${prevention.reduced}.`);
+          if(prevention.prevented)logCommander(`Battlefield prevention stops ${prevention.prevented} damage from ${opp.name.split(',')[0]}.`);
+
+          // Remove killed defender creatures
+          for(const dead of combat.defenderCreaturesKilled){
+            const idx=tgt.tokens.indexOf(dead);
+            if(idx>=0){
+              const moved=removeOpponentPermanent(tgt,`token:${idx}`,"graveyard");
+              if(moved)logCommander(`${dead.name} (${tgt.name.split(',')[0]}) dies blocking → ${moved.destination}.`);
+            }
+          }
+          // Remove killed attacker creatures
+          for(const dead of combat.attackerCreaturesKilled){
+            const idx=opp.tokens.indexOf(dead);
+            if(idx>=0){
+              const moved=removeOpponentPermanent(opp,`token:${idx}`,"graveyard");
+              if(moved)logCommander(`${dead.name} (${opp.name.split(',')[0]}) dies in combat → ${moved.destination}.`);
+            }
+          }
+
+          // Log combat summary
+          if(combat.blockedDescriptions.length>0){
+            const blockSummary=combat.blockedDescriptions.map(b=>{
+              if(b.attackerDies&&b.blockerDies)return `${b.attacker} trades with ${b.blocker}`;
+              if(b.attackerDies)return `${b.blocker} kills ${b.attacker}`;
+              if(b.blockerDies)return `${b.attacker} kills ${b.blocker}`;
+              return `${b.blocker} blocks ${b.attacker}`;
+            }).join("; ");
+            logCommander(`Combat: ${blockSummary}.`);
+          }
+          if(prevention.damage>0){
+            logCommander(`${combat.unblocked.length} unblocked → ${prevention.damage} damage to ${tgt.name.split(',')[0]}. Life → ${tgt.life}.`);
+          }else if(attackers.length>0&&(combat.blockedDescriptions.length>0||prevention.prevented||prevention.reduced)){
+            logCommander(`${tgt.name.split(',')[0]} takes no combat damage from ${opp.name.split(',')[0]}.`);
           }
         }
       }
@@ -442,7 +791,8 @@ const PLAYER_ACTIONS=[
   {value:"destroy",label:"Destroy permanents"},
   {value:"sacrifice",label:"Sacrifice permanents"},
   {value:"exile",label:"Exile permanents"},
-  {value:"reanimate",label:"Reanimate creature"},
+  {value:"exileGraveyards",label:"Exile all graveyards"},
+  {value:"reanimate",label:"Resurrect selected creatures to your battlefield"},
   {value:"draw",label:"Draw cards"},
   {value:"loseLife",label:"Lose life"},
   {value:"gainLife",label:"Gain life"}
@@ -460,7 +810,11 @@ function ensureCommanderEffectState(state){
   player.nextGraveyardCardId=player.nextGraveyardCardId||player.graveyard.length;
   player.discardHistory=player.discardHistory||[];
   if(player.exileCount==null)player.exileCount=0;
+  player.exile=player.exile||[];
+  player.nextExileCardId=player.nextExileCardId||player.exile.length;
   state.discardHistory=state.discardHistory||[];
+  state.battlefieldRules=state.battlefieldRules||[];
+  state.nextBattlefieldRuleId=state.nextBattlefieldRuleId||state.battlefieldRules.length;
   (state.opponents||[]).forEach(opp=>{
     opp.typedHand=opp.typedHand||[];
     opp.graveyardCount=opp.graveyardCount||0;
@@ -468,6 +822,8 @@ function ensureCommanderEffectState(state){
     opp.nextGraveyardCardId=opp.nextGraveyardCardId||opp.graveyard.length;
     opp.discardHistory=opp.discardHistory||[];
     opp.exileCount=opp.exileCount||0;
+    opp.exile=opp.exile||[];
+    opp.nextExileCardId=opp.nextExileCardId||opp.exile.length;
     opp.attachedGear=opp.attachedGear||[];
     if(opp.attachedGear.length===0&&opp.gear>0){
       opp.attachedGear=Array.from({length:opp.gear},(_,index)=>({name:`Equipment ${index+1}`,bonus:0,kw:null}));
@@ -476,15 +832,224 @@ function ensureCommanderEffectState(state){
   });
 }
 
+const BATTLEFIELD_RULE_TYPES=[
+  {value:"artifactCastBan",group:"Can / can't rules",label:"CPU artifacts can't be cast"},
+  {value:"noncreatureCastBan",group:"Can / can't rules",label:"CPU noncreature spells can't be cast"},
+  {value:"cpuSpellLimit",group:"Can / can't rules",label:"CPU can cast only one spell per turn"},
+  {value:"cpuCreatureAttackBan",group:"Can / can't rules",label:"CPU creatures can't attack"},
+  {value:"cpuCreatureBlockBan",group:"Can / can't rules",label:"CPU creatures can't block"},
+  {value:"noncreatureTax",group:"Cost",label:"CPU noncreature spells cost more"},
+  {value:"creatureTax",group:"Cost",label:"CPU creature spells cost more"},
+  {value:"preventCpuDamage",group:"Replacement / prevention",label:"Prevent the next CPU damage"},
+  {value:"cpuGraveyardExile",group:"Replacement / prevention",label:"CPU cards going to graveyards are exiled instead"},
+  {value:"cpuDamageReduction",group:"Replacement / prevention",label:"CPU combat damage is reduced"},
+  {value:"cpuCreaturePT",group:"Continuous effects & layers",label:"CPU creatures get +X/+Y"},
+  {value:"cpuCreatureMinusPT",group:"Continuous effects & layers",label:"CPU creatures get -X/-Y"},
+  {value:"cpuCreaturePowerCap",group:"Continuous effects & layers",label:"CPU creature power can't exceed X"},
+  {value:"cpuCreatureKeywordLoss",group:"Continuous effects & layers",label:"CPU creatures lose modeled keywords"}
+];
+let battlefieldRuleDraft={kind:"artifactCastBan",sourceName:"",sourceType:"Enchantment",amount:2,power:1,toughness:1};
+
+function battlefieldRules(){return gameState?.battlefieldRules||[];}
+function activeBattlefieldRules(kind){return battlefieldRules().filter(rule=>!kind||rule.kind===kind);}
+function battlefieldRuleLabel(rule){
+  const source=rule.sourceName||"Unnamed rule";
+  switch(rule.kind){
+    case "artifactCastBan":return `${source} — CPU artifacts can't be cast`;
+    case "noncreatureCastBan":return `${source} — CPU noncreature spells can't be cast`;
+    case "cpuSpellLimit":return `${source} — CPU can cast only one spell each turn`;
+    case "cpuCreatureAttackBan":return `${source} — CPU creatures can't attack`;
+    case "cpuCreatureBlockBan":return `${source} — CPU creatures can't block`;
+    case "noncreatureTax":return `${source} — CPU noncreature spells cost ${rule.amount} more`;
+    case "creatureTax":return `${source} — CPU creature spells cost ${rule.amount} more`;
+    case "preventCpuDamage":return `${source} — prevent next ${rule.remaining||0} CPU damage`;
+    case "cpuGraveyardExile":return `${source} — CPU cards going to graveyards are exiled instead`;
+    case "cpuDamageReduction":return `${source} — CPU combat damage is reduced by ${rule.amount}`;
+    case "cpuCreaturePT":return `${source} — CPU creatures get ${formatSigned(rule.power)}/${formatSigned(rule.toughness)}`;
+    case "cpuCreatureMinusPT":return `${source} — CPU creatures get -${Math.max(0,parseInt(rule.power)||0)}/-${Math.max(0,parseInt(rule.toughness)||0)}`;
+    case "cpuCreaturePowerCap":return `${source} — CPU creature power can't exceed ${rule.amount}`;
+    case "cpuCreatureKeywordLoss":return `${source} — CPU creatures lose modeled keywords`;
+    default:return source;
+  }
+}
+function formatSigned(value){const amount=parseInt(value)||0;return `${amount>=0?"+":""}${amount}`;}
+function isPersistentBattlefieldRule(rule){return rule.kind!=="preventCpuDamage";}
+function cpuCreatureModifier(){
+  const bonus=activeBattlefieldRules("cpuCreaturePT").reduce((modifier,rule)=>({
+    power:modifier.power+(parseInt(rule.power)||0),
+    toughness:modifier.toughness+(parseInt(rule.toughness)||0)
+  }),{power:0,toughness:0});
+  const reduction=activeBattlefieldRules("cpuCreatureMinusPT").reduce((modifier,rule)=>({
+    power:modifier.power+Math.max(0,parseInt(rule.power)||0),
+    toughness:modifier.toughness+Math.max(0,parseInt(rule.toughness)||0)
+  }),{power:0,toughness:0});
+  return {power:bonus.power-reduction.power,toughness:bonus.toughness-reduction.toughness};
+}
+function cpuCreaturePowerCap(){
+  const caps=activeBattlefieldRules("cpuCreaturePowerCap").map(rule=>Math.max(0,parseInt(rule.amount)||0));
+  return caps.length?Math.min(...caps):Infinity;
+}
+function cpuCreaturesLoseModeledKeywords(){return activeBattlefieldRules("cpuCreatureKeywordLoss").length>0;}
+function applyBattlefieldRuleModifiers(){
+  if(!gameState)return;
+  const modifier=cpuCreatureModifier();
+  const powerCap=cpuCreaturePowerCap();
+  const removeKeywords=cpuCreaturesLoseModeledKeywords();
+  const defeated=[];
+  gameState.opponents.forEach(opp=>{
+    opp.tokens.forEach(token=>{
+      if(token.baseP==null)token.baseP=token.p||0;
+      if(token.baseT==null)token.baseT=token.t||0;
+      if(token.baseKws==null)token.baseKws=[...(token.kws||[])];
+      token.p=Math.max(0,Math.min(powerCap,token.baseP+modifier.power));
+      token.t=token.baseT+modifier.toughness;
+      token.kws=removeKeywords?[]:[...token.baseKws];
+      if(token.t<=0)defeated.push({opp,token});
+    });
+  });
+  defeated.forEach(({opp,token})=>{
+    const index=opp.tokens.indexOf(token);
+    if(index<0)return;
+    const moved=removeOpponentPermanent(opp,`token:${index}`,"graveyard");
+    if(moved)logCommander(`${token.name} has 0 or less toughness and leaves the battlefield → ${moved.destination}.`);
+  });
+}
+function cpuSpellDescriptor(card,category){
+  const resolvedCategory=category||card?.ref?.category;
+  if(resolvedCategory==="commander"||resolvedCategory==="creatures"||card?.isCreature||card?.rampValue)return {types:["Creature"],nonCreature:false};
+  if(resolvedCategory==="gear"||resolvedCategory==="explosive"||card?.name==="Skullclamp")return {types:["Artifact"],nonCreature:true};
+  if(resolvedCategory==="ramp"||resolvedCategory==="draw"||resolvedCategory==="haymakers")return {types:["Sorcery"],nonCreature:true};
+  if(resolvedCategory==="protection")return {types:["Instant"],nonCreature:true};
+  if(resolvedCategory==="utility")return {types:["Enchantment"],nonCreature:true};
+  return {types:["Sorcery"],nonCreature:true};
+}
+function cpuCastingRequirement(card,baseCost,category){
+  const descriptor=cpuSpellDescriptor(card,category);
+  if(descriptor.types.includes("Artifact")&&activeBattlefieldRules("artifactCastBan").length)return {allowed:false,cost:Infinity,reason:"artifacts can't be cast"};
+  if(descriptor.nonCreature&&activeBattlefieldRules("noncreatureCastBan").length)return {allowed:false,cost:Infinity,reason:"noncreature spells can't be cast"};
+  const noncreatureTax=descriptor.nonCreature?activeBattlefieldRules("noncreatureTax").reduce((sum,rule)=>sum+(parseInt(rule.amount)||0),0):0;
+  const creatureTax=descriptor.types.includes("Creature")?activeBattlefieldRules("creatureTax").reduce((sum,rule)=>sum+(parseInt(rule.amount)||0),0):0;
+  const additional=noncreatureTax+creatureTax;
+  return {allowed:true,cost:Math.max(0,(baseCost||0)+additional),additional,descriptor};
+}
+function cpuSpellLimitReached(turnSpellState){return activeBattlefieldRules("cpuSpellLimit").length>0&&(turnSpellState?.spellsCast||0)>=1;}
+function recordCpuSpellCast(turnSpellState){if(turnSpellState)turnSpellState.spellsCast=(turnSpellState.spellsCast||0)+1;}
+function cpuCanCast(card,baseCost,mana,category,turnSpellState){
+  const requirement=cpuCastingRequirement(card,baseCost,category);
+  if(requirement.allowed&&cpuSpellLimitReached(turnSpellState))return {...requirement,allowed:false,reason:"only one spell can be cast each turn",canCast:false};
+  return {...requirement,canCast:requirement.allowed&&mana>=requirement.cost};
+}
+function cpuCreaturesCannotAttack(){return activeBattlefieldRules("cpuCreatureAttackBan").length>0;}
+function cpuCreaturesCannotBlock(){return activeBattlefieldRules("cpuCreatureBlockBan").length>0;}
+function cpuCardsGoToExileInstead(){return activeBattlefieldRules("cpuGraveyardExile").length>0;}
+function battlefieldRuleRemovalPriority(rule){
+  return {cpuSpellLimit:60,artifactCastBan:55,noncreatureCastBan:50,creatureTax:45,noncreatureTax:40,cpuCreatureAttackBan:35,cpuCreatureBlockBan:35,cpuGraveyardExile:30,cpuDamageReduction:25,cpuCreatureKeywordLoss:20,cpuCreaturePowerCap:20,cpuCreaturePT:20,cpuCreatureMinusPT:20}[rule.kind]||0;
+}
+function canCpuRemovalAffectRule(card,rule){
+  if(card.name==="Beast Within"||card.name==="Chaos Warp")return true;
+  return card.name==="Return to Nature"&&["Artifact","Enchantment"].includes(rule.sourceType);
+}
+function findCpuRuleRemoval(opp,mana,turnSpellState){
+  const rules=activeBattlefieldRules().filter(isPersistentBattlefieldRule).sort((left,right)=>battlefieldRuleRemovalPriority(right)-battlefieldRuleRemovalPriority(left));
+  if(!rules.length)return null;
+  const answers=opp.typedHand
+    .map((card,index)=>({card,index}))
+    .filter(({card})=>["Beast Within","Chaos Warp","Return to Nature"].includes(card.name));
+  for(const rule of rules){
+    for(const answer of answers){
+      const casting=cpuCanCast(answer.card,answer.card.cost,mana,undefined,turnSpellState);
+      if(casting.canCast&&canCpuRemovalAffectRule(answer.card,rule))return {...answer,rule,casting};
+    }
+  }
+  return null;
+}
+function tryCpuRemoveBattlefieldRule(opp,mana,actions,turnSpellState){
+  const answer=findCpuRuleRemoval(opp,mana,turnSpellState);
+  if(!answer)return mana;
+  mana-=answer.casting.cost;
+  const [card]=opp.typedHand.splice(answer.index,1);
+  opp.hand.other=Math.max(0,(opp.hand.other||0)-1);
+  const graveyardCard=typedGraveyardCard(card);
+  addOpponentGraveyardCard(opp,graveyardCard);
+  recordCpuSpellCast(turnSpellState);
+  gameState.battlefieldRules=gameState.battlefieldRules.filter(rule=>rule.id!==answer.rule.id);
+  applyBattlefieldRuleModifiers();
+  actions.push({label:`Cast ${card.name}`,detail:`Removes ${battlefieldRuleLabel(answer.rule)}.`});
+  logCommander(`${opp.name.split(",")[0]} casts ${card.name} to remove ${answer.rule.sourceName||"a battlefield rule"}.`);
+  return mana;
+}
+function applyCpuDamagePrevention(damage,commanderDamage){
+  let remainingDamage=Math.max(0,damage||0);
+  let remainingCommanderDamage=Math.max(0,commanderDamage||0);
+  const damageReduction=activeBattlefieldRules("cpuDamageReduction").reduce((sum,rule)=>sum+(parseInt(rule.amount)||0),0);
+  const reduced=Math.min(remainingDamage,damageReduction);
+  remainingDamage-=reduced;
+  remainingCommanderDamage=Math.max(0,remainingCommanderDamage-reduced);
+  let prevented=0;
+  activeBattlefieldRules("preventCpuDamage").forEach(rule=>{
+    if(remainingDamage<=0||!rule.remaining)return;
+    const absorbed=Math.min(remainingDamage,rule.remaining);
+    rule.remaining-=absorbed;
+    remainingDamage-=absorbed;
+    const commanderAbsorbed=Math.min(remainingCommanderDamage,absorbed);
+    remainingCommanderDamage-=commanderAbsorbed;
+    prevented+=absorbed;
+  });
+  if(prevented)gameState.battlefieldRules=gameState.battlefieldRules.filter(rule=>rule.kind!=="preventCpuDamage"||rule.remaining>0);
+  return {damage:remainingDamage,commanderDamage:remainingCommanderDamage,prevented,reduced};
+}
+function addBattlefieldRule(draft){
+  const kind=draft.kind;
+  const sourceName=(draft.sourceName||"").trim()||"Unnamed battlefield rule";
+  const rule={
+    id:`rule:${++gameState.nextBattlefieldRuleId}`,
+    kind,
+    sourceName,
+    sourceType:draft.sourceType||"Enchantment",
+    amount:Math.max(0,parseInt(draft.amount)||0),
+    power:kind==="cpuCreatureMinusPT"?Math.max(0,parseInt(draft.power)||0):parseInt(draft.power)||0,
+    toughness:kind==="cpuCreatureMinusPT"?Math.max(0,parseInt(draft.toughness)||0):parseInt(draft.toughness)||0,
+    remaining:kind==="preventCpuDamage"?Math.max(1,parseInt(draft.amount)||1):null,
+    createdTurn:gameState.turn
+  };
+  gameState.battlefieldRules.push(rule);
+  applyBattlefieldRuleModifiers();
+  renderBoardView(gameState);
+  logCommander(`Battlefield rule added: ${battlefieldRuleLabel(rule)}.`);
+  return rule;
+}
+function removeBattlefieldRule(ruleId,reason="removed"){
+  const rule=battlefieldRules().find(candidate=>candidate.id===ruleId);
+  if(!rule)return;
+  gameState.battlefieldRules=gameState.battlefieldRules.filter(candidate=>candidate.id!==ruleId);
+  applyBattlefieldRuleModifiers();
+  renderBoardView(gameState);
+  logCommander(`${rule.sourceName||"Battlefield rule"} ${reason}.`);
+}
+
 function createPlayerEffect(draft){
+  if(draft.action==="exileGraveyards")return {scope:"each",action:"exileGraveyards",count:0,all:true,cardType:null};
   return {
     scope:draft.scope,
     action:draft.action,
     count:Math.max(1,parseInt(draft.count)||1),
+    all:!!draft.all,
     cardType:(draft.action==="destroy"||draft.action==="sacrifice"||draft.action==="exile")?draft.cardType:draft.action==="reanimate"?"creature":null
   };
 }
-
+function playerActionAmount(effect,target){
+  if(!effect.all)return effect.count;
+  if(effect.action==="discard")return target.id==="player"?Math.max(0,target.handSize||0):opponentHandSize(target);
+  if(effect.action==="mill"||effect.action==="draw")return target.id==="player"?Math.max(0,target.librarySize||0):opponentDeckSize(target);
+  if(effect.action==="reanimate")return graveyardCreatureCards(target).length;
+  if(effect.action==="destroy"||effect.action==="sacrifice"||effect.action==="exile"){
+    return target.id==="player"
+      ?["creature","permanent"].includes(effect.cardType)?Math.max(0,target.creatures||0):0
+      :opponentPermanentOptions(target,effect.cardType).length;
+  }
+  if(effect.action==="loseLife"||effect.action==="gainLife")return Math.max(0,target.life||0);
+  return effect.count;
+}
 function effectTargets(state,effect,targetId){
   const all=[state.player,...aliveOpponents(state)];
   if(effect.scope==="each")return all;
@@ -518,13 +1083,23 @@ function typedGraveyardCard(card){
   return {name:card.name,ico:card.ico||"🃏",types:typedCardTypes(card),p:card.p,t:card.t,kws:card.kws?[...card.kws]:[],effect:card.effect||"",ref:card.ref||null,virtual:false};
 }
 function battlefieldGraveyardCard(token){
-  return {name:token.name,ico:token.ico||"🐾",types:(token.type||"Creature").includes("Creature")?["Creature"]:[token.type||"Permanent"],p:token.p,t:token.t,kws:token.kws?[...token.kws]:[],effect:token.effect||"",virtual:false,isToken:!!token.isToken};
+  return {name:token.name,ico:token.ico||"🐾",types:(token.type||"Creature").includes("Creature")?["Creature"]:[token.type||"Permanent"],p:token.p,t:token.t,kws:token.baseKws?[...token.baseKws]:token.kws?[...token.kws]:[],effect:token.effect||"",virtual:false,isToken:!!token.isToken};
+}
+function addOpponentExileCard(opp,card){
+  if(card.isToken)return null;
+  opp.exile=opp.exile||[];
+  opp.nextExileCardId=(opp.nextExileCardId||0)+1;
+  const {id:_id,ownerId:_ownerId,destination:_destination,...cardData}=card;
+  const entry={...cardData,id:`${opp.id}:ex:${opp.nextExileCardId}`,ownerId:opp.id,destination:"exile"};
+  opp.exile.push(entry);opp.exileCount=(opp.exileCount||0)+1;
+  return entry;
 }
 function addOpponentGraveyardCard(opp,card){
   if(card.isToken)return null;
+  if(cpuCardsGoToExileInstead())return addOpponentExileCard(opp,card);
   opp.graveyard=opp.graveyard||[];
   opp.nextGraveyardCardId=(opp.nextGraveyardCardId||0)+1;
-  const entry={id:`${opp.id}:gy:${opp.nextGraveyardCardId}`,ownerId:opp.id,...card};
+  const entry={id:`${opp.id}:gy:${opp.nextGraveyardCardId}`,ownerId:opp.id,...card,destination:"graveyard"};
   opp.graveyard.push(entry);opp.graveyardCount++;
   return entry;
 }
@@ -562,9 +1137,16 @@ function reanimateGraveyardCard(owner,cardId){
   owner.graveyardCount=Math.max(0,(owner.graveyardCount||0)-1);
   const player=gameState.player;
   player.tokens=player.tokens||[];
-  player.tokens.push({name:card.name,ico:card.ico||"🐾",kind:"reanimated-creature",type:"Creature",p:card.p||1,t:card.t||1,baseP:card.p||1,baseT:card.t||1,kws:card.kws?[...card.kws]:[],effect:card.effect||`Reanimated from ${effectTargetName(owner)}'s graveyard.`,summoningSick:true,owner:card.ownerId||owner.id,controller:"player",isToken:false});
+  player.tokens.push({name:card.name,ico:card.ico||"🐾",kind:"reanimated-creature",type:"Creature",p:card.p||1,t:card.t||1,baseP:card.p||1,baseT:card.t||1,kws:card.kws?[...card.kws]:[],effect:card.effect||`Resurrected from ${effectTargetName(owner)}'s graveyard.`,summoningSick:true,owner:card.ownerId||owner.id,controller:"player",isToken:false});
   player.creatures++;
   return card;
+}
+function exileOpponentGraveyardCreature(opp,cardId){
+  const index=(opp.graveyard||[]).findIndex(card=>card.id===cardId&&card.types?.includes("Creature")&&!card.isToken);
+  if(index<0)return null;
+  const [card]=opp.graveyard.splice(index,1);
+  opp.graveyardCount=Math.max(0,(opp.graveyardCount||0)-1);
+  return addOpponentExileCard(opp,card);
 }
 function cpuDiscardPriority(opp,option){
   if(option.kind==="hand"){
@@ -648,13 +1230,27 @@ function chooseCpuPermanents(opp,type,count){
     .slice(0,count)
     .map(option=>option.key);
 }
+function moveGraveyardToExile(owner){
+  const graveyard=owner.graveyard||[];
+  const total=Math.max(owner.graveyardCount||0,graveyard.length);
+  const unmaterialized=Math.max(0,total-graveyard.length);
+  owner.exile=owner.exile||[];
+  owner.nextExileCardId=owner.nextExileCardId||owner.exile.length;
+  const moved=graveyard.map(card=>{
+    owner.nextExileCardId++;
+    const {destination,...cardData}=card;
+    const entry={...cardData,id:`${owner.id}:ex:${owner.nextExileCardId}`,ownerId:owner.id,destination:"exile"};
+    owner.exile.push(entry);
+    return entry;
+  });
+  owner.exileCount=(owner.exileCount||0)+total;
+  owner.graveyard=[];
+  owner.graveyardCount=0;
+  return {total,moved,unmaterialized};
+}
 function recordOpponentPermanentZone(opp,destination,card){
-  if(destination==="exile"){
-    opp.exileCount=(opp.exileCount||0)+1;
-    return {...card,destination:"exile"};
-  }
-  const entry=card&&addOpponentGraveyardCard(opp,card);
-  return entry?{...entry,destination:"graveyard"}:null;
+  if(destination==="exile")return card?addOpponentExileCard(opp,card):null;
+  return card?addOpponentGraveyardCard(opp,card):null;
 }
 function removeOpponentPermanent(opp,key,destination="graveyard"){
   const [kind,indexText]=key.split(":"),index=parseInt(indexText);
@@ -681,7 +1277,7 @@ function canResolvePlayerEffect(effect,draft){
   return effectTargets(gameState,effect,draft.targetId).every(owner=>{
     const cards=graveyardCreatureCards(owner);
     const selected=draft.choices[owner.id]||[];
-    return cards.length===0||selected.length>=Math.min(effect.count,cards.length);
+    return cards.length===0||selected.length>=playerActionAmount(effect,owner);
   });
 }
 function resolvePlayerEffect(effect,draft){
@@ -690,46 +1286,57 @@ function resolvePlayerEffect(effect,draft){
   cmdSnapshot();
   targets.forEach(target=>{
     const name=effectTargetName(target);
-    if(effect.action==="reanimate"){
-      const cardIds=(draft.choices[target.id]||[]).slice(0,effect.count);
+    const amount=playerActionAmount(effect,target);
+    if(effect.action==="exileGraveyards"){
+      const result=moveGraveyardToExile(target);
+      if(result.total===0){
+        logCommander(`${name}'s graveyard is already empty.`);
+      }else{
+        const typeSummary=result.moved.length?discardedTypeSummary(result.moved):"Unknown";
+        const detail=result.unmaterialized?` Includes ${result.unmaterialized} previously unmaterialized card${result.unmaterialized===1?"":"s"}.`:"";
+        logCommander(`${name} exiles ${result.total} graveyard card${result.total===1?"":"s"}. Types: ${typeSummary}.${detail}`);
+      }
+    }else if(effect.action==="reanimate"){
+      const cardIds=(draft.choices[target.id]||[]).slice(0,amount);
       const reanimated=cardIds.map(cardId=>reanimateGraveyardCard(target,cardId)).filter(Boolean);
-      if(reanimated.length)logCommander(`You reanimate ${reanimated.map(discardedCardText).join(", ")} from ${name}'s graveyard.`);
-      else logCommander(`${name}'s graveyard has no selected creature to reanimate.`);
+      if(reanimated.length)logCommander(`You resurrect ${reanimated.map(discardedCardText).join(", ")} from ${name}'s graveyard onto your battlefield.`);
+      else logCommander(`${name}'s graveyard has no selected creature cards to resurrect.`);
     }else if(effect.action==="discard"){
       if(target.id==="player"){
-        const amount=Math.min(effect.count,target.handSize);target.handSize-=amount;
-        const discarded=Array.from({length:amount},()=>addPlayerGraveyardCard(target,{name:"Unrevealed discarded card",ico:"🃏",types:["Unknown"],virtual:true})).filter(Boolean);
+        const discardedAmount=Math.min(amount,target.handSize);target.handSize-=discardedAmount;
+        const discarded=Array.from({length:discardedAmount},()=>addPlayerGraveyardCard(target,{name:"Unrevealed discarded card",ico:"🃏",types:["Unknown"],virtual:true})).filter(Boolean);
         recordDiscardedCards(target,discarded);
         logCommander(`${name} discards ${discarded.length?discarded.map(discardedCardText).join(", "):"no cards"}. Types: ${discardedTypeSummary(discarded)}. The physical-hand model does not reveal their actual identities.`);
       }else{
-        const discarded=discardFromOpponent(target,effect.count);
+        const discarded=discardFromOpponent(target,amount);
         logCommander(`${name} chooses to discard ${discarded.length?discarded.map(discardedCardText).join(", "):"no cards"}.${discarded.length?` Types: ${discardedTypeSummary(discarded)}.`:""}`);
       }
     }else if(effect.action==="mill"){
       if(target.id==="player"){
-        const amount=Math.min(effect.count,target.librarySize);target.librarySize-=amount;
-        const milled=Array.from({length:amount},()=>addPlayerGraveyardCard(target,{name:"Unrevealed milled card",ico:"📚",types:["Unknown"],virtual:true})).filter(Boolean);
+        const milledAmount=Math.min(amount,target.librarySize);target.librarySize-=milledAmount;
+        const milled=Array.from({length:milledAmount},()=>addPlayerGraveyardCard(target,{name:"Unrevealed milled card",ico:"📚",types:["Unknown"],virtual:true})).filter(Boolean);
         logCommander(`${name} mills ${milled.length?milled.map(discardedCardText).join(", "):"no cards"}. Types: ${discardedTypeSummary(milled)}. The physical-library model does not reveal their actual identities.`);
       }else{
-        const milled=millOpponent(target,effect.count);
+        const milled=millOpponent(target,amount);
         logCommander(`${name} mills ${milled.length?milled.map(discardedCardText).join(", "):"no cards"}.${milled.length?` Types: ${discardedTypeSummary(milled)}.`:""}`);
       }
     }else if(effect.action==="draw"){
       if(target.id==="player"){
-        const amount=Math.min(effect.count,target.librarySize);target.librarySize-=amount;target.handSize+=amount;
-        logCommander(`${name} draws ${amount} card${amount===1?"":"s"}.`);
+        const drawnAmount=Math.min(amount,target.librarySize);target.librarySize-=drawnAmount;target.handSize+=drawnAmount;
+        logCommander(`${name} draws ${drawnAmount} card${drawnAmount===1?"":"s"}.`);
       }else{
-        let drawn=0;for(let i=0;i<effect.count;i++)if(drawForOpponent(target)!=="none")drawn++;
+        let drawn=0;for(let i=0;i<amount;i++)if(drawForOpponent(target)!=="none")drawn++;
         logCommander(`${name} draws ${drawn} card${drawn===1?"":"s"}.`);
       }
     }else if(effect.action==="loseLife"||effect.action==="gainLife"){
-      const direction=effect.action==="loseLife"?-1:1;target.life=Math.max(0,target.life+(direction*effect.count));
-      logCommander(`${name} ${effect.action==="loseLife"?"loses":"gains"} ${effect.count} life. (Life → ${target.life})`);
+      const direction=effect.action==="loseLife"?-1:1;target.life=Math.max(0,target.life+(direction*amount));
+      logCommander(`${name} ${effect.action==="loseLife"?"loses":"gains"} ${amount} life. (Life → ${target.life})`);
     }else if(target.id==="player"){
-      if(effect.action==="exile")target.exileCount+=effect.count;
-      logCommander(`${effect.action==="exile"?"Exile":"Resolve"} ${effect.count} ${effect.cardType} card${effect.count===1?"":"s"} you control.`);
+      if(effect.action==="exile")target.exileCount+=amount;
+      const subject=effect.all?`all ${effect.cardType}s you control`:`${amount} ${effect.cardType} card${amount===1?"":"s"} you control`;
+      logCommander(`${effect.action==="exile"?"Exile":"Resolve"} ${subject}.`);
     }else{
-      const selections=chooseCpuPermanents(target,effect.cardType,effect.count).sort((left,right)=>{
+      const selections=chooseCpuPermanents(target,effect.cardType,amount).sort((left,right)=>{
         const [leftKind,leftIndex]=left.split(":"),[rightKind,rightIndex]=right.split(":");
         return leftKind===rightKind?parseInt(rightIndex)-parseInt(leftIndex):leftKind.localeCompare(rightKind);
       });
@@ -740,19 +1347,19 @@ function resolvePlayerEffect(effect,draft){
       else logCommander(`${name} has no ${effect.cardType} to ${effect.action}.`);
     }
   });
-  commanderEffectDraft={scope:draft.scope,action:draft.action,count:draft.count,cardType:draft.cardType,targetId:null,choices:{},creaturesPlayed:draft.creaturesPlayed||0};
+  commanderEffectDraft={scope:draft.scope,action:draft.action,count:1,all:false,cardType:draft.cardType,targetId:null,choices:{},creaturesPlayed:draft.creaturesPlayed||0};
   ensureCommanderEffectState(gameState);saveState();showCommanderGame();
 }
 function isPermanentPlayerAction(effect){return effect.action==="destroy"||effect.action==="sacrifice"||effect.action==="exile";}
 async function confirmAndResolvePlayerEffect(effect,draft){
   const targets=effectTargets(gameState,effect,draft.targetId);
-  const affectsPlayer=effect.action==="reanimate"?false:targets.some(target=>target.id==="player");
+  const affectsPlayer=effect.action!=="reanimate"&&effect.action!=="exileGraveyards"&&targets.some(target=>target.id==="player");
   const cpuTargets=targets.filter(target=>target.id!=="player");
   const playerInstruction=affectsPlayer
     ?`Complete your physical action now, then confirm it: ${playerEffectSummary(effect)}`
     :`No physical action is required from you.`;
   const cpuInstruction=effect.action==="reanimate"
-    ?"Selected creature cards will enter your battlefield under your control."
+    ?"Selected creature cards will be resurrected onto your battlefield under your control."
     :cpuTargets.length
     ?isPermanentPlayerAction(effect)
       ?"Each affected CPU will automatically choose its least valuable eligible permanent."
@@ -796,8 +1403,8 @@ function renderSetupScreen(onStartAdventure, onStartCommander) {
           <label>Opponents</label>
           <div class="count-row">
             <button type="button" class="count-btn" data-count="1">1</button>
-            <button type="button" class="count-btn active" data-count="2">2</button>
-            <button type="button" class="count-btn" data-count="3">3</button>
+            <button type="button" class="count-btn" data-count="2">2</button>
+            <button type="button" class="count-btn active" data-count="3">3</button>
             <button type="button" class="count-btn" data-count="4">4</button>
           </div>
         </div>
@@ -819,7 +1426,7 @@ function renderSetupScreen(onStartAdventure, onStartCommander) {
     </div>`;
   overlay.classList.add("show");
 
-  let selectedCount=2;
+  let selectedCount=3;
   modal.querySelectorAll('.count-btn').forEach(btn=>{
     btn.onclick=()=>{modal.querySelectorAll('.count-btn').forEach(b=>b.classList.remove('active'));btn.classList.add('active');selectedCount=parseInt(btn.dataset.count,10);};
   });
@@ -860,19 +1467,52 @@ function showGraveyardViewer(state,ownerId){
   const owner=findGraveyardOwner(state,ownerId);
   const overlay=document.getElementById('overlay'),modal=document.getElementById('modal');
   if(!owner||!overlay||!modal)return;
-  const cards=owner.graveyard||[];
-  const unmaterialized=unmaterializedGraveyardCount(owner);
   const ownerName=owner.id==="player"?"Your":`${owner.name.split(",")[0]}'s`;
-  const cardsHtml=cards.length?cards.map(card=>`<li class="graveyard-card ${card.virtual?"virtual":""}">
-    <span class="graveyard-card-icon">${escapeHtml(card.ico||"🃏")}</span><div class="graveyard-card-info"><strong>${escapeHtml(card.name)}</strong><span>${escapeHtml(cardTypeText(card))}${card.p!=null&&card.t!=null?` · ${card.p}/${card.t}`:""}</span>${card.effect?`<small>${escapeHtml(card.effect)}</small>`:""}</div>
-  </li>`).join(""):"<li class=\"graveyard-empty\">No materialized cards yet.</li>";
-  const historicalNote=unmaterialized?`<p class="graveyard-untracked">${unmaterialized} earlier card${unmaterialized===1?" was":"s were"} counted but not materialized, so ${unmaterialized===1?"it":"their identities"} cannot be shown.</p>`:"";
-  modal.className="modal graveyard-modal";
-  modal.innerHTML=`<div class="graveyard-modal-head"><div><span class="big-ico">⚰</span><h2>${escapeHtml(ownerName)} Graveyard</h2></div><button type="button" class="graveyard-close" aria-label="Close graveyard">×</button></div><p class="graveyard-summary">${owner.graveyardCount||0} card${owner.graveyardCount===1?"":"s"} · ${cards.length} materialized</p><ul class="graveyard-card-list">${cardsHtml}</ul>${historicalNote}<button type="button" class="cta ghost" id="closeGraveyardViewer">Close</button>`;
-  overlay.classList.add("show");
+  let selectedCardId=null;
   const close=()=>{overlay.classList.remove("show");modal.innerHTML="";};
-  document.getElementById("closeGraveyardViewer").onclick=close;
-  modal.querySelector(".graveyard-close").onclick=close;
+  const render=()=>{
+    const cards=owner.graveyard||[];
+    const selectableCards=owner.id==="player"?[]:cards.filter(card=>!card.isToken&&card.types?.includes("Creature"));
+    if(!selectableCards.some(card=>card.id===selectedCardId))selectedCardId=null;
+    const selectedCard=selectableCards.find(card=>card.id===selectedCardId)||null;
+    const unmaterialized=unmaterializedGraveyardCount(owner);
+    const cardsHtml=cards.length?cards.map(card=>{
+      const selectable=selectableCards.some(candidate=>candidate.id===card.id);
+      const selected=card.id===selectedCardId;
+      return `<li class="graveyard-card ${card.virtual?"virtual":""} ${selectable?"selectable":""} ${selected?"selected":""}">
+        <span class="graveyard-card-icon">${escapeHtml(card.ico||"🃏")}</span><div class="graveyard-card-info"><strong>${escapeHtml(card.name)}</strong><span>${escapeHtml(cardTypeText(card))}${card.p!=null&&card.t!=null?` · ${card.p}/${card.t}`:""}</span>${card.effect?`<small>${escapeHtml(card.effect)}</small>`:""}</div>
+        ${selectable?`<button type="button" class="graveyard-card-select" data-graveyard-card-id="${escapeHtml(card.id)}" aria-pressed="${selected}">${selected?"Selected":"Select creature"}</button>`:""}
+      </li>`;
+    }).join(""):"<li class=\"graveyard-empty\">No materialized cards yet.</li>";
+    const historicalNote=unmaterialized?`<p class="graveyard-untracked">${unmaterialized} earlier card${unmaterialized===1?" was":"s were"} counted but not materialized, so ${unmaterialized===1?"it":"their identities"} cannot be shown.</p>`:"";
+    const actionControls=selectableCards.length?`<section class="graveyard-card-actions"><p>${selectedCard?`Selected: <strong>${escapeHtml(selectedCard.name)}</strong>.`:"Select a creature card, then choose an action."}</p><div><button type="button" class="target-btn graveyard-exile-action" id="exileSelectedGraveyardCreature" ${selectedCard?"":"disabled"}>Exile selected creature</button><button type="button" class="target-btn graveyard-resurrect-action" id="resurrectSelectedGraveyardCreature" ${selectedCard?"":"disabled"}>Resurrect to your battlefield</button></div></section>`:"";
+    modal.className="modal graveyard-modal";
+    modal.innerHTML=`<div class="graveyard-modal-head"><div><span class="big-ico">⚰</span><h2>${escapeHtml(ownerName)} Graveyard</h2></div><button type="button" class="graveyard-close" aria-label="Close graveyard">×</button></div><p class="graveyard-summary">${owner.graveyardCount||0} card${owner.graveyardCount===1?"":"s"} · ${cards.length} materialized</p><ul class="graveyard-card-list">${cardsHtml}</ul>${historicalNote}${actionControls}<button type="button" class="cta ghost" id="closeGraveyardViewer">Close</button>`;
+    overlay.classList.add("show");
+    document.getElementById("closeGraveyardViewer").onclick=close;
+    modal.querySelector(".graveyard-close").onclick=close;
+    modal.querySelectorAll("[data-graveyard-card-id]").forEach(button=>button.onclick=()=>{
+      selectedCardId=button.dataset.graveyardCardId;
+      render();
+    });
+    const resolveSelectedCreature=action=>{
+      if(!selectedCard)return;
+      cmdSnapshot();
+      const moved=action==="exile"
+        ?exileOpponentGraveyardCreature(owner,selectedCard.id)
+        :reanimateGraveyardCard(owner,selectedCard.id);
+      if(!moved)return;
+      if(action==="exile")logCommander(`You exile ${discardedCardText(moved)} from ${owner.name.split(",")[0]}'s graveyard.`);
+      else logCommander(`You resurrect ${discardedCardText(moved)} from ${owner.name.split(",")[0]}'s graveyard onto your battlefield.`);
+      ensureCommanderEffectState(gameState);
+      saveState();
+      close();
+      showCommanderGame();
+    };
+    modal.querySelector("#exileSelectedGraveyardCreature")?.addEventListener("click",()=>resolveSelectedCreature("exile"));
+    modal.querySelector("#resurrectSelectedGraveyardCreature")?.addEventListener("click",()=>resolveSelectedCreature("resurrect"));
+  };
+  render();
 }
 function wireGraveyardViewerControls(root,state){
   root.querySelectorAll("[data-graveyard-owner]").forEach(control=>{
@@ -880,6 +1520,27 @@ function wireGraveyardViewerControls(root,state){
     control.onclick=open;
     control.onkeydown=event=>{if(event.key==="Enter"||event.key===" ")open(event);};
   });
+  root.querySelectorAll("[data-exile-owner]").forEach(control=>{
+    const open=event=>{event.preventDefault();event.stopPropagation();showExileViewer(state,control.dataset.exileOwner);};
+    control.onclick=open;
+    control.onkeydown=event=>{if(event.key==="Enter"||event.key===" ")open(event);};
+  });
+}
+function showExileViewer(state,ownerId){
+  const owner=findGraveyardOwner(state,ownerId);
+  const overlay=document.getElementById('overlay'),modal=document.getElementById('modal');
+  if(!owner||!overlay||!modal)return;
+  const cards=owner.exile||[];
+  const ownerName=owner.id==="player"?"Your":`${owner.name.split(",")[0]}'s`;
+  const cardsHtml=cards.length?cards.map(card=>`<li class="graveyard-card exile-card">
+    <span class="graveyard-card-icon">${escapeHtml(card.ico||"🃏")}</span><div class="graveyard-card-info"><strong>${escapeHtml(card.name)}</strong><span>${escapeHtml(cardTypeText(card))}${card.p!=null&&card.t!=null?` · ${card.p}/${card.t}`:""}</span>${card.effect?`<small>${escapeHtml(card.effect)}</small>`:""}</div>
+  </li>`).join(""):"<li class=\"graveyard-empty\">No cards in exile.</li>";
+  modal.className="modal graveyard-modal";
+  modal.innerHTML=`<div class="graveyard-modal-head"><div><span class="big-ico">✦</span><h2>${escapeHtml(ownerName)} Exile</h2></div><button type="button" class="graveyard-close" aria-label="Close exile">×</button></div><p class="graveyard-summary">${owner.exileCount||0} card${owner.exileCount===1?"":"s"} exiled</p><ul class="graveyard-card-list">${cardsHtml}</ul><button type="button" class="cta ghost" id="closeGraveyardViewer">Close</button>`;
+  overlay.classList.add("show");
+  const close=()=>{overlay.classList.remove("show");modal.innerHTML="";};
+  document.getElementById("closeGraveyardViewer").onclick=close;
+  modal.querySelector(".graveyard-close").onclick=close;
 }
 
 function renderLifeHud(state){
@@ -897,7 +1558,7 @@ function renderLifeHud(state){
   state.opponents.forEach(opp=>{
     const dead=isOpponentDead(opp);const cd=state.player.commanderDamageReceived[opp.id]||0;
     const active=state._activeOppIndex===opp.index&&state.phase==="cpu";
-    html+=`<button type="button" class="life-pip life-pip-btn ${dead?'dead':''} ${active?'active-opp':''}" data-view="${opp.index}" style="border-color:${opp.color}"><span class="life-ico">${opp.ico}</span><span class="life-name">${opp.name.split(',')[0]}</span><span class="life-val ${opp.life<=10?'warn':''}">${dead?'☠':opp.life}</span><span class="life-creatures">🃏 ${opponentHandSize(opp)} · 📚 ${opponentDeckSize(opp)} · <span class="life-graveyard" role="button" tabindex="0" data-graveyard-owner="${opp.id}">⚰ ${opp.graveyardCount}</span></span>${cd>0?`<span class="life-cmdr-dmg">⚜${cd}</span>`:''}</button>`;
+    html+=`<button type="button" class="life-pip life-pip-btn ${dead?'dead':''} ${active?'active-opp':''}" data-view="${opp.index}" style="border-color:${opp.color}"><span class="life-ico">${opp.ico}</span><span class="life-name">${opp.name.split(',')[0]}</span><span class="life-val ${opp.life<=10?'warn':''}">${dead?'☠':opp.life}</span><span class="life-creatures">🃏 ${opponentHandSize(opp)} · 📚 ${opponentDeckSize(opp)} · <span class="life-graveyard" role="button" tabindex="0" data-graveyard-owner="${opp.id}">⚰ ${opp.graveyardCount}</span>${opp.exileCount?` · <span class="life-graveyard" role="button" tabindex="0" data-exile-owner="${opp.id}">✦ ${opp.exileCount}</span>`:''}</span>${cd>0?`<span class="life-cmdr-dmg">⚜${cd}</span>`:''}</button>`;
   });
   el.innerHTML=html;
   el.querySelectorAll('.life-pip-btn').forEach(btn=>{
@@ -925,7 +1586,7 @@ function renderSingleView(state,board){
   const totalViews=state.opponents.length+1; // opponents + player
   const viewIdx=state.viewTarget; // -1 for player, 0+ for opponents
   const isPlayerView=viewIdx===-1;
-  const canRemove=state.phase==="player";
+  const canRemove=true; // Always allow removal to track board state
 
   if(isPlayerView){
     renderPlayerBoardView(state,board,totalViews);
@@ -940,7 +1601,7 @@ function renderSingleView(state,board){
       const kws=t.kws&&t.kws.length?t.kws.join(' · '):'';
       const tooltip=`${t.name} — ${t.p}/${t.t}${t.kws&&t.kws.length?' · '+t.kws.join(', '):''}${t.effect?' — '+t.effect:''}`;
       return `<div class="card ${t.kind==='commander'?'commander':''} ${t.summoningSick?'sick':''} ${t.attacking?'tapped':''}" title="${tooltip.replace(/"/g,'&quot;')}">
-      ${canRemove?`<button type="button" class="c-x" data-opp="${opp.id}" data-rm-idx="${i}" title="Remove ${t.name}" aria-label="Remove ${t.name}">×</button>`:''}
+      ${canRemove?`<button type="button" class="c-remove" data-opp="${opp.id}" data-rm-idx="${i}" title="Remove ${t.name}" aria-label="Remove ${t.name}">↗</button>`:''}
       <span class="c-name"><span>${t.name}</span><span class="mana">${t.kind==='commander'?'⚜':'🌲'}</span></span>
       <span class="c-art">${t.ico}</span>
       ${kws?`<span class="c-kw">${kws}</span>`:''}
@@ -964,7 +1625,7 @@ function renderSingleView(state,board){
       <div class="cbs-item"><span class="cbs-label">Commander</span><span class="cbs-val">${opp.commanderZone?'Zone (+'+opp.commanderTax+')':'Field'}</span></div>
       <div class="cbs-item"><span class="cbs-label">Artifact — Equipment</span><span class="cbs-val">${opp.gear}</span></div>
       <div class="cbs-item"><span class="cbs-label">Graveyard</span><button type="button" class="cbs-zone-btn" data-graveyard-owner="${opp.id}">⚰ ${opp.graveyardCount}</button></div>
-      <div class="cbs-item"><span class="cbs-label">Exile</span><span class="cbs-val">🌀 ${opp.exileCount}</span></div>
+      <div class="cbs-item"><span class="cbs-label">Exile</span><button type="button" class="cbs-zone-btn" data-exile-owner="${opp.id}">✦ ${opp.exileCount}</button></div>
     </div></div>
     <div class="field-col"><div class="field-h"><span class="lbl">${opp.name.split(',')[0]}'s creatures</span></div><div class="tokens">${tokensHtml}</div></div></div>`;
 
@@ -996,15 +1657,48 @@ function renderSingleView(state,board){
 
   // Wire remove buttons during player turn
   if(canRemove){
-    board.querySelectorAll('.c-x[data-rm-idx]').forEach(btn=>{
-      btn.onclick=(e)=>{
+    board.querySelectorAll('.c-remove[data-rm-idx]').forEach(btn=>{
+      btn.onclick=async(e)=>{
         e.stopPropagation();
         const targetOpp=state.opponents.find(o=>o.id===btn.dataset.opp);
         const idx=parseInt(btn.dataset.rmIdx);
         if(!targetOpp||idx>=targetOpp.tokens.length)return;
-        const moved=removeOpponentPermanent(targetOpp,`token:${idx}`,"graveyard");
-        if(moved)logCommander(`You destroy ${movementCardText(moved)} from ${targetOpp.name.split(',')[0]}. Types: ${discardedTypeSummary([moved])}.`);
-        renderBoardView(state);renderLifeHud(state);saveState();
+        const token=targetOpp.tokens[idx];
+
+        // Commanders always return to command zone
+        if(token.kind==="commander"){
+          const moved=removeOpponentPermanent(targetOpp,`token:${idx}`,"graveyard");
+          if(moved)logCommander(`${moved.name} returns to the command zone.`);
+          renderBoardView(state);renderLifeHud(state);
+          if(state.phase==="cpu"&&state._activeOppIndex!=null){
+            const activeOpp=state.opponents[state._activeOppIndex];
+            if(activeOpp){const panel=document.getElementById('respGrid');if(panel){renderResponseForm(panel,activeOpp,activeOpp._lastResult||{actions:[],attackPower:0,target:null},activeOpp._lastResult?.target==="player"&&activeOpp._lastResult?.attackPower>0);}}
+          }
+          saveState();
+          return;
+        }
+
+        // Ask graveyard or exile
+        const dest=await askCommanderRemovalDestination(token);
+        if(!dest)return; // cancelled
+        const moved=removeOpponentPermanent(targetOpp,`token:${idx}`,dest);
+        if(moved){
+          const verb=dest==="exile"?"exile":"destroy";
+          logCommander(`You ${verb} ${movementCardText({...moved,destination:dest})} from ${targetOpp.name.split(',')[0]}. Types: ${discardedTypeSummary([moved])}.`);
+        }
+        renderBoardView(state);renderLifeHud(state);
+        // Refresh the action/response panel to reflect updated creature list
+        if(state.phase==="cpu"&&state._activeOppIndex!=null){
+          const activeOpp=state.opponents[state._activeOppIndex];
+          if(activeOpp){
+            const panel=document.getElementById('respGrid');
+            if(panel){
+              const attacksPlayer=activeOpp._lastResult?.target==="player"&&activeOpp._lastResult?.attackPower>0;
+              renderResponseForm(panel,activeOpp,activeOpp._lastResult||{actions:[],attackPower:0,target:null},attacksPlayer);
+            }
+          }
+        }
+        saveState();
       };
     });
   }
@@ -1034,7 +1728,7 @@ function renderPlayerBoardView(state,board,totalViews){
       ${cmdrDmgHtml}
       <div class="cbs-item"><span class="cbs-label">Creatures</span><div class="cbs-adj"><button type="button" class="cbs-btn" data-player-stat="creatures" data-d="-1">−</button><span class="cbs-val">${p.creatures}</span><button type="button" class="cbs-btn" data-player-stat="creatures" data-d="1">+</button></div></div>
       <div class="cbs-item"><span class="cbs-label">Graveyard</span><button type="button" class="cbs-zone-btn" data-graveyard-owner="player">⚰ ${p.graveyardCount}</button></div>
-      <div class="cbs-item"><span class="cbs-label">Exile</span><span class="cbs-val">🌀 ${p.exileCount}</span></div>
+      <div class="cbs-item"><span class="cbs-label">Exile</span><button type="button" class="cbs-zone-btn" data-exile-owner="player">✦ ${p.exileCount}</button></div>
     </div></div>
     <div class="field-col"><div class="field-h"><span class="lbl">Your board state</span></div><div class="tokens">${playerTokensHtml}</div></div></div></div>`;
 
@@ -1171,6 +1865,7 @@ function saveState(){safeSet(SAVE_KEY,JSON.stringify({...gameState,_type:"comman
 
 function showCommanderGame(){
   ensureCommanderEffectState(gameState);
+  applyBattlefieldRuleModifiers();
   document.getElementById('modePill').textContent=`Commander Battle`;
   document.getElementById('turnNum').textContent=gameState.turn;
   document.getElementById('phasePill').textContent=gameState.phase==="cpu"?"Opponents' Turn":"Your Turn";
@@ -1347,22 +2042,8 @@ function advanceCpuQueue(){
   const result=executeOpponentTurn(opp,allPlayers);
   currentCpuResult={opponent:opp,...result};
 
-  // Auto-resolve CPU-on-CPU damage (player doesn't interact with these)
-  if(result.attackPower>0&&result.target&&result.target!=="player"){
-    const tgt=gameState.opponents.find(p=>p.id===result.target);
-    if(tgt&&!isOpponentDead(tgt)){
-      const cmdDmg=result.commanderAttacking?(opp.tokens.find(t=>t.kind==="commander")?.p||0):0;
-      tgt.life=Math.max(0,tgt.life-result.attackPower);
-      tgt.damageLog[opp.id]=(tgt.damageLog[opp.id]||0)+result.attackPower;
-      tgt.lastAttacker=opp.id;
-      if(cmdDmg>0)tgt.commanderDamageReceived[opp.id]=(tgt.commanderDamageReceived[opp.id]||0)+cmdDmg;
-      if(result.attackPower>=5&&tgt.tokens.length>0&&Math.random()<0.4){
-        const vi=Math.floor(Math.random()*tgt.tokens.length);
-        const moved=removeOpponentPermanent(tgt,`token:${vi}`,"graveyard");
-        if(moved)logCommander(`${opp.name.split(',')[0]}'s attack destroys ${movementCardText(moved)} from ${tgt.name.split(',')[0]}. Types: ${discardedTypeSummary([moved])}.`);
-      }
-    }
-  }
+  // CPU-vs-CPU combat resolves after the response window so intervention can
+  // change the actual blockers and attackers before damage is assigned.
 
   // Show this opponent's actions and give the player a response window
   showOpponentTurnResponse(opp,result);
@@ -1386,6 +2067,7 @@ function showOpponentTurnResponse(opp,result){
     logCommander(`${opp.name.split(',')[0]} ${action.detail}`);
   });
   gameState._activeOppIndex=opp.index;
+  opp._lastResult=result;
   if(gameState.viewMode==="single")gameState.viewTarget=opp.index;
   renderBoardView(gameState);
 
@@ -1412,6 +2094,73 @@ function showOpponentTurnResponse(opp,result){
   const isIntervention=!attacksPlayer&&result.attackPower>0;
   document.getElementById('respTitle').textContent=attacksPlayer?"Your Response":isIntervention?"Intervene?":"Your Response";
   renderResponseForm(panel,opp,result,attacksPlayer);
+}
+
+/**
+ * Commander-mode combat choice popup — block (stop damage, creature lives) or kill (dies → graveyard).
+ * Returns "blocked" | "dies" | null (cancelled).
+ */
+function askCommanderCombatChoice(token){
+  const p=token.p||0, t=token.t||0;
+  const kws=token.kws||[];
+  return new Promise(res=>{
+    inputResolver=res;
+    document.getElementById('inputTitle').textContent=`${token.name} (${p}/${t})`;
+    const body=document.getElementById('inputBody');
+    body.innerHTML=`<div class="combat-choice-body">
+      <div class="combat-choice-card">${token.ico||"🐾"} <b>${token.name}</b>${kws.length?' · '+kws.join(', '):''}</div>
+      <div class="combat-choice-btns">
+        <button type="button" class="combat-choice-btn choice-blocked" id="choiceBlocked">
+          <span class="choice-ico">🛡️</span>
+          <span class="choice-label">Blocked</span>
+          <span class="choice-desc">Stop ${p} damage · creature survives</span>
+        </button>
+        <button type="button" class="combat-choice-btn choice-dies" id="choiceDies">
+          <span class="choice-ico">💀</span>
+          <span class="choice-label">Dies</span>
+          <span class="choice-desc">Creature is destroyed → graveyard</span>
+        </button>
+      </div>
+    </div>`;
+    const acts=document.getElementById('inputActions'); acts.className="input-actions hide-ok";
+    document.getElementById('inputCancel').onclick=()=>{ closeInput(); res(null); };
+    document.getElementById('choiceBlocked').onclick=()=>{ closeInput(); res("blocked"); };
+    document.getElementById('choiceDies').onclick=()=>{ closeInput(); res("dies"); };
+    document.getElementById('inputOverlay').classList.add('show');
+  });
+}
+/**
+ * Commander-mode removal destination popup — graveyard or exile.
+ * Returns "graveyard" | "exile" | null (cancelled).
+ */
+function askCommanderRemovalDestination(token){
+  const p=token.p||0, t=token.t||0;
+  const kws=token.kws||[];
+  return new Promise(res=>{
+    inputResolver=res;
+    document.getElementById('inputTitle').textContent=`Remove ${token.name}`;
+    const body=document.getElementById('inputBody');
+    body.innerHTML=`<div class="combat-choice-body">
+      <div class="combat-choice-card">${token.ico||"🐾"} <b>${token.name}</b> (${p}/${t})${kws.length?' · '+kws.join(', '):''}</div>
+      <div class="combat-choice-btns">
+        <button type="button" class="combat-choice-btn choice-graveyard" id="choiceGraveyard">
+          <span class="choice-ico">☠</span>
+          <span class="choice-label">Graveyard</span>
+          <span class="choice-desc">Destroyed, sacrificed, or died</span>
+        </button>
+        <button type="button" class="combat-choice-btn choice-exile" id="choiceExile">
+          <span class="choice-ico">✦</span>
+          <span class="choice-label">Exile</span>
+          <span class="choice-desc">Removed from the game entirely</span>
+        </button>
+      </div>
+    </div>`;
+    const acts=document.getElementById('inputActions'); acts.className="input-actions hide-ok";
+    document.getElementById('inputCancel').onclick=()=>{ closeInput(); res(null); };
+    document.getElementById('choiceGraveyard').onclick=()=>{ closeInput(); res("graveyard"); };
+    document.getElementById('choiceExile').onclick=()=>{ closeInput(); res("exile"); };
+    document.getElementById('inputOverlay').classList.add('show');
+  });
 }
 
 function renderResponseForm(panel,opp,result,attacksPlayer){
@@ -1499,14 +2248,16 @@ function renderResponseForm(panel,opp,result,attacksPlayer){
 
   // Wire kill-select buttons — keyed by opp id + index
   const killMap={};  // {oppId: Set of indices}
+  const blockMap={};  // {oppId: Set of indices} — blocked but alive
   function updateDamageFromKills(){
     if(!attacksPlayer)return;
     const attackers=opp.tokens.filter(t=>t.attacking);
     const attackerKills=killMap[opp.id]||new Set();
+    const attackerBlocks=blockMap[opp.id]||new Set();
     let remaining=0; let cmdAlive=false;
     attackers.forEach((t)=>{
       const realIdx=opp.tokens.indexOf(t);
-      if(!attackerKills.has(realIdx)){remaining+=t.p; if(t.kind==="commander")cmdAlive=true;}
+      if(!attackerKills.has(realIdx)&&!attackerBlocks.has(realIdx)){remaining+=t.p; if(t.kind==="commander")cmdAlive=true;}
     });
     const dmgInput=panel.querySelector('input[data-key="damageThrough"]');
     if(dmgInput){ dmgInput.value=remaining; dmgInput.max=remaining; }
@@ -1516,13 +2267,60 @@ function renderResponseForm(panel,opp,result,attacksPlayer){
       else{const cmdPower=opp.tokens.find(t=>t.kind==="commander")?.p||0;cmdrInput.max=Math.min(cmdPower,remaining);cmdrInput.value=Math.min(parseInt(cmdrInput.value)||0,cmdrInput.max);}
     }
   }
+  function updateBtnVisual(btn,oppId,idx){
+    const killed=killMap[oppId]&&killMap[oppId].has(idx);
+    const blocked=blockMap[oppId]&&blockMap[oppId].has(idx);
+    btn.classList.toggle('selected',killed);
+    btn.classList.toggle('blocked-btn',blocked);
+    // Update label
+    const statusEl=btn.querySelector('.kill-btn-status');
+    if(statusEl){
+      if(killed)statusEl.textContent='💀';
+      else if(blocked)statusEl.textContent='🛡️';
+      else statusEl.textContent=btn.classList.contains('is-tapped')?'⚔':'⬡';
+    }
+  }
   panel.querySelectorAll('.kill-btn').forEach(btn=>{
-    btn.onclick=()=>{
+    btn.onclick=async()=>{
       const oppId=btn.dataset.opp;
       const idx=parseInt(btn.dataset.idx);
       if(!killMap[oppId])killMap[oppId]=new Set();
-      if(killMap[oppId].has(idx)){killMap[oppId].delete(idx);btn.classList.remove('selected');}
-      else{killMap[oppId].add(idx);btn.classList.add('selected');}
+      if(!blockMap[oppId])blockMap[oppId]=new Set();
+
+      // If already marked, clicking resets
+      if(killMap[oppId].has(idx)||blockMap[oppId].has(idx)){
+        killMap[oppId].delete(idx);
+        blockMap[oppId].delete(idx);
+        updateBtnVisual(btn,oppId,idx);
+        updateDamageFromKills();
+        return;
+      }
+
+      // Find the token to check if it's attacking
+      const targetOpp=gameState.opponents.find(o=>o.id===oppId);
+      const token=targetOpp&&targetOpp.tokens[idx];
+      if(!token){
+        // Fallback: toggle kill
+        killMap[oppId].add(idx);
+        updateBtnVisual(btn,oppId,idx);
+        updateDamageFromKills();
+        return;
+      }
+
+      // If attacking, show block/die choice
+      if(token.attacking){
+        const choice=await askCommanderCombatChoice(token);
+        if(!choice)return; // cancelled
+        if(choice==="blocked"){
+          blockMap[oppId].add(idx);
+        }else{
+          killMap[oppId].add(idx);
+        }
+      }else{
+        // Non-attacking creatures can only die
+        killMap[oppId].add(idx);
+      }
+      updateBtnVisual(btn,oppId,idx);
       updateDamageFromKills();
     };
   });
@@ -1607,7 +2405,10 @@ function resolveResponseAndContinue(opp,result,attacksPlayer,panel){
   if(attacksPlayer){
     // Recalculate actual attack power after removals (attackers may have been removed)
     const actualPower=opp.tokens.filter(t=>t.attacking).reduce((s,t)=>s+t.p,0);
-    const finalDamage=Math.min(damageThrough,actualPower);
+    const declaredDamage=Math.min(damageThrough,actualPower);
+    const declaredCommanderDamage=Math.min(cmdrDmgThrough,declaredDamage);
+    const prevention=applyCpuDamagePrevention(declaredDamage,declaredCommanderDamage);
+    const finalDamage=prevention.damage;
 
     if(finalDamage>0){
       gameState.player.life=Math.max(0,gameState.player.life-finalDamage);
@@ -1616,16 +2417,57 @@ function resolveResponseAndContinue(opp,result,attacksPlayer,panel){
     } else {
       logCommander(`You prevent all damage from ${opp.name.split(',')[0]}.`);
     }
+    if(prevention.reduced)logCommander(`Battlefield damage reduction lowers ${opp.name.split(',')[0]}'s combat damage by ${prevention.reduced}.`);
+    if(prevention.prevented)logCommander(`Battlefield prevention stops ${prevention.prevented} damage from ${opp.name.split(',')[0]}.`);
 
-    if(cmdrDmgThrough>0){
-      const finalCmdr=Math.min(cmdrDmgThrough,finalDamage);
-      gameState.player.commanderDamageReceived[opp.id]=(gameState.player.commanderDamageReceived[opp.id]||0)+finalCmdr;
-      logCommander(`${finalCmdr} commander damage from ${opp.name.split(',')[0]} (${gameState.player.commanderDamageReceived[opp.id]}/21).`);
+    if(prevention.commanderDamage>0){
+      gameState.player.commanderDamageReceived[opp.id]=(gameState.player.commanderDamageReceived[opp.id]||0)+prevention.commanderDamage;
+      logCommander(`${prevention.commanderDamage} commander damage from ${opp.name.split(',')[0]} (${gameState.player.commanderDamageReceived[opp.id]}/21).`);
     }
 
     if(playerDeaths>0){
       gameState.player.creatures=Math.max(0,gameState.player.creatures-playerDeaths);
       logCommander(`${playerDeaths} of your creature(s) died blocking.`);
+    }
+  }else if(result.target){
+    const defender=gameState.opponents.find(candidate=>candidate.id===result.target);
+    const attackers=opp.tokens.filter(token=>token.attacking);
+    if(defender&&!isOpponentDead(defender)&&attackers.length>0){
+      const combat=resolveCpuCombat(opp,defender,attackers);
+      const prevention=applyCpuDamagePrevention(combat.damageToDefender,combat.commanderDamage);
+      if(prevention.damage>0){
+        defender.life=Math.max(0,defender.life-prevention.damage);
+        defender.damageLog[opp.id]=(defender.damageLog[opp.id]||0)+prevention.damage;
+        defender.lastAttacker=opp.id;
+      }
+      if(prevention.commanderDamage>0){
+        defender.commanderDamageReceived[opp.id]=(defender.commanderDamageReceived[opp.id]||0)+prevention.commanderDamage;
+      }
+      if(prevention.reduced)logCommander(`Battlefield damage reduction lowers ${opp.name.split(",")[0]}'s combat damage by ${prevention.reduced}.`);
+      if(prevention.prevented)logCommander(`Battlefield prevention stops ${prevention.prevented} damage from ${opp.name.split(",")[0]}.`);
+      combat.defenderCreaturesKilled.forEach(dead=>{
+        const index=defender.tokens.indexOf(dead);
+        if(index>=0){
+          const moved=removeOpponentPermanent(defender,`token:${index}`,"graveyard");
+          if(moved)logCommander(`${dead.name} (${defender.name.split(",")[0]}) dies blocking → ${moved.destination}.`);
+        }
+      });
+      combat.attackerCreaturesKilled.forEach(dead=>{
+        const index=opp.tokens.indexOf(dead);
+        if(index>=0){
+          const moved=removeOpponentPermanent(opp,`token:${index}`,"graveyard");
+          if(moved)logCommander(`${dead.name} (${opp.name.split(",")[0]}) dies in combat → ${moved.destination}.`);
+        }
+      });
+      if(combat.blockedDescriptions.length){
+        const blocks=combat.blockedDescriptions.map(block=>{
+          const resultText=block.attackerDies&&block.blockerDies?`${block.attacker} trades with ${block.blocker}`:block.attackerDies?`${block.blocker} kills ${block.attacker}`:block.blockerDies?`${block.attacker} kills ${block.blocker}`:`${block.blocker} blocks ${block.attacker}`;
+          return `${resultText}${block.trampleDamage?` (${block.trampleDamage} trample)`:""}`;
+        }).join("; ");
+        logCommander(`Combat: ${blocks}.`);
+      }
+      if(prevention.damage>0)logCommander(`${combat.unblocked.length} unblocked attacker${combat.unblocked.length===1?"":"s"} → ${prevention.damage} damage to ${defender.name.split(",")[0]}. Life → ${defender.life}.`);
+      else if(combat.blockedDescriptions.length||prevention.prevented)logCommander(`${defender.name.split(",")[0]} takes no combat damage from ${opp.name.split(",")[0]}.`);
     }
   }
 
@@ -1692,42 +2534,138 @@ function showDrawStep(){
 
 function commanderEffectDraftForPanel(panel){
   const played=parseInt(panel?.querySelector('input[data-key="creaturesPlayed"]')?.value)||0;
+  const disclosure=panel?.querySelector('.player-action-disclosure');
   if(!commanderEffectDraft){
-    commanderEffectDraft={scope:"target",action:"discard",count:1,cardType:"creature",targetId:null,choices:{},creaturesPlayed:played};
+    commanderEffectDraft={scope:"target",action:"discard",count:1,all:false,cardType:"creature",targetId:null,choices:{},creaturesPlayed:played,actionOpen:false};
   }
+  if(disclosure)commanderEffectDraft.actionOpen=disclosure.open;
   commanderEffectDraft.creaturesPlayed=played||commanderEffectDraft.creaturesPlayed||0;
   return commanderEffectDraft;
 }
 function playerEffectSummary(effect){
+  if(effect.action==="exileGraveyards")return "Exile every card from every graveyard.";
   const scope={each:"Each player",eachOpponent:"Each opponent",target:"Target player"}[effect.scope];
-  if(effect.action==="reanimate")return `Reanimate ${effect.count} creature${effect.count===1?"":"s"} from ${scope.toLowerCase()}'s graveyard under your control.`;
+  if(effect.action==="reanimate")return effect.all
+    ?`Resurrect every eligible creature card from ${scope.toLowerCase()}'s graveyard onto your battlefield.`
+    :`Resurrect up to ${effect.count} selected creature${effect.count===1?"":"s"} from ${scope.toLowerCase()}'s graveyard onto your battlefield.`;
   const action={discard:"discards",mill:"mills",draw:"draws",loseLife:"loses",gainLife:"gains",destroy:"destroys",sacrifice:"sacrifices",exile:"exiles"}[effect.action];
+  if(effect.all){
+    if(effect.action==="gainLife")return `${scope} gains life equal to its current life total.`;
+    if(effect.action==="loseLife")return `${scope} loses all life.`;
+    const subject=(effect.action==="destroy"||effect.action==="sacrifice"||effect.action==="exile")?`all ${effect.cardType}s`:"all cards";
+    return `${scope} ${action} ${subject}.`;
+  }
   const subject=(effect.action==="destroy"||effect.action==="sacrifice"||effect.action==="exile")?`${effect.count} ${effect.cardType}${effect.count===1?"":"s"}`:effect.action.includes("Life")?`${effect.count} life`:`${effect.count} card${effect.count===1?"":"s"}`;
   return `${scope} ${action} ${subject}.`;
+}
+function battlefieldRuleTypeOptions(selected){
+  const groups={};
+  BATTLEFIELD_RULE_TYPES.forEach(rule=>{(groups[rule.group]||=[]).push(rule);});
+  return Object.entries(groups).map(([group,rules])=>`<optgroup label="${group}">${rules.map(rule=>`<option value="${rule.value}" ${rule.value===selected?"selected":""}>${rule.label}</option>`).join("")}</optgroup>`).join("");
+}
+function battlefieldRuleHelp(kind){
+  const help={
+    artifactCastBan:"Stops CPUs from casting equipment, fast mana, and modeled artifact spells.",
+    noncreatureCastBan:"Stops CPUs from casting noncreature spells while this rule remains active.",
+    cpuSpellLimit:"Each CPU can cast only one modeled spell on its turn. Land drops and activated abilities remain available.",
+    cpuCreatureAttackBan:"CPU creatures remain unable to declare attacks while this rule remains active.",
+    cpuCreatureBlockBan:"CPU creatures cannot be assigned as blockers in CPU-versus-CPU combat while this rule remains active.",
+    noncreatureTax:"The added cost applies to every modeled CPU noncreature spell, but not activated abilities such as equip.",
+    creatureTax:"The added cost applies to commanders and modeled CPU creature spells.",
+    preventCpuDamage:"Consumes prevention automatically as CPUs deal damage anywhere on the Commander battlefield.",
+    cpuGraveyardExile:"Modeled CPU cards that would enter a graveyard are sent to exile instead. The existing commander-zone handling remains unchanged.",
+    cpuDamageReduction:"Reduces the modeled total of CPU combat damage before one-shot prevention is consumed.",
+    cpuCreaturePT:"Changes every CPU creature's power and toughness while this rule remains active.",
+    cpuCreatureMinusPT:"Reduces every CPU creature's power and toughness by the specified positive values while this rule remains active.",
+    cpuCreaturePowerCap:"Caps every CPU creature's power after its other modeled power and toughness changes are applied.",
+    cpuCreatureKeywordLoss:"Removes modeled combat keywords such as trample, deathtouch, indestructible, and first strike while this rule remains active."
+  };
+  return help[kind]||"";
+}
+function battlefieldRuleAmountLabel(kind){
+  return {
+    noncreatureTax:"Additional mana",
+    creatureTax:"Additional mana",
+    preventCpuDamage:"Damage to prevent",
+    cpuDamageReduction:"Damage reduction",
+    cpuCreaturePowerCap:"Maximum power"
+  }[kind]||"Amount";
+}
+function buildBattlefieldRulesPanel(){
+  const draft=battlefieldRuleDraft;
+  const needsAmount=["noncreatureTax","creatureTax","preventCpuDamage","cpuDamageReduction","cpuCreaturePowerCap"].includes(draft.kind);
+  const needsStats=["cpuCreaturePT","cpuCreatureMinusPT"].includes(draft.kind);
+  const statsAreReductions=draft.kind==="cpuCreatureMinusPT";
+  const statMinimum=statsAreReductions?0:-20;
+  const powerValue=statsAreReductions?Math.max(0,parseInt(draft.power)||0):parseInt(draft.power)||0;
+  const toughnessValue=statsAreReductions?Math.max(0,parseInt(draft.toughness)||0):parseInt(draft.toughness)||0;
+  const amountMinimum=draft.kind==="cpuCreaturePowerCap"?0:1;
+  const amountValue=Math.max(amountMinimum,parseInt(draft.amount)||amountMinimum);
+  const active=activeBattlefieldRules();
+  const activeHtml=active.length
+    ?active.map(rule=>`<li class="battlefield-rule-item"><div><strong>${escapeHtml(rule.sourceName||"Unnamed battlefield rule")}</strong><span>${escapeHtml(battlefieldRuleLabel(rule))}</span></div><button type="button" class="battlefield-rule-remove" data-rule-remove-id="${rule.id}">Remove</button></li>`).join("")
+    :"<li class=\"battlefield-rule-empty\">No persistent CPU rules are active.</li>";
+  return `<section class="battlefield-rules-panel" aria-label="Battlefield Rules and Permissions">
+    <div class="battlefield-rules-heading"><div><span>🛡</span><strong>Battlefield Rules & Permissions</strong></div><small>Enforced against CPUs; track player-only effects at the table.</small></div>
+    <div class="battlefield-rule-builder">
+      <div class="player-action-grid">
+        <label>Rule<select id="battlefieldRuleType">${battlefieldRuleTypeOptions(draft.kind)}</select></label>
+        <label>Source name (optional)<input type="text" id="battlefieldRuleSource" maxlength="80" value="${escapeHtml(draft.sourceName)}" placeholder="e.g. Stony Silence"></label>
+        <label>Source type<select id="battlefieldRuleSourceType"><option value="Enchantment" ${draft.sourceType==="Enchantment"?"selected":""}>Enchantment</option><option value="Artifact" ${draft.sourceType==="Artifact"?"selected":""}>Artifact</option><option value="Rule" ${draft.sourceType==="Rule"?"selected":""}>Other / rule</option></select></label>
+        ${needsAmount?`<label>${battlefieldRuleAmountLabel(draft.kind)}<input type="number" id="battlefieldRuleAmount" min="${amountMinimum}" max="99" value="${amountValue}"></label>`:""}
+        ${needsStats?`<label>${statsAreReductions?"Power reduction":"Power"}<input type="number" id="battlefieldRulePower" min="${statMinimum}" max="20" value="${powerValue}"></label><label>${statsAreReductions?"Toughness reduction":"Toughness"}<input type="number" id="battlefieldRuleToughness" min="${statMinimum}" max="20" value="${toughnessValue}"></label>`:""}
+      </div>
+      <p class="player-effect-help">${battlefieldRuleHelp(draft.kind)}</p>
+      <button type="button" class="target-btn battlefield-rule-add" id="addBattlefieldRule">Add persistent rule</button>
+    </div>
+    <div class="battlefield-rule-active"><span>Active rules</span><ul>${activeHtml}</ul></div>
+  </section>`;
+}
+function wireBattlefieldRulesPanel(panel){
+  const updateDraft=()=>{
+    battlefieldRuleDraft.kind=panel.querySelector("#battlefieldRuleType")?.value||battlefieldRuleDraft.kind;
+    battlefieldRuleDraft.sourceName=panel.querySelector("#battlefieldRuleSource")?.value||"";
+    battlefieldRuleDraft.sourceType=panel.querySelector("#battlefieldRuleSourceType")?.value||"Enchantment";
+    const amountInput=panel.querySelector("#battlefieldRuleAmount");
+    if(amountInput)battlefieldRuleDraft.amount=Math.max(parseInt(amountInput.value)||0,parseInt(amountInput.min)||0);
+    const isReduction=battlefieldRuleDraft.kind==="cpuCreatureMinusPT";
+    const power=Math.max(parseInt(panel.querySelector("#battlefieldRulePower")?.value)||0,isReduction?0:-20);
+    const toughness=Math.max(parseInt(panel.querySelector("#battlefieldRuleToughness")?.value)||0,isReduction?0:-20);
+    battlefieldRuleDraft.power=power;
+    battlefieldRuleDraft.toughness=toughness;
+  };
+  panel.querySelector("#battlefieldRuleType")?.addEventListener("change",()=>{updateDraft();renderCommanderMainPhasePanel();});
+  panel.querySelector("#addBattlefieldRule")?.addEventListener("click",()=>{
+    updateDraft();cmdSnapshot();addBattlefieldRule(battlefieldRuleDraft);saveState();renderCommanderMainPhasePanel();
+  });
+  panel.querySelectorAll("[data-rule-remove-id]").forEach(button=>button.addEventListener("click",()=>{
+    cmdSnapshot();removeBattlefieldRule(button.dataset.ruleRemoveId,"was removed manually");saveState();renderCommanderMainPhasePanel();
+  }));
 }
 function renderCommanderMainPhasePanel(){
   const panel=document.getElementById('respGrid');if(!panel)return;
   const draft=commanderEffectDraftForPanel(panel),effect=createPlayerEffect(draft);
   const scopeOptions=PLAYER_ACTION_SCOPES.map(scope=>`<option value="${scope.value}" ${scope.value===draft.scope?"selected":""}>${scope.label}</option>`).join("");
   const actionOptions=PLAYER_ACTIONS.map(action=>`<option value="${action.value}" ${action.value===draft.action?"selected":""}>${action.label}</option>`).join("");
-  const countOptions=[1,2,3,4,5].map(count=>`<option value="${count}" ${count===effect.count?"selected":""}>${count}</option>`).join("");
   const needsCardType=effect.action==="destroy"||effect.action==="sacrifice"||effect.action==="exile";
+  const isGlobalGraveyardExile=effect.action==="exileGraveyards";
+  const isAllAmount=!isGlobalGraveyardExile&&effect.all;
   const cardTypeOptions=PLAYER_ACTION_CARD_TYPES.map(type=>`<option value="${type}" ${type===draft.cardType?"selected":""}>${type[0].toUpperCase()+type.slice(1)}</option>`).join("");
-  let actionHtml=`<div class="context-section player-effect-section"><div class="context-section-title">Create player action</div>
+  let actionHtml=`<details class="context-disclosure player-action-disclosure"${draft.actionOpen?" open":""}><summary><span>Create Player Action</span><small></small></summary><div class="context-disclosure-body"><div class="context-section player-effect-section">
     <div class="player-action-grid">
-      <label>Scope<select id="playerActionScope">${scopeOptions}</select></label>
+      ${isGlobalGraveyardExile?"":`<label>Scope<select id="playerActionScope">${scopeOptions}</select></label>`}
       <label>Action<select id="playerActionType">${actionOptions}</select></label>
-      <label>Amount<select id="playerActionCount">${countOptions}</select></label>
+      ${isGlobalGraveyardExile?"":`<label>Amount<div class="inline-stepper player-action-count-stepper${isAllAmount?" all-selected":""}"><button type="button" id="playerActionCountDown" ${isAllAmount?"disabled":""}>−</button><input type="number" min="1" max="99" value="${isAllAmount?"":effect.count}" id="playerActionCount" ${isAllAmount?"disabled":""}><button type="button" id="playerActionCountUp" ${isAllAmount?"disabled":""}>+</button></div><span class="player-action-all-toggle"><input type="checkbox" id="playerActionAll" ${isAllAmount?"checked":""}>All</span></label>`}
       ${needsCardType?`<label>Card type<select id="playerActionCardType">${cardTypeOptions}</select></label>`:""}
     </div>
-    <span class="player-effect-help">Uses the existing CPU hand, library, battlefield, and permanent-removal simulation.</span>
+    <span class="player-effect-help">${isGlobalGraveyardExile?"Moves every tracked graveyard card to its owner’s exile zone and clears all graveyard totals.":"All resolves to each target’s available modeled amount. Noncreature permanents you control remain a physical-table action."}</span>
     <div class="player-effect-preview"><strong>${playerEffectSummary(effect)}</strong></div>`;
   if(effect.scope==="target"){
     actionHtml+=`<div class="target-buttons player-effect-targets">${[gameState.player,...aliveOpponents(gameState)].map(target=>`<button type="button" class="target-btn ${draft.targetId===target.id?"active":""}" data-action-target-id="${target.id}">${target.id==="player"?"🗡️":target.ico} ${effectTargetName(target)}</button>`).join("")}</div>`;
   }
   const targets=effectTargets(gameState,effect,draft.targetId);
   if(effect.action==="reanimate"&&targets.length>0){
-    actionHtml+='<div class="player-effect-choices"><span>Select creature cards from the chosen graveyard.</span>';
+    actionHtml+=`<div class="player-effect-choices"><span>${effect.all?"Select every available creature card":`Select up to ${effect.count} creature card${effect.count===1?"":"s"}`}; every selected card is resurrected onto your battlefield.</span>`;
     targets.forEach(owner=>{
       const cards=graveyardCreatureCards(owner);
       actionHtml+=`<div class="player-effect-owner"><span>${owner.id==="player"?"🗡️":owner.ico} ${effectTargetName(owner)}'s graveyard</span>${cards.length?`<div class="kill-select">${cards.map(card=>`<button type="button" class="kill-btn ${(draft.choices[owner.id]||[]).includes(card.id)?"selected":""}" data-reanimate-owner="${owner.id}" data-reanimate-card="${card.id}">${card.ico||"🐾"} ${card.name} (${card.p||1}/${card.t||1})</button>`).join("")}</div>`:"<small>No materialized creature cards.</small>"}</div>`;
@@ -1738,20 +2676,32 @@ function renderCommanderMainPhasePanel(){
     const cpuTargets=targets.filter(target=>target.id!=="player");
     actionHtml+='<div class="player-effect-choices">';
     if(cpuTargets.length)actionHtml+=`<span>Each affected CPU chooses its least valuable ${effect.cardType} automatically.</span>`;
-    if(targets.some(target=>target.id==="player"))actionHtml+=`<div class="player-effect-manual">🗡️ Complete your own ${effect.cardType} selection at the table, then confirm resolution.</div>`;
+    if(targets.some(target=>target.id==="player"))actionHtml+=`<div class="player-effect-manual">🗡️ Complete your own ${effect.all?`all ${effect.cardType}s`:`${effect.count} ${effect.cardType}${effect.count===1?"":"s"}`} selection at the table, then confirm resolution.</div>`;
     actionHtml+="</div>";
   }
   const ready=canResolvePlayerEffect(effect,draft);
-  actionHtml+=`<button type="button" class="target-btn player-effect-resolve" id="resolvePlayerAction" ${ready?"":"disabled"}>Resolve action</button></div>`;
-  panel.innerHTML=`<div class="context-form commander-form"><div class="context-section"><div class="commander-player-actions"><div class="inline-stepper"><label>Creatures I played</label><button type="button" data-key="creaturesPlayed" data-delta="-1">−</button><input type="number" min="0" value="${draft.creaturesPlayed}" data-key="creaturesPlayed"><button type="button" data-key="creaturesPlayed" data-delta="1">+</button></div></div></div>${actionHtml}</div>`;
+  actionHtml+=`<button type="button" class="target-btn player-effect-resolve" id="resolvePlayerAction" ${ready?"":"disabled"}>Resolve action</button></div></div></details>`;
+  const battlefieldRulesHtml=buildBattlefieldRulesPanel();
+  panel.innerHTML=`<div class="context-form commander-form"><div class="context-section"><div class="commander-player-actions"><div class="inline-stepper"><label>Creatures I played</label><button type="button" data-key="creaturesPlayed" data-delta="-1">−</button><input type="number" min="0" value="${draft.creaturesPlayed}" data-key="creaturesPlayed"><button type="button" data-key="creaturesPlayed" data-delta="1">+</button></div></div></div>${battlefieldRulesHtml}${actionHtml}</div>`;
+  wireBattlefieldRulesPanel(panel);
   wireSteppers(panel);
   const updateAction=(field,value,resetTarget=false)=>{
     draft.creaturesPlayed=parseInt(panel.querySelector('input[data-key="creaturesPlayed"]')?.value)||0;
-    draft[field]=value;draft.choices={};if(resetTarget)draft.targetId=null;renderCommanderMainPhasePanel();
+    draft[field]=value;
+    if(field==="action"){draft.count=1;draft.all=false;}
+    draft.choices={};if(resetTarget)draft.targetId=null;renderCommanderMainPhasePanel();
   };
-  panel.querySelector('#playerActionScope').onchange=event=>updateAction("scope",event.target.value,true);
+  const scopeSelect=panel.querySelector('#playerActionScope');
+  if(scopeSelect)scopeSelect.onchange=event=>updateAction("scope",event.target.value,true);
   panel.querySelector('#playerActionType').onchange=event=>updateAction("action",event.target.value);
-  panel.querySelector('#playerActionCount').onchange=event=>updateAction("count",parseInt(event.target.value));
+  const countInput=panel.querySelector('#playerActionCount');
+  if(countInput){
+    countInput.onchange=()=>updateAction("count",Math.max(1,parseInt(countInput.value)||1));
+    panel.querySelector('#playerActionCountDown').onclick=()=>{countInput.value=Math.max(1,(parseInt(countInput.value)||1)-1);updateAction("count",parseInt(countInput.value));};
+    panel.querySelector('#playerActionCountUp').onclick=()=>{countInput.value=(parseInt(countInput.value)||1)+1;updateAction("count",parseInt(countInput.value));};
+  }
+  const allInput=panel.querySelector('#playerActionAll');
+  if(allInput)allInput.onchange=()=>updateAction("all",allInput.checked);
   const cardType=panel.querySelector('#playerActionCardType');
   if(cardType)cardType.onchange=event=>updateAction("cardType",event.target.value);
   panel.querySelectorAll('[data-action-target-id]').forEach(button=>{button.onclick=()=>{draft.targetId=button.dataset.actionTargetId;draft.choices={};renderCommanderMainPhasePanel();};});
