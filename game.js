@@ -824,7 +824,7 @@ function pickMultiTokenModal(){
     document.getElementById('inputOverlay').classList.add('show');
   });
 }
-function askConfirm(title, msg, okLabel){
+function askConfirm(title, msg, okLabel, cancelLabel){
   return new Promise(res=>{
     inputResolver=res;
     document.getElementById('inputTitle').textContent=title;
@@ -832,8 +832,9 @@ function askConfirm(title, msg, okLabel){
     body.innerHTML=`<div class="confirm-msg">${msg}</div>`;
     const acts=document.getElementById('inputActions'); acts.className="input-actions";
     const ok=document.getElementById('inputOk'); ok.textContent=okLabel||"Confirm";
+    const cancel=document.getElementById('inputCancel'); cancel.textContent=cancelLabel||"Cancel";
     ok.onclick=()=>{ closeInput(); res(true); };
-    document.getElementById('inputCancel').onclick=()=>{ closeInput(); res(false); };
+    cancel.onclick=()=>{ closeInput(); res(false); };
     document.getElementById('inputOverlay').classList.add('show');
   });
 }

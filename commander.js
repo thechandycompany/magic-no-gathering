@@ -118,9 +118,13 @@ const VOLTRON_CARDS = {
     {name:"Outpost Siege",cost:4,effect:"Exile top; play each upkeep."},
     {name:"Lifecrafter's Bestiary",cost:3,effect:"Scry 1; draw on creature cast."},
     {name:"Skullclamp",cost:1,effect:"+1/-1; draw 2 on death."}
+  ],
+  boardwipes: [
+    {name:"Wrath of the Wilds",cost:6,effect:"Destroy all creatures. They can't be regenerated.",wipeType:"symmetric"},
+    {name:"Savage Decree",cost:8,effect:"Destroy all creatures target player controls.",wipeType:"targeted"}
   ]
 };
-const DECK_COMPOSITION = {creatures:14, gear:12, protection:10, draw:5, haymakers:4, utility:6};
+const DECK_COMPOSITION = {creatures:14, gear:12, protection:10, draw:5, haymakers:4, utility:6, boardwipes:2};
 
 const CPU_NAMES = [
   { name:"Rukha, Wildheart Vanguard", ico:"🪓", color:"#c0392b" },
@@ -171,7 +175,7 @@ function drawCard(deck, hand) {
 
 function createOpponent(index) {
   const id = CPU_NAMES[index] || CPU_NAMES[0];
-  const deck = {lands:37,ramp:10,explosive:1,other:51};
+  const deck = {lands:37,ramp:10,explosive:1,other:53};
   const otherDeck = generateOtherDeck();
   const hand = {lands:0,ramp:0,explosive:0,other:0};
   for (let i=0;i<7;i++) drawCard(deck,hand);
@@ -229,11 +233,35 @@ function returnCommanderToZone(opp){opp.tokens=opp.tokens.filter(t=>t.kind!=="co
 function threatScore(p){
   const c=p.creatures!=null?p.creatures:(p.tokens?p.tokens.length:0);
   const cmd=p.tokens?p.tokens.some(t=>t.kind==="commander"):false;
+  const pwCount=(p.planeswalkers||[]).length;
   // Player always has high baseline threat — in real Commander, the human is
   // the most dangerous because they're unpredictable and may be sandbagging.
   // This ensures CPUs attack the player regularly, not just each other.
+  // Planeswalkers significantly increase threat since they generate value every turn.
   const humanBonus=p.id==="player"?20:0;
-  return c*3+(cmd?15:0)+(40-p.life)+humanBonus;
+  return c*3+(cmd?15:0)+(40-p.life)+humanBonus+(pwCount*12);
+}
+
+/**
+ * Decides whether a CPU should redirect its attack to one of the player's
+ * planeswalkers instead of the player's life total. In real MTG, attackers
+ * can target planeswalkers. CPUs do this when:
+ * - The player has a planeswalker with meaningful loyalty
+ * - The planeswalker hasn't already been reduced to low loyalty
+ * - Random chance (not every turn — sometimes face is still better)
+ * Returns the planeswalker object to target, or null (attack life).
+ */
+function choosePlaneswalkerTarget(opp, playerState){
+  const pws=playerState.planeswalkers||[];
+  if(pws.length===0)return null;
+  // Higher-loyalty planeswalkers are higher priority targets
+  const viable=pws.filter(pw=>pw.loyalty>0).sort((a,b)=>b.loyalty-a.loyalty);
+  if(viable.length===0)return null;
+  // CPUs prioritize killing planeswalkers ~60% of the time when they exist
+  // — they're value engines that must be answered, especially if loyalty is high
+  const targetChance=viable[0].loyalty>=5?0.7:viable[0].loyalty>=3?0.55:0.35;
+  if(Math.random()<targetChance)return viable[0];
+  return null;
 }
 
 function evaluateStrategy(opp, alive) {
@@ -270,6 +298,119 @@ function chooseTarget(opp, allPlayers) {
   let roll=Math.random()*totalScore;
   for(const p of scored){roll-=p.score;if(roll<=0)return p.id;}
   return scored[scored.length-1].id;
+}
+
+/* ---------- board wipe strategy ---------- */
+/**
+ * Evaluates whether the CPU should cast a board wipe this turn.
+ * Strategy:
+ * - Symmetric (Wrath of the Wilds): Cast when opponents collectively have 4+ more
+ *   creatures than you, OR you're about to die and they have a wide board.
+ *   Never cast if you have more creatures than all opponents combined.
+ * - Targeted (Savage Decree): Cast when a single opponent has 3+ creatures and is
+ *   the biggest threat. Prefer targeting whoever has the most board presence.
+ *
+ * Returns { cast: boolean, manaRemaining: number }
+ */
+function evaluateAndCastBoardWipe(opp, mana, allPlayers, actions, turnSpellState){
+  const wipesInHand=opp.typedHand.filter(c=>c.ref?.category==="boardwipes");
+  if(wipesInHand.length===0)return {cast:false,manaRemaining:mana};
+
+  const myCreatureCount=opp.tokens.length;
+  const opponents=allPlayers.filter(p=>p.id!==opp.id&&p.life>0);
+  const totalEnemyCreatures=opponents.reduce((sum,p)=>{
+    const count=p.creatures!=null?p.creatures:(p.tokens?p.tokens.length:0);
+    return sum+count;
+  },0);
+
+  // Find the most threatening opponent by creature count
+  let biggestThreat=null, biggestThreatCount=0;
+  opponents.forEach(p=>{
+    const count=p.creatures!=null?p.creatures:(p.tokens?p.tokens.length:0);
+    if(count>biggestThreatCount){biggestThreatCount=count;biggestThreat=p;}
+  });
+
+  // --- Symmetric wipe decision ---
+  const symmetricWipe=wipesInHand.find(c=>c.wipeType==="symmetric");
+  if(symmetricWipe){
+    const casting=cpuCanCast(symmetricWipe,symmetricWipe.cost,mana,"haymakers",turnSpellState);
+    if(casting.canCast){
+      const boardDeficit=totalEnemyCreatures-myCreatureCount;
+      // Cast if enemies have 4+ more creatures, OR life is critical and they have 3+
+      const desperate=opp.life<=15&&totalEnemyCreatures>=3;
+      if(boardDeficit>=4||desperate){
+        mana-=casting.cost;
+        opp.typedHand=opp.typedHand.filter(c=>c!==symmetricWipe);
+        opp.hand.other=Math.max(0,opp.hand.other-1);
+        recordCpuSpellCast(turnSpellState);
+
+        // Remove all of THIS CPU's non-commander creatures
+        const myDead=opp.tokens.filter(t=>t.kind!=="commander");
+        for(let i=opp.tokens.length-1;i>=0;i--){
+          if(opp.tokens[i]&&opp.tokens[i].kind!=="commander")removeOpponentPermanent(opp,`token:${i}`,"graveyard");
+        }
+
+        // Remove all OTHER CPU's creatures
+        const otherCpus=allPlayers.filter(p=>p.id!==opp.id&&p.id!=="player"&&p.tokens);
+        otherCpus.forEach(cpu=>{
+          const cpuOpp=(typeof gameState!=="undefined"&&gameState)?gameState.opponents.find(o=>o.id===cpu.id):null;
+          if(cpuOpp){
+            for(let i=cpuOpp.tokens.length-1;i>=0;i--){
+              if(cpuOpp.tokens[i]&&cpuOpp.tokens[i].kind!=="commander")removeOpponentPermanent(cpuOpp,`token:${i}`,"graveyard");
+            }
+          }
+        });
+
+        actions.push({
+          label:`⚡ Cast ${symmetricWipe.name}`,
+          detail:`${symmetricWipe.effect} All non-commander creatures on every battlefield are destroyed.`,
+          boardWipe:"symmetric",
+          wipeName:symmetricWipe.name
+        });
+        return {cast:true,manaRemaining:mana};
+      }
+    }
+  }
+
+  // --- Targeted wipe decision ---
+  const targetedWipe=wipesInHand.find(c=>c.wipeType==="targeted");
+  if(targetedWipe&&biggestThreat&&biggestThreatCount>=3){
+    const casting=cpuCanCast(targetedWipe,targetedWipe.cost,mana,"haymakers",turnSpellState);
+    if(casting.canCast){
+      // Cast if the biggest threat has 3+ creatures and more than us
+      if(biggestThreatCount>myCreatureCount||(biggestThreatCount>=3&&opp.life<=25)){
+        mana-=casting.cost;
+        opp.typedHand=opp.typedHand.filter(c=>c!==targetedWipe);
+        opp.hand.other=Math.max(0,opp.hand.other-1);
+        recordCpuSpellCast(turnSpellState);
+
+        // If targeting another CPU, destroy their creatures immediately
+        if(biggestThreat.id!=="player"){
+          const cpuOpp=(typeof gameState!=="undefined"&&gameState)?gameState.opponents.find(o=>o.id===biggestThreat.id):null;
+          if(cpuOpp){
+            for(let i=cpuOpp.tokens.length-1;i>=0;i--){
+              if(cpuOpp.tokens[i]&&cpuOpp.tokens[i].kind!=="commander")removeOpponentPermanent(cpuOpp,`token:${i}`,"graveyard");
+            }
+          }
+        }
+        // If targeting the player, creatures are NOT removed here — the player gets
+        // a popup/response window to protect before resolution.
+
+        const targetName=biggestThreat.id==="player"?"You":biggestThreat.name.split(',')[0];
+        actions.push({
+          label:`⚡ Cast ${targetedWipe.name} targeting ${targetName}`,
+          detail:`${targetedWipe.effect} ${targetName}'s creatures are destroyed.`,
+          boardWipe:"targeted",
+          wipeTarget:biggestThreat.id,
+          wipeTargetName:targetName,
+          wipeName:targetedWipe.name
+        });
+        return {cast:true,manaRemaining:mana};
+      }
+    }
+  }
+
+  return {cast:false,manaRemaining:mana};
 }
 
 /* ---------- turn execution ---------- */
@@ -333,9 +474,17 @@ function executeOpponentTurn(opp, allPlayers) {
     }
   }
 
+  // Board wipe evaluation — cast BEFORE deploying more creatures
+  const boardWipeCast=evaluateAndCastBoardWipe(opp,mana,allPlayers,actions,turnSpellState);
+  if(boardWipeCast.cast)mana=boardWipeCast.manaRemaining;
+
   // Secondary: cast creatures with remaining mana (multiple if possible).
+  // AI aggressiveness: the more cards and mana available, the more casts allowed.
+  // Prevents situations where CPUs sit on 7 cards and 12 mana doing nothing.
+  const handTotal=opponentHandSize(opp);
+  const maxCreatureCasts=handTotal>=6?5:handTotal>=4?4:3;
   let castCount=0;
-  while(mana>=1&&castCount<3){
+  while(mana>=1&&castCount<maxCreatureCasts){
     const castable=opp.typedHand
       .filter(card=>card.ref?.category==="creatures"||card.rampValue)
       .map(card=>({card,casting:cpuCanCast(card,card.cost,mana,"creatures",turnSpellState)}))
@@ -363,6 +512,34 @@ function executeOpponentTurn(opp, allPlayers) {
     mana-=fallbackRampCasting.cost;
     recordCpuSpellCast(turnSpellState);
     actions.push({label:"Cast Wilds Guide",detail:"2/2 ramp creature enters."+(fallbackRampCasting.additional?" Creature tax paid: "+fallbackRampCasting.additional+".":"")});
+  }
+
+  // Tertiary: with remaining mana, cast non-creature spells (draw, utility, haymakers)
+  // to develop the board instead of passing with a full hand.
+  if(mana>=2&&opp.typedHand.length>0){
+    const nonCreatureSpells=opp.typedHand
+      .filter(card=>!card.rampValue&&card.ref?.category!=="creatures"&&card.ref?.category!=="gear"&&card.ref?.category!=="protection"&&card.ref?.category!=="boardwipes")
+      .map(card=>({card,casting:cpuCanCast(card,card.cost,mana,card.ref?.category,turnSpellState)}))
+      .filter(({casting})=>casting.canCast)
+      .sort((left,right)=>left.card.cost-right.card.cost);
+    let spellsCast=0;
+    for(const entry of nonCreatureSpells){
+      if(spellsCast>=2)break;
+      if(mana<entry.casting.cost)continue;
+      mana-=entry.casting.cost;
+      const card=entry.card;
+      opp.typedHand=opp.typedHand.filter(c=>c!==card);opp.hand.other=Math.max(0,opp.hand.other-1);
+      recordCpuSpellCast(turnSpellState);
+      if(card.ref?.category==="draw"){
+        const extraDraws=Math.min(3,opp.otherDeck?.length||0);
+        for(let i=0;i<extraDraws;i++){if(opp.otherDeck.length>0){const ref=opp.otherDeck.pop();opp.typedHand.push({...resolveCard(ref),ref});opp.hand.other++;}}
+        actions.push({label:`Cast ${card.name}`,detail:`${card.effect} Draws ${extraDraws} card${extraDraws===1?"":"s"}.`});
+      }else{
+        addOpponentGraveyardCard(opp,typedGraveyardCard(card));
+        actions.push({label:`Cast ${card.name}`,detail:card.effect||"Resolves a spell."});
+      }
+      spellsCast++;
+    }
   }
   applyBattlefieldRuleModifiers();
 
@@ -400,9 +577,22 @@ function executeOpponentTurn(opp, allPlayers) {
   }
   opp.attackPower=attackPower;
 
+  // When attacking the player, decide if some/all attackers should target a planeswalker
+  let planeswalkerTarget=null;
+  if(attackPower>0&&target==="player"&&typeof gameState!=="undefined"&&gameState){
+    planeswalkerTarget=choosePlaneswalkerTarget(opp,gameState.player);
+  }
+  opp._planeswalkerTarget=planeswalkerTarget;
+
   if(attackPower>0&&target){
     const tn=allPlayers.find(p=>p.id===target);
-    actions.push({label:`Attack ${tn?tn.name.split(',')[0]:"?"} for ${attackPower}`,detail:`${opp.tokens.filter(t=>t.attacking).length} attacker(s). Strategy: ${STRATEGY_LABELS[opp.currentStrategy]}.`});
+    let attackLabel=`Attack ${tn?tn.name.split(',')[0]:"?"} for ${attackPower}`;
+    let attackDetail=`${opp.tokens.filter(t=>t.attacking).length} attacker(s). Strategy: ${STRATEGY_LABELS[opp.currentStrategy]}.`;
+    if(planeswalkerTarget){
+      attackLabel=`Attack ${planeswalkerTarget.name} (⬡ ${planeswalkerTarget.loyalty}) for ${attackPower}`;
+      attackDetail=`Targeting your planeswalker. ${opp.tokens.filter(t=>t.attacking).length} attacker(s). Strategy: ${STRATEGY_LABELS[opp.currentStrategy]}.`;
+    }
+    actions.push({label:attackLabel,detail:attackDetail});
   }
 
   // End step: CPU cannot retain more than seven cards. It keeps the most useful cards.
@@ -416,7 +606,7 @@ function executeOpponentTurn(opp, allPlayers) {
 
   opp.tokens.forEach(t=>{t.summoningSick=false;});
   opp.actionSteps=actions;
-  return {target,attackPower,commanderAttacking,actions};
+  return {target,attackPower,commanderAttacking,actions,planeswalkerTarget};
 }
 
 /* =====================================================================
@@ -427,13 +617,13 @@ function createCommanderBattle(numOpponents) {
   for(let i=0;i<Math.min(4,Math.max(1,numOpponents));i++) opponents.push(createOpponent(i));
   return {
     gameMode:"commanderBattle", turn:1, phase:"cpu", cpuTurnIndex:0,
-    opponents, player:{id:"player",name:"You",life:40,creatures:0,handSize:7,librarySize:92,graveyardCount:0,graveyard:[],nextGraveyardCardId:0,discardHistory:[],exileCount:0,exile:[],nextExileCardId:0,commanderDamageReceived:{},commanderDamageDealt:{},tokens:[]},
+    opponents, player:{id:"player",name:"You",life:40,creatures:0,handSize:7,librarySize:92,graveyardCount:0,graveyard:[],nextGraveyardCardId:0,discardHistory:[],exileCount:0,exile:[],nextExileCardId:0,commanderDamageReceived:{},commanderDamageDealt:{},tokens:[],planeswalkers:[]},
     battlefieldRules:[], nextBattlefieldRuleId:0,
-    discardHistory:[], log:[], viewMode:"single", viewTarget:0, gameOver:false, winner:null,
+    discardHistory:[], log:[], viewMode:"all", viewTarget:0, gameOver:false, winner:null,
   };
 }
 
-function playerAsTarget(state){return {id:"player",name:"You",life:state.player.life,creatures:state.player.creatures,tokens:state.player.tokens||[]};}
+function playerAsTarget(state){return {id:"player",name:"You",life:state.player.life,creatures:state.player.creatures,tokens:state.player.tokens||[],planeswalkers:state.player.planeswalkers||[]};}
 function allPlayersForTargeting(state){const all=[playerAsTarget(state)];state.opponents.forEach(o=>{if(!isOpponentDead(o))all.push(o);});return all;}
 function aliveOpponents(state){return state.opponents.filter(o=>!isOpponentDead(o));}
 function isPlayerDead(state){
@@ -812,6 +1002,7 @@ function ensureCommanderEffectState(state){
   if(player.exileCount==null)player.exileCount=0;
   player.exile=player.exile||[];
   player.nextExileCardId=player.nextExileCardId||player.exile.length;
+  player.planeswalkers=player.planeswalkers||[];
   state.discardHistory=state.discardHistory||[];
   state.battlefieldRules=state.battlefieldRules||[];
   state.nextBattlefieldRuleId=state.nextBattlefieldRuleId||state.battlefieldRules.length;
@@ -918,7 +1109,7 @@ function cpuSpellDescriptor(card,category){
   const resolvedCategory=category||card?.ref?.category;
   if(resolvedCategory==="commander"||resolvedCategory==="creatures"||card?.isCreature||card?.rampValue)return {types:["Creature"],nonCreature:false};
   if(resolvedCategory==="gear"||resolvedCategory==="explosive"||card?.name==="Skullclamp")return {types:["Artifact"],nonCreature:true};
-  if(resolvedCategory==="ramp"||resolvedCategory==="draw"||resolvedCategory==="haymakers")return {types:["Sorcery"],nonCreature:true};
+  if(resolvedCategory==="ramp"||resolvedCategory==="draw"||resolvedCategory==="haymakers"||resolvedCategory==="boardwipes")return {types:["Sorcery"],nonCreature:true};
   if(resolvedCategory==="protection")return {types:["Instant"],nonCreature:true};
   if(resolvedCategory==="utility")return {types:["Enchantment"],nonCreature:true};
   return {types:["Sorcery"],nonCreature:true};
@@ -1347,7 +1538,7 @@ function resolvePlayerEffect(effect,draft){
       else logCommander(`${name} has no ${effect.cardType} to ${effect.action}.`);
     }
   });
-  commanderEffectDraft={scope:draft.scope,action:draft.action,count:1,all:false,cardType:draft.cardType,targetId:null,choices:{},creaturesPlayed:draft.creaturesPlayed||0};
+  commanderEffectDraft={scope:draft.scope,action:draft.action,count:1,all:false,cardType:draft.cardType,targetId:null,choices:{},creaturesPlayed:draft.creaturesPlayed||0,actionOpen:draft.actionOpen};
   ensureCommanderEffectState(gameState);saveState();showCommanderGame();
 }
 function isPermanentPlayerAction(effect){return effect.action==="destroy"||effect.action==="sacrifice"||effect.action==="exile";}
@@ -1704,6 +1895,51 @@ function renderSingleView(state,board){
   }
 }
 
+function wirePlaneswalkerControls(board,state){
+  board.querySelectorAll('[data-pw-add]').forEach(button=>{
+    button.onclick=async event=>{
+      event.stopPropagation();
+      const name=await askPlaneswalkerName();
+      if(!name)return;
+      const loyalty=await askPlaneswalkerLoyalty();
+      if(loyalty==null)return;
+      state.player.planeswalkers=state.player.planeswalkers||[];
+      const id="pw_"+Date.now()+"_"+Math.floor(Math.random()*1000);
+      state.player.planeswalkers.push({id,name,loyalty});
+      logCommander(`⬡ ${name} enters the battlefield with ${loyalty} loyalty.`);
+      saveState();renderBoardView(state);renderLifeHud(state);
+    };
+  });
+  board.querySelectorAll('[data-pw-loyalty]').forEach(button=>{
+    button.onclick=event=>{
+      event.stopPropagation();
+      const pwId=button.dataset.pwLoyalty;
+      const delta=parseInt(button.dataset.d,10);
+      const planeswalkers=state.player.planeswalkers||[];
+      const pw=planeswalkers.find(candidate=>candidate.id===pwId);
+      if(!pw||Number.isNaN(delta))return;
+      pw.loyalty=Math.max(0,pw.loyalty+delta);
+      if(pw.loyalty===0){
+        state.player.planeswalkers=planeswalkers.filter(candidate=>candidate.id!==pwId);
+        logCommander(`⬡ ${pw.name} has been destroyed (loyalty reached 0).`);
+      }
+      saveState();renderBoardView(state);renderLifeHud(state);
+    };
+  });
+  board.querySelectorAll('[data-pw-remove]').forEach(button=>{
+    button.onclick=event=>{
+      event.stopPropagation();
+      const pwId=button.dataset.pwRemove;
+      const planeswalkers=state.player.planeswalkers||[];
+      const pw=planeswalkers.find(candidate=>candidate.id===pwId);
+      if(!pw)return;
+      state.player.planeswalkers=planeswalkers.filter(candidate=>candidate.id!==pwId);
+      logCommander(`⬡ ${pw.name} leaves the battlefield.`);
+      saveState();renderBoardView(state);renderLifeHud(state);
+    };
+  });
+}
+
 function renderPlayerBoardView(state,board,totalViews){
   board.className='board';board.style.borderColor='var(--gold-dim)';
   const p=state.player;
@@ -1719,6 +1955,10 @@ function renderPlayerBoardView(state,board,totalViews){
   const playerCreatureCards=(p.tokens||[]).filter(token=>token.kind==="reanimated-creature");
   const playerTokensHtml=playerCreatureCards.length?playerCreatureCards.map(token=>`<div class="card voltron-creature reanimated" title="Reanimated from ${token.owner}"><span class="c-name"><span>${token.name}</span><span class="mana">↩</span></span><span class="c-art">${token.ico}</span>${token.kws?.length?`<span class="c-kw">${token.kws.join(" · ")}</span>`:""}${token.effect?`<span class="c-effect">${token.effect}</span>`:""}<span class="c-pt">${token.p}/${token.t}</span>${token.summoningSick?'<div class="c-sick">💤</div>':''}</div>`).join(""):`<div class="empty-field">${p.creatures} creature${p.creatures!==1?'s':''} on your battlefield</div>`;
 
+  // Planeswalker display
+  const pws=p.planeswalkers||[];
+  const pwHtml=pws.length?pws.map(pw=>`<div class="card commander pw-card" title="${pw.name} · Loyalty ${pw.loyalty}"><span class="c-name"><span>${pw.name}</span><span class="mana">⬡</span></span><span class="c-art">⬡</span><span class="c-pt">${pw.loyalty}</span><button type="button" class="c-remove" data-pw-remove="${pw.id}" title="Remove ${pw.name}">↗</button><div class="pw-adj"><button type="button" class="cbs-btn" data-pw-loyalty="${pw.id}" data-d="-1">−</button><button type="button" class="cbs-btn" data-pw-loyalty="${pw.id}" data-d="1">+</button></div></div>`).join(""):"";
+
   board.innerHTML=`<div class="board-h"><span class="ico">🗡️</span><span>You</span>
     <span class="atk-note"></span>
     <div class="view-controls"><button class="btn-ghost view-btn" id="prevOppBtn">◂</button><span class="view-counter">1/${totalViews}</span><button class="btn-ghost view-btn" id="nextOppBtn">▸</button><button class="btn-ghost view-btn" id="allViewBtn">⊞</button></div>
@@ -1727,15 +1967,19 @@ function renderPlayerBoardView(state,board,totalViews){
       <div class="cbs-item"><span class="cbs-label">Life</span><div class="cbs-adj"><button type="button" class="cbs-btn" data-player-stat="life" data-d="-1">−</button><span class="cbs-val ${p.life<=10?'warn':''}">${p.life}</span><button type="button" class="cbs-btn" data-player-stat="life" data-d="1">+</button></div></div>
       ${cmdrDmgHtml}
       <div class="cbs-item"><span class="cbs-label">Creatures</span><div class="cbs-adj"><button type="button" class="cbs-btn" data-player-stat="creatures" data-d="-1">−</button><span class="cbs-val">${p.creatures}</span><button type="button" class="cbs-btn" data-player-stat="creatures" data-d="1">+</button></div></div>
+      <div class="cbs-item"><span class="cbs-label">Planeswalkers</span><span class="cbs-val">⬡ ${pws.length}</span></div>
       <div class="cbs-item"><span class="cbs-label">Graveyard</span><button type="button" class="cbs-zone-btn" data-graveyard-owner="player">⚰ ${p.graveyardCount}</button></div>
       <div class="cbs-item"><span class="cbs-label">Exile</span><button type="button" class="cbs-zone-btn" data-exile-owner="player">✦ ${p.exileCount}</button></div>
     </div></div>
-    <div class="field-col"><div class="field-h"><span class="lbl">Your board state</span></div><div class="tokens">${playerTokensHtml}</div></div></div></div>`;
+    <div class="field-col"><div class="field-h"><span class="lbl">Your board state</span><button class="btn-ghost" data-pw-add type="button">+ Planeswalker</button></div><div class="tokens">${pwHtml}${playerTokensHtml}</div></div></div></div>`;
 
   document.getElementById('prevOppBtn').onclick=()=>{state.viewTarget=state.opponents.length-1;renderBoardView(state);};
   document.getElementById('nextOppBtn').onclick=()=>{state.viewTarget=0;renderBoardView(state);};
   document.getElementById('allViewBtn').onclick=()=>{state.viewMode="all";renderBoardView(state);};
   wireGraveyardViewerControls(board,state);
+
+  // Wire planeswalker controls shared by single and All Opponents views.
+  wirePlaneswalkerControls(board,state);
 
   // Wire player stat controls
   board.querySelectorAll('[data-player-stat]').forEach(btn=>{
@@ -1760,22 +2004,30 @@ function renderPlayerBoardView(state,board,totalViews){
 
 function renderAllView(state,board){
   board.className='board all-view';board.style.borderColor='';
-  let html=`<div class="board-h"><span class="ico">⊞</span><span>All Opponents</span><div class="view-controls"><button class="btn-ghost view-btn" id="singleViewBtn">◻</button></div></div><div class="all-opponents-grid">`;
+  const player=state.player;
+  const planeswalkers=player.planeswalkers||[];
+  const playerPlaneswalkersHtml=planeswalkers.length
+    ?`<div class="all-pw-list">${planeswalkers.map(pw=>`<div class="all-pw-card"><span class="all-pw-name" title="${escapeHtml(pw.name)}">⬡ ${escapeHtml(pw.name)}</span><div class="all-pw-controls"><button type="button" class="cbs-btn" data-pw-loyalty="${pw.id}" data-d="-1" aria-label="Decrease ${escapeHtml(pw.name)} loyalty">−</button><span class="all-pw-loyalty">${pw.loyalty}</span><button type="button" class="cbs-btn" data-pw-loyalty="${pw.id}" data-d="1" aria-label="Increase ${escapeHtml(pw.name)} loyalty">+</button><button type="button" class="all-pw-remove" data-pw-remove="${pw.id}" title="Remove ${escapeHtml(pw.name)}" aria-label="Remove ${escapeHtml(pw.name)}">↗</button></div></div>`).join('')}</div>`
+    :'<span class="all-pw-empty">No planeswalkers on your battlefield.</span>';
+  let html=`<div class="board-h"><span class="ico">⊞</span><span>All Opponents</span><span class="atk-note">Commander battlefield</span><div class="view-controls"><button class="btn-ghost view-btn" id="singleViewBtn" title="Open the active player view">◻</button></div></div><div class="all-opponents-grid">`;
   html+=`<div class="all-opp-card player-card" data-idx="-1" style="border-color:var(--gold-dim)">
-    <div class="all-opp-header"><span>🗡️</span><span class="all-opp-name">You</span><span class="all-opp-life">${state.player.life}</span></div>
-    <div class="all-opp-body"><span>${state.player.creatures} creature${state.player.creatures!==1?'s':''}</span></div>
+    <div class="all-opp-header"><span>🗡️</span><span class="all-opp-name">You</span><span class="all-opp-life">${player.life}</span></div>
+    <div class="all-opp-body"><span>♟ ${player.creatures} creature${player.creatures!==1?'s':''}</span><span>⬡ ${planeswalkers.length} planeswalker${planeswalkers.length===1?'':'s'}</span><span>⚰ ${player.graveyardCount}</span><span>✦ ${player.exileCount}</span></div>
+    <div class="all-opp-pws"><div class="all-pw-heading"><span>Planeswalkers</span><button type="button" class="all-pw-add" data-pw-add>+ Add</button></div>${playerPlaneswalkersHtml}</div>
   </div>`;
   state.opponents.forEach((opp,i)=>{
     const dead=isOpponentDead(opp);const commander=commanderOnField(opp);
+    const commanderSummary=commander?`⚜ ${commander.p}/${commander.t}`:'⚜ In zone';
     html+=`<div class="all-opp-card ${dead?'dead':''}" data-idx="${i}" style="border-color:${opp.color}">
       <div class="all-opp-header"><span>${opp.ico}</span><span class="all-opp-name">${opp.name.split(',')[0]}</span><span class="all-opp-life">${dead?'☠':opp.life}</span></div>
-      <div class="all-opp-body"><span>${opp.tokens.length} creature${opp.tokens.length!==1?'s':''}</span>${commander?`<span>⚔ ${commander.p}/${commander.t}</span>`:'<span>Cmdr in zone</span>'}<span>${opp.landsInPlay+opp.rampInPlay} mana</span><span>📚 ${opponentDeckSize(opp)}</span></div>
+      <div class="all-opp-body"><span>♟ ${opp.tokens.length} creature${opp.tokens.length!==1?'s':''}</span><span>${commanderSummary}</span><span>◇ ${opp.landsInPlay+opp.rampInPlay} mana</span><span>📚 ${opponentDeckSize(opp)}</span></div>
       ${opp.attackTarget?`<div class="all-opp-target">→ ${getTargetName(state,opp.attackTarget)}</div>`:''}
     </div>`;
   });
   html+='</div>';board.innerHTML=html;
   document.getElementById('singleViewBtn').onclick=()=>{state.viewMode="single";if(state._activeOppIndex!=null)state.viewTarget=state._activeOppIndex;renderBoardView(state);};
-  board.querySelectorAll('.all-opp-card').forEach(card=>{card.onclick=()=>{state.viewTarget=parseInt(card.dataset.idx);state.viewMode="single";renderBoardView(state);};});
+  wirePlaneswalkerControls(board,state);
+  board.querySelectorAll('.all-opp-card').forEach(card=>{card.onclick=()=>{state.viewTarget=parseInt(card.dataset.idx,10);state.viewMode="single";renderBoardView(state);};});
 }
 
 function renderCpuTurnSummary(state,turnResults){
@@ -2061,6 +2313,71 @@ const CPU_FLAVOR = {
 };
 function pickFlavor(type){const pool=CPU_FLAVOR[type]||CPU_FLAVOR.draw;return pool[Math.floor(Math.random()*pool.length)];}
 
+/**
+ * Shows a board wipe notification popup to the player.
+ * Symmetric: "All creatures have been destroyed. Clear your board."
+ * Targeted (player): "Your creatures are being destroyed. Clear your board unless you have a response."
+ * Targeted (other CPU): Just log it, no popup needed (already resolved).
+ */
+function showBoardWipePopup(opp, wipeAction){
+  const oppName=opp.name.split(',')[0];
+  return new Promise(resolve=>{
+    if(wipeAction.boardWipe==="symmetric"){
+      // Symmetric — resolve the player's board choice before combat responses.
+      logCommander(`💥 ${oppName} casts ${wipeAction.wipeName}! All creatures are destroyed.`);
+      setTimeout(()=>{
+        askConfirm(
+          `💥 ${wipeAction.wipeName}`,
+          `<strong>${oppName}</strong> casts <strong>${wipeAction.wipeName}</strong>.<br><br>` +
+          `All creatures on the battlefield are destroyed.<br><br>` +
+          `<em>Choose whether you countered the spell or cleared your board.</em>`,
+          "I cleared my board",
+          "I countered"
+        ).then(clearedBoard=>{
+          if(gameState){
+            if(clearedBoard){
+              const destroyed=gameState.player.creatures;
+              gameState.player.creatures=0;
+              logCommander(`You clear your board; ${wipeAction.wipeName} destroys ${destroyed} creature${destroyed===1?"":"s"}.`);
+            }else logCommander(`You counter ${wipeAction.wipeName}; your creatures remain on the battlefield.`);
+            saveState();
+            renderBoardView(gameState);renderLifeHud(gameState);
+          }
+          resolve();
+        });
+      },200);
+    }else if(wipeAction.boardWipe==="targeted"&&wipeAction.wipeTarget==="player"){
+      // Targeted at player — resolve the wipe before opening the combat response window.
+      logCommander(`💥 ${oppName} casts ${wipeAction.wipeName} targeting you! Your creatures are being destroyed.`);
+      setTimeout(()=>{
+        askConfirm(
+          `💥 ${wipeAction.wipeName} — Targeting You`,
+          `<strong>${oppName}</strong> casts <strong>${wipeAction.wipeName}</strong> targeting your board.<br><br>` +
+          `All creatures you control are destroyed.<br><br>` +
+          `<em>Choose whether you countered the spell or cleared your board.</em>`,
+          "I cleared my board",
+          "I countered"
+        ).then(clearedBoard=>{
+          if(gameState){
+            if(clearedBoard){
+              const destroyed=gameState.player.creatures;
+              gameState.player.creatures=0;
+              logCommander(`You clear your board; ${wipeAction.wipeName} destroys ${destroyed} creature${destroyed===1?"":"s"}.`);
+            }else logCommander(`You counter ${wipeAction.wipeName}; your creatures remain on the battlefield.`);
+            saveState();
+            renderBoardView(gameState);renderLifeHud(gameState);
+          }
+          resolve();
+        });
+      },200);
+    }else{
+      // Targeted at another CPU — already resolved in executeOpponentTurn.
+      logCommander(`💥 ${oppName} casts ${wipeAction.wipeName} targeting ${wipeAction.wipeTargetName}! Their creatures are destroyed.`);
+      resolve();
+    }
+  });
+}
+
 function showOpponentTurnResponse(opp,result){
   showCommanderGame();
   result.actions.filter(action=>(action.discarded&&action.discarded.length)||action.deckOut).forEach(action=>{
@@ -2089,11 +2406,19 @@ function showOpponentTurnResponse(opp,result){
   // Show full action breakdown in the Last Turn section (below confirm bar)
   renderLastTurnSection(opp);
 
-  // Render the response form
-  const panel=document.getElementById('respGrid');
-  const isIntervention=!attacksPlayer&&result.attackPower>0;
-  document.getElementById('respTitle').textContent=attacksPlayer?"Your Response":isIntervention?"Intervene?":"Your Response";
-  renderResponseForm(panel,opp,result,attacksPlayer);
+  // Resolve any board-wipe choice before the combat response form is available.
+  const wipeAction=result.actions.find(a=>a.boardWipe);
+  const renderResponse=()=>{
+    const panel=document.getElementById('respGrid');
+    const isIntervention=!attacksPlayer&&result.attackPower>0;
+    document.getElementById('respTitle').textContent=attacksPlayer?"Your Response":isIntervention?"Intervene?":"Your Response";
+    renderResponseForm(panel,opp,result,attacksPlayer);
+  };
+  if(wipeAction){
+    showBoardWipePopup(opp,wipeAction).then(renderResponse);
+    return;
+  }
+  renderResponse();
 }
 
 /**
@@ -2163,6 +2488,50 @@ function askCommanderRemovalDestination(token){
   });
 }
 
+/**
+ * Ask the player to name a planeswalker they're adding.
+ */
+function askPlaneswalkerName(){
+  return new Promise(res=>{
+    inputResolver=res;
+    document.getElementById('inputTitle').textContent="Add Planeswalker";
+    const body=document.getElementById('inputBody');
+    body.innerHTML=`<div class="confirm-msg"><label>Planeswalker name<input type="text" id="pwNameInput" placeholder="e.g. Jace, the Mind Sculptor" maxlength="60" style="width:100%;padding:8px;margin-top:6px;border:1px solid var(--border-lt);border-radius:6px;background:var(--panel);color:var(--ink);font-size:14px;"></label></div>`;
+    const acts=document.getElementById('inputActions'); acts.className="input-actions";
+    const ok=document.getElementById('inputOk'); ok.textContent="Next";
+    ok.onclick=()=>{const v=document.getElementById('pwNameInput').value.trim();closeInput();res(v||null);};
+    document.getElementById('inputCancel').onclick=()=>{closeInput();res(null);};
+    document.getElementById('inputOverlay').classList.add('show');
+    setTimeout(()=>{const inp=document.getElementById('pwNameInput');if(inp){inp.focus();}},60);
+  });
+}
+
+/**
+ * Ask for starting loyalty for the planeswalker.
+ */
+function askPlaneswalkerLoyalty(){
+  return new Promise(res=>{
+    inputResolver=res;
+    document.getElementById('inputTitle').textContent="Starting Loyalty";
+    const body=document.getElementById('inputBody');
+    body.innerHTML=`<div class="num-row">
+       <button type="button" id="numDown">−</button>
+       <input type="number" id="numInput" value="4" min="1" inputmode="numeric">
+       <button type="button" id="numUp">+</button></div>`;
+    const acts=document.getElementById('inputActions'); acts.className="input-actions";
+    document.getElementById('inputOk').textContent="Add";
+    const inp=document.getElementById('numInput');
+    document.getElementById('numDown').onclick=()=>{inp.value=Math.max(1,(parseInt(inp.value,10)||0)-1);};
+    document.getElementById('numUp').onclick=()=>{inp.value=(parseInt(inp.value,10)||0)+1;};
+    inp.onkeydown=(e)=>{if(e.key==="Enter"){done();}};
+    function done(){const v=parseInt(inp.value,10);closeInput();res(isNaN(v)?null:Math.max(1,v));}
+    document.getElementById('inputOk').onclick=done;
+    document.getElementById('inputCancel').onclick=()=>{closeInput();res(null);};
+    document.getElementById('inputOverlay').classList.add('show');
+    setTimeout(()=>{inp.focus();inp.select();},60);
+  });
+}
+
 function renderResponseForm(panel,opp,result,attacksPlayer){
   const hasCreatures=opp.tokens.length>0;
   const defenderOpp=(!attacksPlayer&&result.target)?gameState.opponents.find(o=>o.id===result.target):null;
@@ -2207,17 +2576,27 @@ function renderResponseForm(panel,opp,result,attacksPlayer){
     const cmdDmg=result.commanderAttacking?(opp.tokens.find(t=>t.kind==="commander")?.p||0):0;
     const attackers=opp.tokens.filter(t=>t.attacking);
     const attackerList=attackers.map(t=>`${t.ico} ${t.name} (${t.p}/${t.t})`).join(', ');
-    html+=`<div class="context-section"><div class="context-section-title">Combat — ${opp.name.split(',')[0]} attacks you for ${result.attackPower}</div>
+    const pwTarget=result.planeswalkerTarget||opp._planeswalkerTarget;
+    const attackingPW=!!pwTarget;
+    const combatTitle=attackingPW
+      ?`Combat — ${opp.name.split(',')[0]} attacks ⬡ ${pwTarget.name} (${pwTarget.loyalty}) for ${result.attackPower}`
+      :`Combat — ${opp.name.split(',')[0]} attacks you for ${result.attackPower}`;
+    html+=`<div class="context-section"><div class="context-section-title">${combatTitle}</div>
       <div class="cab-attackers">${attackerList}</div>
       <div class="commander-player-actions">
-        <div class="inline-stepper"><label>Damage getting through</label>
+        ${attackingPW?`<div class="inline-stepper"><label>Damage to ${pwTarget.name}</label>
+          <button type="button" data-key="damageToPW" data-delta="-1">−</button>
+          <input type="number" min="0" max="${result.attackPower}" value="${result.attackPower}" data-key="damageToPW" data-pw-id="${pwTarget.id}">
+          <button type="button" data-key="damageToPW" data-delta="1">+</button>
+        </div>`:""}
+        <div class="inline-stepper"><label>Damage getting through${attackingPW?" to you":""}</label>
           <button type="button" data-key="damageThrough" data-delta="-1">−</button>
-          <input type="number" min="0" max="${result.attackPower}" value="${result.attackPower}" data-key="damageThrough">
+          <input type="number" min="0" max="${result.attackPower}" value="${attackingPW?0:result.attackPower}" data-key="damageThrough">
           <button type="button" data-key="damageThrough" data-delta="1">+</button>
         </div>
         ${cmdDmg>0?`<div class="inline-stepper"><label>Commander damage</label>
           <button type="button" data-key="cmdrDmgThrough" data-delta="-1">−</button>
-          <input type="number" min="0" max="${cmdDmg}" value="${cmdDmg}" data-key="cmdrDmgThrough">
+          <input type="number" min="0" max="${cmdDmg}" value="${attackingPW?0:cmdDmg}" data-key="cmdrDmgThrough">
           <button type="button" data-key="cmdrDmgThrough" data-delta="1">+</button>
         </div>`:''}
         <div class="inline-stepper"><label>Your creatures that died</label>
@@ -2234,6 +2613,30 @@ function renderResponseForm(panel,opp,result,attacksPlayer){
     html+=`<div class="context-summary"><span class="context-summary-icon">✓</span><div><strong>No response needed</strong><span>${opp.name.split(',')[0]} didn't threaten you this turn.</span></div></div>`;
   }
 
+  // Board-wipe outcomes are resolved by showBoardWipePopup before this response form appears.
+
+  // Player response actions — always available (instants, flash, abilities)
+  html+=`<div class="context-section"><div class="context-section-title">Your response (instants / flash)</div>
+    <div class="commander-player-actions">
+      <div class="inline-stepper"><label>Creatures you played (flash)</label>
+        <button type="button" data-key="flashCreatures" data-delta="-1">−</button>
+        <input type="number" min="0" value="0" data-key="flashCreatures">
+        <button type="button" data-key="flashCreatures" data-delta="1">+</button>
+      </div>
+      <div class="inline-stepper"><label>Damage you dealt (instant)</label>
+        <button type="button" data-key="instantDamage" data-delta="-1">−</button>
+        <input type="number" min="0" value="0" data-key="instantDamage">
+        <button type="button" data-key="instantDamage" data-delta="1">+</button>
+      </div>
+      <div class="inline-stepper"><label>Damage target</label>
+        <div class="target-buttons instant-dmg-targets" id="instantDmgTargets">
+          <button type="button" class="target-btn tiny-target" data-instant-target="${opp.id}">${opp.ico}</button>
+          ${defenderOpp?`<button type="button" class="target-btn tiny-target" data-instant-target="${defenderOpp.id}">${defenderOpp.ico}</button>`:""}
+        </div>
+      </div>
+    </div>
+  </div>`;
+
   html+='</div>';
   panel.innerHTML=html;
 
@@ -2243,6 +2646,17 @@ function renderResponseForm(panel,opp,result,attacksPlayer){
       const inp=btn.parentElement.querySelector('input');const mx=inp.max?parseInt(inp.max):999;
       inp.value=Math.max(0,Math.min(mx,(parseInt(inp.value)||0)+parseInt(btn.dataset.delta)));
       if(inp.dataset.key==="playerDeaths")updateCreaturePreview();
+    };
+  });
+
+  // Wire instant damage target selection
+  panel._instantDmgTarget=opp.id;
+  panel.querySelectorAll('[data-instant-target]').forEach(btn=>{
+    if(btn.dataset.instantTarget===opp.id)btn.classList.add('active');
+    btn.onclick=()=>{
+      panel.querySelectorAll('[data-instant-target]').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      panel._instantDmgTarget=btn.dataset.instantTarget;
     };
   });
 
@@ -2335,6 +2749,161 @@ function renderResponseForm(panel,opp,result,attacksPlayer){
   );
 }
 
+/* Reuse the complete Create Player Action workflow during CPU priority windows.
+   The legacy response form still owns combat/removal inputs; this layer removes
+   its limited flash/instant tracker and attaches the same action controls used
+   in the player's main phases. */
+const baseRenderResponseForm=renderResponseForm;
+let cpuResponseActionKey=null;
+
+function buildCpuResponsePlayerActionHtml(draft,effect,actionHelp="Resolve an instant-speed action, then continue the opponent's turn."){
+  const scopeOptions=PLAYER_ACTION_SCOPES.map(scope=>`<option value="${scope.value}" ${scope.value===draft.scope?"selected":""}>${scope.label}</option>`).join("");
+  const actionOptions=PLAYER_ACTIONS.map(action=>`<option value="${action.value}" ${action.value===draft.action?"selected":""}>${action.label}</option>`).join("");
+  const needsCardType=["destroy","sacrifice","exile"].includes(effect.action);
+  const isGlobalGraveyardExile=effect.action==="exileGraveyards";
+  const isAllAmount=!isGlobalGraveyardExile&&effect.all;
+  const cardTypeOptions=PLAYER_ACTION_CARD_TYPES.map(type=>`<option value="${type}" ${type===draft.cardType?"selected":""}>${type[0].toUpperCase()+type.slice(1)}</option>`).join("");
+  let html=`<details class="context-disclosure player-action-disclosure"${draft.actionOpen?" open":""}><summary><span>Create Player Action</span><small></small></summary><div class="context-disclosure-body"><div class="context-section player-effect-section">
+    <div class="player-action-grid">
+      ${isGlobalGraveyardExile?"":`<label>Scope<select id="playerActionScope">${scopeOptions}</select></label>`}
+      <label>Action<select id="playerActionType">${actionOptions}</select></label>
+      ${isGlobalGraveyardExile?"":`<label>Amount<div class="inline-stepper player-action-count-stepper${isAllAmount?" all-selected":""}"><button type="button" id="playerActionCountDown" ${isAllAmount?"disabled":""}>−</button><input type="number" min="1" max="99" value="${isAllAmount?"":effect.count}" id="playerActionCount" ${isAllAmount?"disabled":""}><button type="button" id="playerActionCountUp" ${isAllAmount?"disabled":""}>+</button></div><span class="player-action-all-toggle"><input type="checkbox" id="playerActionAll" ${isAllAmount?"checked":""}>All</span></label>`}
+      ${needsCardType?`<label>Card type<select id="playerActionCardType">${cardTypeOptions}</select></label>`:""}
+    </div>
+    <span class="player-effect-help">${isGlobalGraveyardExile?"Moves every tracked graveyard card to its owner’s exile zone and clears all graveyard totals.":actionHelp}</span>
+    <div class="player-effect-preview"><strong>${playerEffectSummary(effect)}</strong></div>`;
+  if(effect.scope==="target"){
+    html+=`<div class="target-buttons player-effect-targets">${[gameState.player,...aliveOpponents(gameState)].map(target=>`<button type="button" class="target-btn ${draft.targetId===target.id?"active":""}" data-action-target-id="${target.id}">${target.id==="player"?"🗡️":target.ico} ${effectTargetName(target)}</button>`).join("")}</div>`;
+  }
+  const targets=effectTargets(gameState,effect,draft.targetId);
+  if(effect.action==="reanimate"&&targets.length>0){
+    html+=`<div class="player-effect-choices"><span>${effect.all?"Select every available creature card":`Select up to ${effect.count} creature card${effect.count===1?"":"s"}`}; every selected card is resurrected onto your battlefield.</span>`;
+    targets.forEach(owner=>{
+      const cards=graveyardCreatureCards(owner);
+      html+=`<div class="player-effect-owner"><span>${owner.id==="player"?"🗡️":owner.ico} ${effectTargetName(owner)}'s graveyard</span>${cards.length?`<div class="kill-select">${cards.map(card=>`<button type="button" class="kill-btn ${(draft.choices[owner.id]||[]).includes(card.id)?"selected":""}" data-reanimate-owner="${owner.id}" data-reanimate-card="${card.id}">${card.ico||"🐾"} ${card.name} (${card.p||1}/${card.t||1})</button>`).join("")}</div>`:"<small>No materialized creature cards.</small>"}</div>`;
+    });
+    html+="</div>";
+  }
+  if(needsCardType&&targets.length>0){
+    const cpuTargets=targets.filter(target=>target.id!=="player");
+    html+='<div class="player-effect-choices">';
+    if(cpuTargets.length)html+=`<span>Each affected CPU chooses its least valuable ${effect.cardType} automatically.</span>`;
+    if(targets.some(target=>target.id==="player"))html+=`<div class="player-effect-manual">🗡️ Complete your own ${effect.all?`all ${effect.cardType}s`:`${effect.count} ${effect.cardType}${effect.count===1?"":"s"}`} selection at the table, then confirm resolution.</div>`;
+    html+="</div>";
+  }
+  const ready=canResolvePlayerEffect(effect,draft);
+  return html+=`<button type="button" class="target-btn player-effect-resolve" id="resolvePlayerAction" ${ready?"":"disabled"}>Resolve action</button></div></div></details>`;
+}
+
+function renderCpuResponsePlayerAction(panel,opp,result,attacksPlayer){
+  const host=panel.querySelector("#cpuResponsePlayerAction");
+  if(!host)return;
+  const contextKey=`${gameState.turn}:${opp.id}`;
+  if(cpuResponseActionKey!==contextKey){
+    commanderEffectDraft=null;
+    cpuResponseActionKey=contextKey;
+  }
+  const draft=commanderEffectDraftForPanel(host);
+  const disclosure=host.querySelector(".player-action-disclosure");
+  if(disclosure)draft.actionOpen=disclosure.open;
+  const effect=createPlayerEffect(draft);
+  host.innerHTML=buildCpuResponsePlayerActionHtml(draft,effect);
+  const actionDisclosure=host.querySelector(".player-action-disclosure");
+  if(actionDisclosure)actionDisclosure.ontoggle=()=>{draft.actionOpen=actionDisclosure.open;};
+
+  const updateAction=(field,value,resetTarget=false)=>{
+    const currentDisclosure=host.querySelector(".player-action-disclosure");
+    if(currentDisclosure)draft.actionOpen=currentDisclosure.open;
+    draft[field]=value;
+    if(field==="action"){draft.count=1;draft.all=false;}
+    draft.choices={};
+    if(resetTarget)draft.targetId=null;
+    renderCpuResponsePlayerAction(panel,opp,result,attacksPlayer);
+  };
+  const scopeSelect=host.querySelector("#playerActionScope");
+  if(scopeSelect)scopeSelect.onchange=event=>updateAction("scope",event.target.value,true);
+  host.querySelector("#playerActionType").onchange=event=>updateAction("action",event.target.value);
+  const countInput=host.querySelector("#playerActionCount");
+  if(countInput){
+    countInput.onchange=()=>updateAction("count",Math.max(1,parseInt(countInput.value)||1));
+    host.querySelector("#playerActionCountDown").onclick=()=>{countInput.value=Math.max(1,(parseInt(countInput.value)||1)-1);updateAction("count",parseInt(countInput.value));};
+    host.querySelector("#playerActionCountUp").onclick=()=>{countInput.value=(parseInt(countInput.value)||1)+1;updateAction("count",parseInt(countInput.value));};
+  }
+  const allInput=host.querySelector("#playerActionAll");
+  if(allInput)allInput.onchange=()=>updateAction("all",allInput.checked);
+  const cardType=host.querySelector("#playerActionCardType");
+  if(cardType)cardType.onchange=event=>updateAction("cardType",event.target.value);
+  host.querySelectorAll("[data-action-target-id]").forEach(button=>{button.onclick=()=>{draft.targetId=button.dataset.actionTargetId;draft.choices={};renderCpuResponsePlayerAction(panel,opp,result,attacksPlayer);};});
+  host.querySelectorAll("[data-reanimate-owner]").forEach(button=>{button.onclick=()=>{
+    const owner=button.dataset.reanimateOwner,cardId=button.dataset.reanimateCard;
+    const selected=draft.choices[owner]||[];
+    draft.choices[owner]=selected.includes(cardId)?selected.filter(id=>id!==cardId):[...selected,cardId];
+    renderCpuResponsePlayerAction(panel,opp,result,attacksPlayer);
+  };});
+  host.querySelector("#resolvePlayerAction").onclick=async()=>{
+    if(!canResolvePlayerEffect(effect,draft))return;
+    const resolved=await confirmAndResolvePlayerEffect(effect,draft);
+    if(resolved)renderResponseForm(panel,opp,result,attacksPlayer);
+  };
+}
+
+function renderCombatPlayerAction(panel){
+  const host=panel.querySelector("#combatPlayerAction");
+  if(!host)return;
+  const draft=commanderEffectDraftForPanel(host);
+  const disclosure=host.querySelector(".player-action-disclosure");
+  if(disclosure)draft.actionOpen=disclosure.open;
+  const effect=createPlayerEffect(draft);
+  host.innerHTML=buildCpuResponsePlayerActionHtml(draft,effect,"Resolve a player action before finalizing combat.");
+  const actionDisclosure=host.querySelector(".player-action-disclosure");
+  if(actionDisclosure)actionDisclosure.ontoggle=()=>{draft.actionOpen=actionDisclosure.open;};
+
+  const updateAction=(field,value,resetTarget=false)=>{
+    const currentDisclosure=host.querySelector(".player-action-disclosure");
+    if(currentDisclosure)draft.actionOpen=currentDisclosure.open;
+    draft[field]=value;
+    if(field==="action"){draft.count=1;draft.all=false;}
+    draft.choices={};
+    if(resetTarget)draft.targetId=null;
+    renderCombatPlayerAction(panel);
+  };
+  const scopeSelect=host.querySelector("#playerActionScope");
+  if(scopeSelect)scopeSelect.onchange=event=>updateAction("scope",event.target.value,true);
+  host.querySelector("#playerActionType").onchange=event=>updateAction("action",event.target.value);
+  const countInput=host.querySelector("#playerActionCount");
+  if(countInput){
+    countInput.onchange=()=>updateAction("count",Math.max(1,parseInt(countInput.value)||1));
+    host.querySelector("#playerActionCountDown").onclick=()=>{countInput.value=Math.max(1,(parseInt(countInput.value)||1)-1);updateAction("count",parseInt(countInput.value));};
+    host.querySelector("#playerActionCountUp").onclick=()=>{countInput.value=(parseInt(countInput.value)||1)+1;updateAction("count",parseInt(countInput.value));};
+  }
+  const allInput=host.querySelector("#playerActionAll");
+  if(allInput)allInput.onchange=()=>updateAction("all",allInput.checked);
+  const cardType=host.querySelector("#playerActionCardType");
+  if(cardType)cardType.onchange=event=>updateAction("cardType",event.target.value);
+  host.querySelectorAll("[data-action-target-id]").forEach(button=>{button.onclick=()=>{draft.targetId=button.dataset.actionTargetId;draft.choices={};renderCombatPlayerAction(panel);};});
+  host.querySelectorAll("[data-reanimate-owner]").forEach(button=>{button.onclick=()=>{
+    const owner=button.dataset.reanimateOwner,cardId=button.dataset.reanimateCard;
+    const selected=draft.choices[owner]||[];
+    draft.choices[owner]=selected.includes(cardId)?selected.filter(id=>id!==cardId):[...selected,cardId];
+    renderCombatPlayerAction(panel);
+  };});
+  host.querySelector("#resolvePlayerAction").onclick=async()=>{
+    if(!canResolvePlayerEffect(effect,draft))return;
+    const resolved=await confirmAndResolvePlayerEffect(effect,draft);
+    if(resolved)renderCombatPlayerAction(panel);
+  };
+}
+
+renderResponseForm=function(panel,opp,result,attacksPlayer){
+  baseRenderResponseForm(panel,opp,result,attacksPlayer);
+  const limitedResponse=Array.from(panel.querySelectorAll(".context-section")).find(section=>section.querySelector(".context-section-title")?.textContent.trim()==="Your response (instants / flash)");
+  if(limitedResponse)limitedResponse.remove();
+  const actionHost=document.createElement("div");
+  actionHost.id="cpuResponsePlayerAction";
+  panel.appendChild(actionHost);
+  renderCpuResponsePlayerAction(panel,opp,result,attacksPlayer);
+};
+
 function resolveResponseAndContinue(opp,result,attacksPlayer,panel){
   cmdSnapshot();
   // Read player's responses
@@ -2343,6 +2912,12 @@ function resolveResponseAndContinue(opp,result,attacksPlayer,panel){
   const damageThrough=parseInt(panel.querySelector('input[data-key="damageThrough"]')?.value)||0;
   const cmdrDmgThrough=parseInt(panel.querySelector('input[data-key="cmdrDmgThrough"]')?.value)||0;
   const playerDeaths=parseInt(panel.querySelector('input[data-key="playerDeaths"]')?.value)||0;
+  const flashCreatures=parseInt(panel.querySelector('input[data-key="flashCreatures"]')?.value)||0;
+  const instantDamage=parseInt(panel.querySelector('input[data-key="instantDamage"]')?.value)||0;
+  const damageToPW=parseInt(panel.querySelector('input[data-key="damageToPW"]')?.value)||0;
+  const pwDmgInput=panel.querySelector('input[data-key="damageToPW"]');
+  const pwTargetId=pwDmgInput?pwDmgInput.dataset.pwId:null;
+  const instantDmgTarget=panel._instantDmgTarget||opp.id;
 
   // Apply countered spells
   if(counteredSet.size>0){
@@ -2473,6 +3048,31 @@ function resolveResponseAndContinue(opp,result,attacksPlayer,panel){
 
   // Clear summoning sickness for this opponent's creatures
   opp.tokens.forEach(t=>{t.summoningSick=false;});
+
+  // Apply player response actions (flash creatures, instant damage, PW damage)
+  if(flashCreatures>0){
+    gameState.player.creatures+=flashCreatures;
+    logCommander(`You flash in ${flashCreatures} creature${flashCreatures===1?"":"s"} during ${opp.name.split(',')[0]}'s turn.`);
+  }
+  if(instantDamage>0){
+    const dmgTarget=gameState.opponents.find(o=>o.id===instantDmgTarget);
+    if(dmgTarget){
+      dmgTarget.life=Math.max(0,dmgTarget.life-instantDamage);
+      dmgTarget.damageLog["player"]=(dmgTarget.damageLog["player"]||0)+instantDamage;
+      logCommander(`You deal ${instantDamage} instant damage to ${dmgTarget.name.split(',')[0]}. (Life → ${dmgTarget.life})`);
+    }
+  }
+  if(damageToPW>0&&pwTargetId){
+    const pw=(gameState.player.planeswalkers||[]).find(p=>p.id===pwTargetId);
+    if(pw){
+      pw.loyalty=Math.max(0,pw.loyalty-damageToPW);
+      logCommander(`${opp.name.split(',')[0]} deals ${damageToPW} combat damage to ⬡ ${pw.name}. Loyalty → ${pw.loyalty}.`);
+      if(pw.loyalty<=0){
+        gameState.player.planeswalkers=gameState.player.planeswalkers.filter(p=>p.id!==pwTargetId);
+        logCommander(`⬡ ${pw.name} has been destroyed!`);
+      }
+    }
+  }
 
   // Update displays
   showCommanderGame();
@@ -2683,6 +3283,8 @@ function renderCommanderMainPhasePanel(){
   actionHtml+=`<button type="button" class="target-btn player-effect-resolve" id="resolvePlayerAction" ${ready?"":"disabled"}>Resolve action</button></div></div></details>`;
   const battlefieldRulesHtml=buildBattlefieldRulesPanel();
   panel.innerHTML=`<div class="context-form commander-form"><div class="context-section"><div class="commander-player-actions"><div class="inline-stepper"><label>Creatures I played</label><button type="button" data-key="creaturesPlayed" data-delta="-1">−</button><input type="number" min="0" value="${draft.creaturesPlayed}" data-key="creaturesPlayed"><button type="button" data-key="creaturesPlayed" data-delta="1">+</button></div></div></div>${battlefieldRulesHtml}${actionHtml}</div>`;
+  const actionDisclosure=panel.querySelector(".player-action-disclosure");
+  if(actionDisclosure)actionDisclosure.ontoggle=()=>{draft.actionOpen=actionDisclosure.open;};
   wireBattlefieldRulesPanel(panel);
   wireSteppers(panel);
   const updateAction=(field,value,resetTarget=false)=>{
@@ -2794,7 +3396,7 @@ function startCombatStep(){
     html+=`</div>`;
   }
 
-  html+='</div>';
+  html+='<div id="combatPlayerAction"></div></div>';
   panel.innerHTML=html;
 
   wireSteppers(panel);
@@ -2811,6 +3413,7 @@ function startCombatStep(){
     };
   });
   panel._killMap=killMap;
+  renderCombatPlayerAction(panel);
 
   setConfirmButton("Finish Combat ▸","",()=>resolveFullCombat(panel,alive),true);
 }
