@@ -1,7 +1,7 @@
 /* =====================================================================
    tests/run.js — entry point for `npm test`.
 
-   Runs the Commander, Adventure and CPU-AI behaviour simulations and
+   Runs the Commander, Adventure, CPU-AI behaviour and deck-archetype simulations and
    prints a summary.
    Exit code:
      1  if any simulation threw an exception (always fatal)
@@ -13,12 +13,13 @@ var report = require("./report");
 var simCommander = require("./sim-commander");
 var simAdventure = require("./sim-adventure");
 var simAi = require("./sim-ai");
+var simDecks = require("./sim-decks");
 
 var strict = process.argv.includes("--strict") || process.env.SIM_STRICT === "1";
 var started = Date.now();
 var results = [];
 
-[["commander", simCommander], ["adventure", simAdventure], ["ai", simAi]].forEach(function (entry) {
+[["commander", simCommander], ["adventure", simAdventure], ["ai", simAi], ["decks", simDecks]].forEach(function (entry) {
   try {
     results.push(entry[1].run());
   } catch (e) {

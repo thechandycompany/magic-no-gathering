@@ -187,8 +187,11 @@ function canBlockCreature(creature){return !creature.attacking&&!creature.tapped
  * defender's available blockers. Returns a score:
  *  > 0  = profitable (attacker likely gets through or wins the trade)
  *  <= 0 = bad trade (attacker would die to a cheaper/equal blocker)
+ * options.commanderAlwaysAttacks (default true): a commander scores 8 when
+ * blockers exist (Voltron policy). false = the commander is evaluated like
+ * any other creature (deck.ai.attackPolicy, e.g. Boros Tokens).
  */
-function evaluateAttackProfitability(attacker, defenderTokens){
+function evaluateAttackProfitability(attacker, defenderTokens, options){
   // No blockers = free damage
   if(defenderTokens.length===0)return 10;
 
@@ -202,7 +205,8 @@ function evaluateAttackProfitability(attacker, defenderTokens){
   var attackerKills=possibleBlockers.filter(function(b){return combatDamageKills(attacker,b);});
 
   // Commander always attacks - voltron pressure is worth the risk
-  if(attacker.kind==="commander")return 8;
+  var commanderAlways=!(options&&options.commanderAlwaysAttacks===false);
+  if(attacker.kind==="commander"&&commanderAlways)return 8;
 
   // Attacker has trample - even if blocked, damage gets through
   if(attacker.kws&&attacker.kws.includes("Trample"))return 5;
@@ -236,21 +240,24 @@ function evaluateAttackProfitability(attacker, defenderTokens){
  * Smart attack declaration for CPU-vs-CPU.
  * Evaluates each creature's profitability against the defender's board.
  * Returns array of tokens that should attack.
+ * options.commanderAlwaysAttacks as in evaluateAttackProfitability (the
+ * Commander AI passes its deck's attack policy; default true).
  */
-function smartDeclareAttackers(opp, defenderTokens){
+function smartDeclareAttackers(opp, defenderTokens, options){
   var candidates=opp.tokens.filter(function(t){return !t.summoningSick;});
   var attackers=[];
+  var commanderAlways=!(options&&options.commanderAlwaysAttacks===false);
 
   for(var i=0;i<candidates.length;i++){
     var t=candidates[i];
     // Mana dorks never attack - their ramp value exceeds combat value
     if(t.kind==="voltron-support"&&t.effect&&t.effect.includes("mana"))continue;
 
-    // Commander always attacks
-    if(t.kind==="commander"){attackers.push(t);continue;}
+    // Commander always attacks (Voltron policy)
+    if(t.kind==="commander"&&commanderAlways){attackers.push(t);continue;}
 
     // Evaluate profitability
-    var score=evaluateAttackProfitability(t, defenderTokens);
+    var score=evaluateAttackProfitability(t, defenderTokens, options);
 
     // Only attack if the trade is at least neutral
     if(score>0){

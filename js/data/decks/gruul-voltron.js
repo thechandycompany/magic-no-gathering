@@ -147,14 +147,36 @@ var GRUUL_VOLTRON = (function() {
   strategyLabels[strategies.LETHAL] = "Lethal attack available";
   strategyLabels[strategies.OPENING] = "Best open attack (leader already under pressure)";
 
+  /* --- AI hooks (called by js/engine/ai-commander.js) ---
+     Hooks only DECIDE: every state change goes through the engine's ctx
+     steps (see createMainPhaseContext), so this file stays free of S /
+     gameState / DOM access. */
+  var ai = {
+    // Commander → fast mana → ramp until Rukha is out; then re-equip loose
+    // gear and cast + equip one piece of gear; then ONE secondary cast.
+    mainPhase: function(opp, ctx) {
+      if (!ctx.commander()) ctx.castCommander() || ctx.castFastMana() || ctx.castRamp();
+      if (ctx.commander()) {
+        ctx.equipLooseGear();
+        if (!ctx.castThisTurn("commander")) ctx.castGear();
+      }
+      ctx.castSecondary(["wipe", "haymaker", "removalVsCpu", "extraGear", "creature", "fallbackRamp", "spell", "removalVsPlayer"]);
+    },
+    // Rukha always swings (Voltron pressure); support creatures need 2+ power
+    // and a profitable attack; a racing commander ignores the home guard.
+    attackPolicy: {commanderAlwaysAttacks: true, minPower: 2, goWide: false, commanderRaces: true}
+  };
+
   /* --- Public deck object --- */
   return {
     id: "gruul-voltron",
     name: "Gruul Voltron",
+    archetype: "voltron",
     commander: commander,
     color: "#c0392b",
     summary: "A Commander-style rival ramps, casts Rukha from the command zone, suits her up, and threatens a 21 commander-damage defeat.",
     winCondition: {type: "commanderDamage", threshold: 21},
+    ai: ai,
     cards: cards,
     deckCompositionBase: deckCompositionBase,
     deckComposition: deckComposition,
