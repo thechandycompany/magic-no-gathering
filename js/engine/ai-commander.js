@@ -1363,7 +1363,7 @@ function executeOpponentMainPhase(opp, allPlayers){
   if(upkeepTokens)actions.push(upkeepTokens);
 
   // Land drop
-  if(opp.hand.lands>0){opp.hand.lands--;opp.landsInPlay++;actions.push({label:"Land drop",detail:`${opp.landsInPlay} lands in play.`,type:"land"});}
+  if(opp.hand.lands>0){opp.hand.lands--;opp.landsInPlay++;actions.push({label:"Land drop",detail:`${plural(opp.landsInPlay,"land")} in play.`,type:"land"});}
 
   let mana=manaAvailable(opp);
   applyBattlefieldRuleModifiers();
