@@ -8,7 +8,7 @@ No Steam, no desktop build, no paid content. See README.md for the fan-content a
 **Before publishing**
 - [x] Set `DONATION_URL` (https://ko-fi.com/chandlerandrew) in `js/data/modes.js`
 - [ ] Set `SOURCE_URL` if the repo is published — leave empty to hide the button
-- [ ] Pick a code license for the repo (e.g. MIT) and add `LICENSE` — covers the code only, not Wizards' IP
+- [x] Code license: GPL-3.0-or-later (`LICENSE`) — covers the code only, not Wizards' IP; chosen for Forge compatibility
 - [ ] Favicon / social preview image (original art only — no Wizards logos, set symbols, mana-symbol artwork or card images)
 - [ ] Run the manual checklist below on desktop Chrome, Firefox, Safari, and one phone/tablet
 - [ ] `npm test -- --strict` passes
@@ -43,6 +43,19 @@ No Steam, no desktop build, no paid content. See README.md for the fan-content a
 - CPUs cannot protect their creatures against another CPU's symmetric wipe (wipe resolves inside the CPU main phase)
 - Lifelink from blocked attackers in your attack declaration is estimated
 - Gruul Voltron vs Boros Tokens balance: Boros is slightly stronger in harsher sims — revisit after playtesting
+
+## Future: real Commander precons from Forge (GPL-3.0)
+Forge (https://github.com/Card-Forge/forge, GPL-3.0) ships decklists for ~180 official Commander precons
+(`forge-gui/res/quest/commanderprecons/*.dck`) and a script per card (`forge-gui/res/cardsfolder/<letter>/<name>.txt`:
+Name, ManaCost, Types, PT, Oracle, plus Forge's ability DSL). This project is GPL-3.0-or-later, so reusing Forge
+material is allowed — keep its copyright/attribution and record what was taken.
+- [ ] `tools/import-forge-deck.js` (Node, no deps): read a `.dck` + the referenced card scripts → generate a deck file
+      in `js/data/decks/` (name, cost, types, P/T, keywords, Oracle text as `effect`, a guessed category/flags marked for review)
+- [ ] Credit Forge in the generated file header and README; note the Forge commit used
+- [ ] Start with precons that fit existing deck strategies (tokens, equipment/Voltron), e.g. "Call for Backup", "Animated Army", "Arm for Battle"
+- [ ] New `deck.ai` strategies to unlock more precons: Graveyard (self-mill/reanimate), Aristocrats (sac + drain), Spellslinger
+- [ ] Setup screen: pick precons by name; sims per imported deck in `tests/sim-decks.js`
+- Limitation: CPUs play cards by category, not their full Forge rules — the exact text shows on hover.
 
 ## Deferred (not planned until it adds real value)
 - **Decklist import** (e.g. Moxfield). The player plays a paper deck; importing it would make them track the same deck in two places. Revisit only if it unlocks something counts can't (e.g. accurate blockers or removal targets) without double bookkeeping.

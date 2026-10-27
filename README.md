@@ -43,6 +43,14 @@ The game is plain static files — there is no build step.
 3. **itch.io:** zip the repo contents with `index.html` at the root (exclude `.git/`, `backup/`, `node_modules/`, `.claude/`), upload as an HTML5 game, set pricing to "No payments" or "Name your own price" with a $0 minimum, and include the fan-content notice in the description.
    **GitHub Pages:** push to a public repo → Settings → Pages → deploy from the default branch root.
 
+## License
+The code is free software under the **GNU General Public License v3.0 or later** — see [`LICENSE`](LICENSE).
+You may copy, modify and share it; any distributed version must stay GPL and include its source.
+GPL was chosen so the project can reuse material from [Forge](https://github.com/Card-Forge/forge) (GPL-3.0) in the future.
+
+The license covers this project's own code only. Magic: The Gathering names, card text and other Wizards of the Coast
+material are **not** licensed here — they are used as fan content under Wizards' Fan Content Policy (above).
+
 ## Develop
 - `CLAUDE.md` — architecture, where code goes, and the hard rules (including the fan-content rules).
 - `docs/OVERHAUL_CONTRACT.md` — engine ↔ UI contract (CPU turn phases, response resolution, deck plug-in seam).

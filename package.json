@@ -4,5 +4,6 @@
   "description": "Solo card game engine (vanilla JS, file://). No runtime dependencies.",
   "scripts": {
     "test": "node tests/run.js"
-  }
+  },
+  "license": "GPL-3.0-or-later"
 }
