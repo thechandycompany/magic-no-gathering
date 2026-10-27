@@ -1,5 +1,32 @@
 # Magic No Gathering — TODO
 
+## [PRIORITY] Refactor Bug Testing
+
+Validate the 16-file modular refactor works identically to the monolithic original.
+
+**Test checklist:**
+- [ ] Clear localStorage (`localStorage.clear(); location.reload()`) and confirm setup screen shows
+- [ ] Begin Commander Battle (3 opponents) — game starts, CPU turns execute, player can respond
+- [ ] Begin Solo Adventure (Easy Garruk) — wolves spawn, combat resolves, undo works
+- [ ] Test Hard Garruk — escalating loyalty, emergency slay/wipe decisions fire
+- [ ] Test Horde Mode — waves spawn, horde deck depletes, win condition triggers
+- [ ] Test Aether Conclave — named creatures enter, auras apply, spell locks work
+- [ ] Test Voltron (adventure) — mana ramps, Rukha casts, gear equips, commander damage tracks
+- [ ] Save/load — save mid-game, reload page, game resumes correctly
+- [ ] Undo — works in both adventure and commander modes
+- [ ] Themes — Settings → Appearance switches Classic / Light / Dark / Dark Purple without breaking layout
+- [ ] Graveyard/exile viewers — open correctly, show cards, track counts
+- [ ] Restart — returns to setup screen, clears state
+
+**Known issues to watch for:**
+- `ReferenceError: X is not defined` from `ai-commander.js` → function is inside commander-ui.js IIFE, needs `window.X = X;` exposure (~line 2120)
+- `gameState is null` errors → commander function called before battle starts, add null guard
+- `S is null` errors → adventure function called when no game active, add null guard
+- Stale saves from before refactor cause boot crash → clear localStorage
+- Browser caching old JS files → hard refresh (Cmd+Shift+R) or bump `?v=N` in HTML script tags
+
+---
+
 ## Player Attack Declaration
 
 Add a step during the player's combat phase where the player explicitly declares which of their creatures are attacking (and optionally which opponent they're attacking in Commander).
@@ -47,37 +74,17 @@ Prepare the game for a Steam release with a free-to-play base + paid DLC model.
 
 ---
 
-## Commander Action: Exile All Graveyards
+## ~~Commander Action: Exile All Graveyards~~ DONE
 
-Add an "Exile all graveyards" player action to the structured action builder.
-
-**Planned:**
-- New action option in the player-action dropdown (alongside discard, mill, destroy, etc.)
-- Moves all materialized graveyard entries from every player/opponent to exile
-- Increments each owner's exileCount by the number of cards removed
-- Resets graveyardCount and graveyard arrays to zero/empty
-- Event log records each owner's exiled card count and types
-- Useful for cards like Tormod's Crypt, Rest in Peace, Bojuka Bog, etc.
+~~Add an "Exile all graveyards" player action to the structured action builder.~~ Implemented in the `resolvePlayerEffect` function — `exileGraveyards` action calls `moveGraveyardToExile()` for each target.
 
 ---
 
-## Commander Rival: Discard Interaction
+## ~~Commander Rival: Discard Interaction~~ DONE
 
-Add player-side discard/mill actions that interact with Rukha's finite virtual hand and deck.
+~~Add player-side discard/mill actions that interact with Rukha's finite virtual hand and deck.~~ Implemented via `PLAYER_ACTIONS` (discard, mill options) and `discardFromOpponent`/`millOpponent` functions with AI priority logic.
 
-**Planned:**
-- Player-turn action to force Rukha to discard from her virtual hand
-- Random discard (e.g. "discard 2") — engine removes cards, AI keeps what matters most
-- Targeted discard (e.g. Thoughtseize) — player picks the category (land, ramp, gear/other)
-- Mill option — damage the virtual deck directly, bypassing the hand
-- Hand size indicator visible in the Commander status badges
-- AI discard priority: keeps lands if short, keeps ramp if commander not cast, keeps gear if commander is on field
-
-**Design notes:**
-- Discard decks delay Rukha's commander cast by stripping unplayed lands and ramp
-- Once Rukha is topdecking, she can only act on what she draws each turn
-- Mill overlaps with discard strategies and accelerates deck depletion
-- Consider a "Rukha has no cards in hand" state where she skips non-combat development
+---
 
 ## Second Commander Rival Archetype
 
@@ -90,6 +97,8 @@ Build a second Commander Rival opponent using the existing framework (finite vir
 - **Boros Tokens/Equipment** — goes wide or empowers its commander through equipment (closest analog to Voltron, so probably not the first pick for variety)
 
 **Design notes:**
-- Reuse VOLTRON_CARDS-style typed pool structure, but with archetype-appropriate categories (e.g. Aristocrats: sac outlets, token generators, drain effects instead of gear/protection/haymakers)
-- Needs its own win condition framing — not every archetype should use commander damage as the primary clock (Aristocrats/Graveyard decks usually grind via card advantage + drain, not one big creature)
+- New deck goes in `js/data/decks/new-archetype.js` and registers in `index.js`
+- Reuse VOLTRON_CARDS-style typed pool structure, but with archetype-appropriate categories
+- Needs its own win condition framing — not every archetype should use commander damage as the primary clock
+- `ai-commander.js` executeOpponentTurn currently has Voltron-specific logic inline — will need deck.ai.* hooks for different playstyles
 - Consider whether this should be a wholly separate mode or a "commander select" step within a shared "Commander Rival" mode
