@@ -2,8 +2,11 @@
    combat.js - Combat engine functions
    Extracted from game.js (declareAttackers, declareVoltronAttackers)
    and commander.js (CPU-vs-CPU combat system).
-   Globals used: S, tokenPower, voltronCommander (from game.js)
-                 cpuCreaturesCannotBlock, applyCpuDamagePrevention (from ai-commander.js)
+   Globals used: S, tokenPower, voltronCommander (from tokens.js)
+                 cpuCreaturesCannotBlock (from ai-commander.js, called at run time)
+   Rules modelled: first strike / double strike damage steps, trample
+   (with deathtouch lethal = 1), deathtouch, indestructible. Summoning-sick
+   creatures can block; tapped (attacking) creatures can't.
    ===================================================================== */
 
 /* ---------- attack declaration (from game.js) ---------- */
@@ -95,36 +98,89 @@ function creatureCombatValue(creature){
   return (creature.p||0)+(creature.t||0)+(hasKeyword(creature,"Deathtouch")?3:0)+(hasKeyword(creature,"Trample")?2:0);
 }
 
+function hasFirstStrikeDamage(creature){return hasKeyword(creature,"First Strike")||hasKeyword(creature,"Double Strike");}
+function hasRegularDamage(creature){return !hasKeyword(creature,"First Strike")||hasKeyword(creature,"Double Strike");}
+/** Number of combat damage steps in which this creature deals damage (2 for double strike). */
+function combatStrikeCount(creature){return hasKeyword(creature,"Double Strike")?2:1;}
+
+/**
+ * Rough "can source kill target in one combat" check used by AI evaluation.
+ * Double strike counts both damage steps. resolveSingleBlock does the exact
+ * step-by-step resolution.
+ */
 function combatDamageKills(source,target){
   if(hasKeyword(target,"Indestructible"))return false;
-  if(hasKeyword(source,"Deathtouch"))return (source.p||0)>0;
-  return (source.p||0)>=(target.t||0);
+  if((source.p||0)<=0)return false;
+  if(hasKeyword(source,"Deathtouch"))return true;
+  return (source.p||0)*combatStrikeCount(source)>=(target.t||0);
 }
 
 function creatureSurvivesCombat(creature,opponent){return !combatDamageKills(opponent,creature);}
 
-function trampleOverflow(attacker,blocker){
+/**
+ * Damage that tramples over a blocker with the given (remaining) toughness in
+ * ONE damage step. Lethal damage is 1 for a deathtouch attacker.
+ * Returns 0 for attackers without trample.
+ */
+function trampleExcess(attacker,blockerToughness){
   if(!hasKeyword(attacker,"Trample"))return 0;
-  var lethal=hasKeyword(attacker,"Deathtouch")?1:Math.max(0,blocker.t||0);
+  var toughness=Math.max(0,blockerToughness||0);
+  var lethal=hasKeyword(attacker,"Deathtouch")?Math.min(1,toughness):toughness;
   return Math.max(0,(attacker.p||0)-lethal);
 }
 
+/** Back-compat wrapper (single damage step against a fresh blocker). */
+function trampleOverflow(attacker,blocker){return trampleExcess(attacker,blocker.t||0);}
+
+/**
+ * Resolves one attacker vs one blocker through the first-strike and regular
+ * combat damage steps. First strike deals damage only in the first step,
+ * double strike in both, everything else only in the regular step. A
+ * creature destroyed in the first step deals no regular damage. A trampling
+ * attacker assigns lethal damage to the blocker (accounting for damage it
+ * already took) and the rest to the defending player; once the blocker is
+ * gone, all of its remaining damage tramples through.
+ * Returns {attackerDies, blockerDies, trampleDamage}.
+ */
 function resolveSingleBlock(attacker,blocker){
-  var attackerStrikesFirst=hasKeyword(attacker,"First Strike")||hasKeyword(attacker,"Double Strike");
-  var blockerStrikesFirst=hasKeyword(blocker,"First Strike")||hasKeyword(blocker,"Double Strike");
-  var attackerDies=false,blockerDies=false;
-  if(attackerStrikesFirst&&!blockerStrikesFirst){
-    blockerDies=combatDamageKills(attacker,blocker);
-    if(!blockerDies)attackerDies=combatDamageKills(blocker,attacker);
-  }else if(blockerStrikesFirst&&!attackerStrikesFirst){
-    attackerDies=combatDamageKills(blocker,attacker);
-    if(!attackerDies)blockerDies=combatDamageKills(attacker,blocker);
-  }else{
-    attackerDies=combatDamageKills(blocker,attacker);
-    blockerDies=combatDamageKills(attacker,blocker);
+  var attackerDT=hasKeyword(attacker,"Deathtouch"),blockerDT=hasKeyword(blocker,"Deathtouch");
+  var attackerTramples=hasKeyword(attacker,"Trample");
+  var attackerIndestructible=hasKeyword(attacker,"Indestructible"),blockerIndestructible=hasKeyword(blocker,"Indestructible");
+  var attackerTaken=0,blockerTaken=0,attackerDies=false,blockerDies=false,trampleDamage=0;
+  var steps=[true,false];
+  for(var s=0;s<steps.length;s++){
+    var firstStep=steps[s];
+    var attackerStrikes=!attackerDies&&(firstStep?hasFirstStrikeDamage(attacker):hasRegularDamage(attacker))&&(attacker.p||0)>0;
+    var blockerStrikes=!blockerDies&&(firstStep?hasFirstStrikeDamage(blocker):hasRegularDamage(blocker))&&(blocker.p||0)>0;
+    var toBlocker=0,toAttacker=0;
+    if(attackerStrikes){
+      var power=attacker.p||0;
+      if(!blockerDies){
+        if(attackerTramples){
+          var lethal=attackerDT?(blockerTaken>0?0:1):Math.max(0,(blocker.t||0)-blockerTaken);
+          var assigned=Math.min(power,lethal);
+          toBlocker=assigned;
+          trampleDamage+=power-assigned;
+        }else toBlocker=power;
+      }else if(attackerTramples){
+        trampleDamage+=power;
+      }
+    }
+    if(blockerStrikes&&!attackerDies)toAttacker=blocker.p||0;
+    if(toBlocker>0){
+      blockerTaken+=toBlocker;
+      if(!blockerIndestructible&&(attackerDT||blockerTaken>=(blocker.t||0)))blockerDies=true;
+    }
+    if(toAttacker>0){
+      attackerTaken+=toAttacker;
+      if(!attackerIndestructible&&(blockerDT||attackerTaken>=(attacker.t||0)))attackerDies=true;
+    }
   }
-  return {attackerDies:attackerDies,blockerDies:blockerDies,trampleDamage:trampleOverflow(attacker,blocker)};
+  return {attackerDies:attackerDies,blockerDies:blockerDies,trampleDamage:trampleDamage};
 }
+
+/** True when a creature is untapped and able to block (summoning sickness does NOT matter). */
+function canBlockCreature(creature){return !creature.attacking&&!creature.tapped;}
 
 /**
  * Evaluate if an attacker would survive or trade favorably against the
@@ -137,7 +193,8 @@ function evaluateAttackProfitability(attacker, defenderTokens){
   if(defenderTokens.length===0)return 10;
 
   // Find the best blocker the defender could assign (highest power that survives or trades)
-  var possibleBlockers=defenderTokens.filter(function(t){return !t.summoningSick;});
+  // Summoning-sick creatures can block; only tapped (attacked) ones can't.
+  var possibleBlockers=defenderTokens.filter(canBlockCreature);
   if(possibleBlockers.length===0)return 10;
 
   var killsAttacker=possibleBlockers.filter(function(b){return combatDamageKills(b,attacker);});
@@ -216,13 +273,13 @@ function smartDeclareAttackers(opp, defenderTokens){
  */
 function cpuAssignBlockers(defender, attackers){
   if(cpuCreaturesCannotBlock())return {assignments:[],unblocked:[].concat(attackers)};
-  var available=defender.tokens.filter(function(t){return !t.summoningSick&&!t.attacking;});
+  // Summoning-sick creatures CAN block; creatures still tapped from attacking can't.
+  var available=(defender.tokens||[]).filter(canBlockCreature);
   var assignments=[]; // {attacker, blocker}
   var used=new Set();
   var defenderLife=defender.life;
 
   // Total incoming if we block nothing
-  var totalIncoming=attackers.reduce(function(s,a){return s+a.p;},0);
 
   // Sort attackers by threat: commander first, then by power descending
   var sorted=[].concat(attackers).sort(function(a,b){
@@ -329,10 +386,11 @@ function resolveCpuCombat(attackerOpp, defenderOpp, attackers){
     });
   }
 
-  var unblockedDamage=unblocked.reduce(function(sum,a){return sum+(a.p||0);},0);
+  // Unblocked double strikers deal damage in both damage steps.
+  var unblockedDamage=unblocked.reduce(function(sum,a){return sum+(a.p||0)*combatStrikeCount(a);},0);
   var unblockedCommanderDamage=unblocked
     .filter(function(a){return a.kind==="commander";})
-    .reduce(function(sum,a){return sum+(a.p||0);},0);
+    .reduce(function(sum,a){return sum+(a.p||0)*combatStrikeCount(a);},0);
   commanderDamage+=unblockedCommanderDamage;
 
   return {

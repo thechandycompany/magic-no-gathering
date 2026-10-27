@@ -69,24 +69,24 @@ var GRUUL_VOLTRON = (function() {
     ],
     // 5 card draw / advantage
     draw: [
-      {name: "Hunter's Insight", cost: 3, effect: "Draw cards equal to combat damage dealt by target creature."},
-      {name: "Rishkar's Expertise", cost: 6, effect: "Draw cards equal to greatest power among creatures you control; cast a free spell."},
-      {name: "Return of the Wildspeaker", cost: 5, effect: "Draw cards equal to greatest power, or creatures get +3/+3."},
-      {name: "Harmonize", cost: 4, effect: "Draw three cards."},
-      {name: "Greater Good", cost: 4, effect: "Sacrifice a creature: draw cards equal to its power, then discard 3."}
+      {name: "Hunter's Insight", cost: 3, effect: "Draw cards equal to combat damage dealt by target creature.", draw: {mode: "power", max: 4}},
+      {name: "Rishkar's Expertise", cost: 6, effect: "Draw cards equal to greatest power among creatures you control; cast a free spell.", draw: {mode: "power", max: 5}},
+      {name: "Return of the Wildspeaker", cost: 5, effect: "Draw cards equal to greatest power, or creatures get +3/+3.", draw: {mode: "power", max: 5}},
+      {name: "Harmonize", cost: 4, effect: "Draw three cards.", draw: {mode: "fixed", count: 3}},
+      {name: "Greater Good", cost: 4, effect: "Sacrifice a creature: draw cards equal to its power, then discard 3.", draw: {mode: "sacrifice", discard: 3}}
     ],
     // 4 haymakers / board control
     haymakers: [
-      {name: "Overwhelming Stampede", cost: 5, effect: "All your creatures get +X/+X and trample where X is greatest power."},
-      {name: "Blasphemous Act", cost: 9, effect: "Deal 13 damage to each creature. Costs less for each creature on field.", scaleCost: true},
-      {name: "Chain Reaction", cost: 4, effect: "Deal damage to each creature equal to the number of creatures on the battlefield."},
-      {name: "Chandra's Ignition", cost: 5, effect: "Target creature deals damage equal to its power to each other creature and each opponent."}
+      {name: "Overwhelming Stampede", cost: 5, effect: "All your creatures get +X/+X and trample until end of turn, where X is the greatest power among them.", haymaker: "pumpTeam"},
+      {name: "Blasphemous Act", cost: 9, effect: "Deal 13 damage to each creature. Costs 1 less for each creature on the battlefield.", scaleCost: true, haymaker: "damageEach", damage: 13},
+      {name: "Chain Reaction", cost: 4, effect: "Deal damage to each creature equal to the number of creatures on the battlefield.", haymaker: "damageEach", damage: "creatureCount"},
+      {name: "Chandra's Ignition", cost: 5, effect: "Target creature you control deals damage equal to its power to each other creature and each opponent.", haymaker: "ignition"}
     ],
     // 6 misc utility (card selection, recursion, value engines)
     utility: [
-      {name: "Eternal Witness", cost: 3, effect: "When this enters, return a card from your graveyard to your hand.", isCreature: true, p: 2, t: 1},
-      {name: "Regrowth", cost: 2, effect: "Return target card from your graveyard to your hand."},
-      {name: "Reckless Impulse", cost: 2, effect: "Exile the top two cards; you may play them this turn."},
+      {name: "Eternal Witness", cost: 3, effect: "When this enters, return a card from your graveyard to your hand.", isCreature: true, p: 2, t: 1, regrowth: true},
+      {name: "Regrowth", cost: 2, effect: "Return target card from your graveyard to your hand.", regrowth: true},
+      {name: "Reckless Impulse", cost: 2, effect: "Exile the top two cards; you may play them this turn.", draw: {mode: "fixed", count: 1}},
       {name: "Outpost Siege", cost: 4, effect: "At the beginning of your upkeep, exile top card; you may play it this turn."},
       {name: "Lifecrafter's Bestiary", cost: 3, effect: "At upkeep, scry 1. Whenever you cast a creature, draw a card."},
       {name: "Skullclamp", cost: 1, effect: "Equipped creature gets +1/-1. When it dies, draw two cards."}
@@ -99,10 +99,14 @@ var GRUUL_VOLTRON = (function() {
   };
 
   /* --- Deck composition (card counts by category) --- */
-  // Base composition (51 "other" cards for solo mode)
+  // Library = 37 lands + 10 ramp + 1 explosive + 51 typed "other" = 99 cards
+  // (plus the commander = 100). Counts beyond a pool's size wrap around.
+  var libraryCounts = {lands: 37, ramp: 10, explosive: 1};
+  // Base composition (51 "other" cards for solo adventure mode)
   var deckCompositionBase = {creatures: 14, gear: 12, protection: 10, draw: 5, haymakers: 4, utility: 6};
-  // Extended composition (53 "other" cards for multiplayer — adds boardwipes)
-  var deckComposition = {creatures: 14, gear: 12, protection: 10, draw: 5, haymakers: 4, utility: 6, boardwipes: 2};
+  // Multiplayer composition (51 "other" cards — adds 2 boardwipes, so one
+  // protection spell (Bolt Bend) and one utility card (Skullclamp) are cut)
+  var deckComposition = {creatures: 14, gear: 12, protection: 9, draw: 5, haymakers: 4, utility: 5, boardwipes: 2};
 
   /* --- CPU identities for multiplayer --- */
   var cpuNames = [
@@ -111,6 +115,9 @@ var GRUUL_VOLTRON = (function() {
     {name: "Thyra, Ember Sovereign", ico: "🔥", color: "#d35400"},
     {name: "Grendol, Tuskbreaker", ico: "🐗", color: "#27ae60"}
   ];
+
+  /* --- Modeled ramp creature cast from a generic "ramp" hand card --- */
+  var fallbackRampCreature = {name: "Wilds Guide", ico: "🌿", type: "Creature — Shaman", p: 2, t: 2, effect: "Taps for mana.", rampValue: 1};
 
   /* --- Commander base stats (shared by all CPU variants) --- */
   var commanderBase = {p: 4, t: 4, kws: ["Trample"], cost: 5};
@@ -147,6 +154,8 @@ var GRUUL_VOLTRON = (function() {
     cards: cards,
     deckCompositionBase: deckCompositionBase,
     deckComposition: deckComposition,
+    libraryCounts: libraryCounts,
+    fallbackRampCreature: fallbackRampCreature,
     cpuNames: cpuNames,
     commanderBase: commanderBase,
     maxCpuHandSize: maxCpuHandSize,
