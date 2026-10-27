@@ -2,7 +2,7 @@
    CUSTOM MODAL INPUTS (native prompt/confirm are blocked in sandboxed iframes)
    ===================================================================== */
 var inputResolver=null;
-function closeInput(){ document.getElementById('inputOverlay').classList.remove('show'); inputResolver=null; }
+function closeInput(){ const overlay=document.getElementById('inputOverlay'); overlay.classList.remove('show'); overlay.dataset.dismissible="true"; inputResolver=null; }
 function askNumber(title, def){
   if(def==null) def=1;
   return new Promise(res=>{
@@ -52,9 +52,12 @@ function pickMultiTokenModal(){
     document.getElementById('inputOverlay').classList.add('show');
   });
 }
-function askConfirm(title, msg, okLabel, cancelLabel){
+/* opts.dismissible:false — for prompts whose second button is a real answer (e.g. "I countered"),
+   so clicking outside or pressing Escape can't pick it by accident. */
+function askConfirm(title, msg, okLabel, cancelLabel, opts){
   return new Promise(res=>{
     inputResolver=res;
+    document.getElementById('inputOverlay').dataset.dismissible=(opts&&opts.dismissible===false)?"false":"true";
     document.getElementById('inputTitle').textContent=title;
     const body=document.getElementById('inputBody');
     body.innerHTML=`<div class="confirm-msg">${msg}</div>`;
@@ -224,4 +227,31 @@ function showEnemyExile(){
   html+=ex.length?cardReferenceListHtml(ex.slice().reverse(),"zone-card-list"):`<div class="graveyard-empty">Exile is empty.</div>`;
   html+='</div>';
   openInfoModal(`✦ ${enemyName()}'s Exile`,html);
+}
+
+/* ===== Dismissing popups =====
+   Clicking the dimmed backdrop or pressing Escape closes the TOPMOST popup — but only if it
+   can be dismissed. Each popup closes through its own cancel/close action so any pending
+   promise still resolves. Not dismissible: the setup screen, victory/defeat, and prompts
+   opened with askConfirm(..., {dismissible:false}). */
+function topOverlay(){
+  const open=Array.from(document.querySelectorAll('.overlay.show'));
+  return open.length?open[open.length-1]:null;
+}
+function dismissOverlay(overlay){
+  if(!overlay)return false;
+  switch(overlay.id){
+    case 'settingsOverlay': closeSettings(); return true;
+    case 'logOverlay': closeLog(); return true;
+    case 'infoOverlay': closeInfoModal(); return true;
+    case 'inputOverlay':
+      if(overlay.dataset.dismissible==="false")return false;
+      document.getElementById('inputCancel').click(); return true;
+    default: {
+      // Generic modal (#overlay): only viewers that offer an explicit close button
+      const close=overlay.querySelector('[data-dismiss], .graveyard-close');
+      if(!close)return false;
+      close.click(); return true;
+    }
+  }
 }

@@ -131,7 +131,6 @@ function wire(){
   // Settings dialog (commander-ui.js re-binds resetBtn for commander mode)
   document.getElementById('menuBtn').onclick=openSettings;
   document.getElementById('settingsClose').onclick=closeSettings;
-  document.getElementById('settingsOverlay').onclick=event=>{if(event.target.id==='settingsOverlay')closeSettings();};
   document.getElementById('resetBtn').onclick=()=>{closeSettings();confirmRestart();};
   document.getElementById('rulesBtn').onclick=showModeRules;
   document.getElementById('graveyardBtn').onclick=showEnemyGraveyard;
@@ -139,10 +138,17 @@ function wire(){
   document.getElementById('portrait').onclick=showModeRules;
   document.getElementById('portrait').onkeydown=event=>{if(event.key==="Enter"||event.key===" "){event.preventDefault();showModeRules();}};
   document.getElementById('infoClose').onclick=closeInfoModal;
-  document.getElementById('infoOverlay').onclick=event=>{if(event.target.id==='infoOverlay')closeInfoModal();};
   document.getElementById('logBtn').onclick=()=>{closeSettings();openLog();};
   document.getElementById('logClose').onclick=closeLog;
-  document.getElementById('logOverlay').onclick=event=>{if(event.target.id==='logOverlay')closeLog();};
+  // Click/tap on the dimmed backdrop closes the popup. The press must also START on the
+  // backdrop, so dragging a text selection out of a dialog doesn't close it.
+  let backdropPress=null;
+  document.addEventListener('pointerdown',event=>{backdropPress=event.target.classList&&event.target.classList.contains('overlay')?event.target:null;});
+  document.addEventListener('click',event=>{
+    const target=event.target;
+    if(target.classList&&target.classList.contains('overlay')&&target.classList.contains('show')&&target===backdropPress&&target===topOverlay())dismissOverlay(target);
+    backdropPress=null;
+  });
   document.addEventListener('keydown',event=>{
     const infoOverlay=document.getElementById('infoOverlay');
     const logOverlay=document.getElementById('logOverlay');
@@ -154,10 +160,7 @@ function wire(){
       return;
     }
     if(event.key!=="Escape")return;
-    if(document.getElementById('inputOverlay').classList.contains('show'))document.getElementById('inputCancel').click();
-    else if(infoOverlay.classList.contains('show'))closeInfoModal();
-    else if(logOverlay.classList.contains('show'))closeLog();
-    else if(settingsOverlay.classList.contains('show'))closeSettings();
+    dismissOverlay(topOverlay());
   });
 }
 
