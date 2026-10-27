@@ -194,8 +194,9 @@ window._adventureEngine = {
 /* ---------- boot ---------- */
 /* Writes GAME_TITLE (js/data/modes.js) into the window title and header. */
 function applyGameTitle(){
-  document.title=`${GAME_TITLE} — Solo Encounter Engine`;
+  document.title=`${GAME_TITLE} — ${GAME_TAGLINE}`;
   const h=document.getElementById('brandTitle');if(h)h.textContent=GAME_TITLE;
+  const sub=document.getElementById('brandSub');if(sub)sub.textContent=GAME_TAGLINE;
   applyAboutInfo();
 }
 
@@ -217,7 +218,8 @@ function applyAboutInfo(){
 /* ===== BACKUP: export / import every ratt_* key (saves + settings) =====
    The web version keeps everything in this browser's localStorage, so clearing
    site data erases it. A backup file is the only way to move or restore a game. */
-var BACKUP_APP_ID="rivals-at-the-table";
+var BACKUP_APP_ID="magic-no-gathering";
+var BACKUP_LEGACY_APP_IDS=["rivals-at-the-table"]; // backups exported under the earlier working title
 var BACKUP_KEY_PREFIX="ratt_";
 function exportBackup(){
   const data={};
@@ -243,7 +245,7 @@ function readBackupFile(file){
   reader.onload=async()=>{
     let payload=null;
     try{payload=JSON.parse(reader.result);}catch(e){}
-    const data=payload&&payload.app===BACKUP_APP_ID&&payload.data&&typeof payload.data==="object"?payload.data:null;
+    const data=payload&&(payload.app===BACKUP_APP_ID||BACKUP_LEGACY_APP_IDS.indexOf(payload.app)>=0)&&payload.data&&typeof payload.data==="object"?payload.data:null;
     // Only this game's keys, only string values
     const entries=data?Object.entries(data).filter(([key,value])=>key.indexOf(BACKUP_KEY_PREFIX)===0&&typeof value==="string"):[];
     if(!entries.length){toast("That file is not a valid backup");return;}

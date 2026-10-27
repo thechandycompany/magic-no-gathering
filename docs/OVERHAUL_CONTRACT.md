@@ -149,4 +149,4 @@ is now a free, unofficial fan project (see README.md), so the original MTG names
 - Saves from the names-v2 build are rewritten on load (`LEGACY_CARD_NAMES` / `LEGACY_TITLE_NAMES` map invented → current;
   `NAMES_VERSION` 3 in js/engine/state.js).
 - Kept from that pass: card behaviour driven by card flags (no name checks), `index.html` entry, `ratt_*` storage keys,
-  `GAME_TITLE` "Rivals at the Table".
+  `GAME_TITLE` (later set back to "Magic No Gathering", tagline "Solo Commander Simulator").

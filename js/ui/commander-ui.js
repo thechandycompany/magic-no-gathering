@@ -82,7 +82,7 @@ function renderSetupScreen(onStartAdventure, onStartCommander) {
   modal.innerHTML=`
     <div class="big-ico">🎴</div>
     <h2>${escapeHtml(GAME_TITLE)}</h2>
-    <p class="setup-sub">Solo Commander Encounter Engine</p>
+    <p class="setup-sub">${GAME_TAGLINE}</p>
     <div class="setup-columns">
       <div class="setup-col setup-col-commander">
         <h3 class="setup-col-h">⚔️ Commander Battle</h3>

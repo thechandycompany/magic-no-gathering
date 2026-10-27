@@ -1,6 +1,6 @@
-# Rivals at the Table — Project Guide
+# Magic No Gathering — Project Guide
 
-> Title defined once as `GAME_TITLE` in `js/data/modes.js`. Entry file: `index.html`.
+> Title and tagline ("Solo Commander Simulator") defined once as `GAME_TITLE` / `GAME_TAGLINE` in `js/data/modes.js`. Entry file: `index.html`. The `ratt_` storage-key prefix is historical (earlier working title) — keep it.
 
 ## What This Is
 
@@ -13,7 +13,7 @@ index.html                 ← single entry point, loads all scripts in order (b
 styles.css                 ← all styles (themes via CSS variables)
 js/
 ├── data/                  ← PURE DATA. No functions that modify state. No DOM.
-│   ├── modes.js           ← GAME_TITLE, FAN_CONTENT_NOTICE, DONATION_URL/SOURCE_URL + mode configs
+│   ├── modes.js           ← GAME_TITLE/GAME_TAGLINE, FAN_CONTENT_NOTICE, DONATION_URL/SOURCE_URL + mode configs
 │   ├── cards-adventure.js ← Card/unit definitions for adventure encounters
 │   └── decks/             ← One file per commander deck archetype
 │       ├── deck-base.js   ← Shared deck utilities (shuffle, draw, mana math)
@@ -82,7 +82,7 @@ docs/OVERHAUL_CONTRACT.md  ← engine ↔ UI contract (function shapes, saved st
    - Never charge for access or put any feature behind payment. Donations stay optional (`DONATION_URL`); nothing is unlocked by them.
    - Never ship Wizards' logos, set symbols, mana-symbol artwork, or card images in the repo. Use emoji/original art.
    - Never imply the project is official or endorsed. Keep `FAN_CONTENT_NOTICE` visible in Settings → About (and on any store page).
-   - Keep the product name original (`GAME_TITLE`); "Magic: The Gathering" is used only descriptively.
+   - The title is a fan parody (`GAME_TITLE`); never pair it with Wizards' logos or official-looking branding.
 
 8. **Saves live in this browser's localStorage** under `ratt_*` keys (Settings → Export/Import backup moves them). Rename a key only with a `LEGACY_STORAGE_KEYS` migration in `js/engine/state.js`.
 

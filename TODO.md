@@ -1,4 +1,4 @@
-# Rivals at the Table — TODO
+# Magic No Gathering — TODO
 
 A free, unofficial Magic: The Gathering fan project, released as a static web page.
 No Steam, no desktop build, no paid content. See README.md for the fan-content and donation rules.

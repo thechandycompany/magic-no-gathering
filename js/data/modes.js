@@ -7,14 +7,15 @@
 
 /* Working title, shown in the window title, header and setup screen.
    Defined once here; every display reads GAME_TITLE. */
-var GAME_TITLE = "Rivals at the Table";
+var GAME_TITLE = "Magic No Gathering";
+var GAME_TAGLINE = "Solo Commander Simulator";
 
 /* Free, unofficial fan project (see README.md "Fan content & donations").
    FAN_CONTENT_NOTICE is the wording Wizards of the Coast's Fan Content Policy asks for.
    Leave a URL empty to hide its button. */
 var FAN_CONTENT_NOTICE = GAME_TITLE + " is unofficial Fan Content permitted under the Fan Content Policy. Not approved/endorsed by Wizards. Portions of the materials used are property of Wizards of the Coast. ©Wizards of the Coast LLC.";
 var DONATION_URL = "https://ko-fi.com/chandlerandrew";   // optional tips; the game stays free and nothing is unlocked
-var SOURCE_URL = "";     // e.g. "https://github.com/you/rivals-at-the-table"
+var SOURCE_URL = "";     // e.g. "https://github.com/you/magic-no-gathering"
 
 var MODES = {
   vanilla: {

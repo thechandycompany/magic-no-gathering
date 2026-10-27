@@ -1,5 +1,5 @@
 {
-  "name": "rivals-at-the-table",
+  "name": "magic-no-gathering",
   "private": true,
   "description": "Solo card game engine (vanilla JS, file://). No runtime dependencies.",
   "scripts": {

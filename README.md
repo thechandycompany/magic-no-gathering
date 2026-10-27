@@ -1,4 +1,6 @@
-# Rivals at the Table
+# Magic No Gathering
+
+**Solo Commander Simulator**
 
 A free, unofficial **Magic: The Gathering** fan project: a solo Commander table for your **real paper deck**.
 You play your own cards at a physical table; the app runs 1–4 CPU Commander opponents — their decks, hands,
@@ -23,13 +25,13 @@ to another device — clearing browser data erases saves otherwise.
 ## Fan content & donations
 This project follows Wizards of the Coast's [Fan Content Policy](https://company.wizards.com/en/legal/fancontentpolicy):
 
-> Rivals at the Table is unofficial Fan Content permitted under the Fan Content Policy. Not approved/endorsed by Wizards. Portions of the materials used are property of Wizards of the Coast. ©Wizards of the Coast LLC.
+> Magic No Gathering is unofficial Fan Content permitted under the Fan Content Policy. Not approved/endorsed by Wizards. Portions of the materials used are property of Wizards of the Coast. ©Wizards of the Coast LLC.
 
 That means:
 - The game is **free** — never paywall it, sell it, or gate any feature behind a payment.
 - **Donations are optional tips** via [Ko-fi](https://ko-fi.com/chandlerandrew) (`DONATION_URL` in `js/data/modes.js`; empty hides the button). Donors get nothing extra.
 - **No Wizards logos, set symbols, mana-symbol artwork, or card images** are included. The app uses emoji and original styling.
-- Real card names, characters, and rules terms are used descriptively; the product name ("Rivals at the Table") is original and the project never claims to be official.
+- Real card names, characters, and rules terms are used descriptively. The name "Magic No Gathering" is a fan parody title; the project never uses Wizards' logos or claims to be official. (A parody of the trademark is the most likely thing to draw a rename request — `GAME_TITLE` is one constant if that happens.)
 - Keep the notice above visible in the app (Settings → About) and on any page that hosts the game.
 
 This is a summary for contributors, not legal advice — read the policy itself before publishing.
@@ -47,4 +49,4 @@ The game is plain static files — there is no build step.
 - `tests/README.md` — headless simulation tests: `npm test`, `npm test -- --strict`, `SIM_GAMES=1000 npm test`.
 - `TODO.md` — release checklist, roadmap, deferred ideas.
 
-Settings you can change in one place (`js/data/modes.js`): `GAME_TITLE`, `DONATION_URL`, `SOURCE_URL`.
+Settings you can change in one place (`js/data/modes.js`): `GAME_TITLE`, `GAME_TAGLINE`, `DONATION_URL`, `SOURCE_URL`.
