@@ -57,7 +57,7 @@ function defaultCommanderDeck() {
 
 /**
  * The deck definition an opponent plays (opp.deckId looked up in
- * DECK_REGISTRY, index.js). Falls back to the default deck (Gruul Voltron)
+ * DECK_REGISTRY, index.js). Falls back to the default deck (Wildheart Armory)
  * for legacy saves without a deckId or an unknown id.
  */
 function deckOf(opp) {
@@ -91,7 +91,7 @@ function deckOtherCount(deckDef) {
 /**
  * Creates a standard virtual library: category counts (not individual cards).
  * 37 lands + 10 ramp + 1 explosive + N other, where N is the deck
- * definition's deckComposition total (51 for Gruul Voltron) = 99 cards.
+ * definition's deckComposition total (51 for Wildheart Armory) = 99 cards.
  */
 function newDeck(deckDef, powerLevel) {
   var def = deckDef || defaultCommanderDeck();

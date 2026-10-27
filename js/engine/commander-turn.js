@@ -484,7 +484,7 @@ function applyPlayerCombat(state,results){
  * Resolves a player action (resolvePlayerEffect) after giving each CPU a
  * chance to respond: targeted destroy/exile/bounce of selected creatures
  * may be answered with protection (cpuRespondToRemoval); "destroy all
- * creatures/permanents" may be answered with Heroic Intervention
+ * creatures/permanents" may be answered with a wipeProtect spell
  * (cpuRespondToWipe). Protected targets are skipped.
  * Returns {responses:[{oppId, label}], lines}.
  */

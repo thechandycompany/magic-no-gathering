@@ -3,7 +3,7 @@
 
    Scenarios (CPU settings PL3 / aggression 0.5 / interaction 0.5 unless noted):
      goldfish <deck>   1 CPU playing that deck vs a player who does nothing
-     pod boros         4 Boros Tokens CPUs vs the scripted player (1 creature
+     pod boros         4 Dawnmarch Legion CPUs vs the scripted player (1 creature
                        a turn, 5 damage a turn to the lowest-life CPU)
      mixed N-CPU       settings.decks = "mixed" (random distinct decks), 2-4 seats
      seat array        settings.decks = ["boros-tokens", "gruul-voltron", ...]
@@ -24,7 +24,7 @@
    commander damage, tokens created per game, anthem casts per game.
 
    Env: SIM_DECK_GOLDFISH (default 120), SIM_DECK_POD (default 40).
-   Seeds: goldfish 60000 + deckIndex*1000 + game, Boros pod 64000 + game,
+   Seeds: goldfish 60000 + deckIndex*1000 + game, Legion pod 64000 + game,
    mixed 66000 + seats*1000 + game, seat array 69000 + game.
    ===================================================================== */
 "use strict";

@@ -189,7 +189,7 @@ function canBlockCreature(creature){return !creature.attacking&&!creature.tapped
  *  <= 0 = bad trade (attacker would die to a cheaper/equal blocker)
  * options.commanderAlwaysAttacks (default true): a commander scores 8 when
  * blockers exist (Voltron policy). false = the commander is evaluated like
- * any other creature (deck.ai.attackPolicy, e.g. Boros Tokens).
+ * any other creature (deck.ai.attackPolicy, e.g. Dawnmarch Legion).
  */
 function evaluateAttackProfitability(attacker, defenderTokens, options){
   // No blockers = free damage

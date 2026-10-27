@@ -11,7 +11,7 @@ Validate the 16-file modular refactor works identically to the monolithic origin
 - [ ] Test Hard Ulvar — escalating loyalty, emergency slay/wipe decisions fire
 - [ ] Test Horde Mode — waves spawn, horde deck depletes, win condition triggers
 - [ ] Test Arcane Conclave — named creatures enter, auras apply, spell locks work
-- [ ] Test Voltron (adventure) — mana ramps, Rukha casts, gear equips, commander damage tracks
+- [ ] Test Commander Rival (adventure) — mana ramps, Rukha casts, gear equips, commander damage tracks
 - [ ] Save/load — save mid-game, reload page, game resumes correctly
 - [ ] Undo — works in both adventure and commander modes
 - [ ] Themes — Settings → Appearance switches Classic / Light / Dark / Dark Purple without breaking layout
@@ -54,7 +54,7 @@ Add a step during the player's combat phase where the player explicitly declares
 Prepare the game for a Steam release with a free-to-play base + paid DLC model.
 
 **Pre-launch blockers:**
-- ~~Rename MTG IP references in UI copy (Garruk → Ulvar, planeswalker → PW, Aether → Arcane Conclave, real card names in help text)~~ DONE outside `js/data/decks/*` and `js/engine/ai-commander.js` (those still need a pass)
+- ~~Rename MTG IP references in UI copy (Garruk → Ulvar, planeswalker → PW, Aether → Arcane Conclave, real card names in help text)~~ DONE (wave 4: every deck card renamed, decks shown as Wildheart Armory / Dawnmarch Legion, entry file is `index.html`)
 - ~~Rename the game itself~~ DONE — working title "Rivals at the Table" (`GAME_TITLE` in `js/data/modes.js`); rename the entry HTML file before shipping
 - Visual polish — card art, layout, animations, overall graphic design pass
 - Wrap in Electron/NW.js for desktop distribution
@@ -94,11 +94,11 @@ Build a second Commander Rival opponent using the existing framework (finite vir
 - **Esper Artifacts** — develops engines, protects them, creates artifact creatures, resets the board selectively
 - **Mardu Aristocrats** — creates fodder, sacrifices creatures for value, drains life, rebuilds after wipes
 - **Sultai Graveyard** — mills, reanimates, recurs threats, makes removal less final
-- **Boros Tokens/Equipment** — goes wide or empowers its commander through equipment (closest analog to Voltron, so probably not the first pick for variety)
+- ~~**Go-wide tokens**~~ — shipped as Dawnmarch Legion (`boros-tokens`)
 
 **Design notes:**
 - New deck goes in `js/data/decks/new-archetype.js` and registers in `index.js`
 - Reuse VOLTRON_CARDS-style typed pool structure, but with archetype-appropriate categories
 - Needs its own win condition framing — not every archetype should use commander damage as the primary clock
-- `ai-commander.js` executeOpponentTurn currently has Voltron-specific logic inline — will need deck.ai.* hooks for different playstyles
+- ~~deck.ai.* hooks~~ — done (see docs/OVERHAUL_CONTRACT.md "Wave 3 — decks")
 - Consider whether this should be a wholly separate mode or a "commander select" step within a shared "Commander Rival" mode

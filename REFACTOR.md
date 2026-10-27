@@ -135,5 +135,5 @@ Current state: the AI in `ai-commander.js` still has Voltron-specific logic inli
 ## Files NOT Changed
 
 - `styles.css` — untouched
-- `Magic No Gathering.html` — only the script tags changed (plus cache-bust params)
+- `index.html` (then named after the old working title) — only the script tags changed (plus cache-bust params)
 - `backup/` — contains originals of game.js, commander.js, and the HTML

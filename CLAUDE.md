@@ -1,6 +1,6 @@
 # Rivals at the Table — Project Guide
 
-> Working title, defined once as `GAME_TITLE` in `js/data/modes.js`. The entry HTML file still carries the pre-rename filename.
+> Working title, defined once as `GAME_TITLE` in `js/data/modes.js`. Entry file: `index.html`.
 
 ## What This Is
 
@@ -9,7 +9,7 @@ A solo card game engine playable via `file://` (no server required). Two modes: 
 ## Architecture
 
 ```
-Magic No Gathering.html    ← single entry point, loads all scripts in order
+index.html                 ← single entry point, loads all scripts in order (bump every ?v= on release)
 styles.css                 ← all styles (themes via CSS variables)
 js/
 ├── data/                  ← PURE DATA. No functions that modify state. No DOM.
@@ -17,8 +17,9 @@ js/
 │   ├── cards-adventure.js ← Card/unit definitions for adventure encounters
 │   └── decks/             ← One file per commander deck archetype
 │       ├── deck-base.js   ← Shared deck utilities (shuffle, draw, mana math)
-│       ├── gruul-voltron.js ← Rukha's deck (cards, composition, AI hints)
-│       └── index.js       ← Registry + backward-compat global aliases
+│       ├── gruul-voltron.js ← "Wildheart Armory": Rukha, equipment-focused commander
+│       ├── boros-tokens.js  ← "Dawnmarch Legion": Ysolde, go-wide Soldier tokens
+│       └── index.js       ← Registry, backward-compat aliases, LEGACY_CARD_NAMES
 │
 ├── engine/                ← GAME LOGIC. May reference globals (S, gameState).
 │   │                        NO document access. No innerHTML. No getElementById.
@@ -27,7 +28,8 @@ js/
 │   ├── tokens.js          ← Creature CRUD, stat calculation, voltron mana model
 │   ├── combat.js          ← Attack/block declaration, damage resolution
 │   ├── ai-adventure.js    ← Adventure AI decisions + turn flow orchestration
-│   └── ai-commander.js    ← Commander battle AI, targeting, rules, effects
+│   ├── ai-commander.js    ← Commander battle AI, targeting, rules, effects, deck ctx steps
+│   └── commander-turn.js  ← resolveCpuResponse: response-window state changes (UI collects input)
 │
 └── ui/                    ← DOM MANIPULATION. Rendering, events, modals.
     ├── modals.js          ← Reusable dialog system (number input, confirm, pick)
@@ -35,6 +37,8 @@ js/
     ├── inputs.js          ← Contextual turn forms, casualty selection
     ├── setup.js           ← Boot, wire(), theme system, setup screen
     └── commander-ui.js    ← Commander mode UI (IIFE with internal state)
+tests/                     ← headless seeded sims (`npm test -- --strict`); see tests/README.md
+docs/OVERHAUL_CONTRACT.md  ← engine ↔ UI contract (function shapes, saved state, deck seam)
 ```
 
 ## Rules for Placing Code
@@ -73,50 +77,40 @@ js/
 
 6. **Load order matters.** A file can only reference globals defined by files loaded BEFORE it in the HTML. Check the script order before adding cross-file calls.
 
+7. **No third-party game IP in user-facing text.** Original card / deck / character names only; say "PW", not the long card-type word. Internal ids, identifiers and CSS classes may keep legacy names.
+
 ## The IIFE Boundary (commander-ui.js)
 
 `commander-ui.js` wraps its internals in `(function(){ "use strict"; ... })()`. This means:
 
 - Functions INSIDE the IIFE are private — other files cannot call them directly
-- Functions that `ai-commander.js` or other global code needs must be explicitly exposed via `window.X = X;` (near line ~2120)
+- Functions that `ai-commander.js` or other global code needs must be explicitly exposed via `window.X = X;` (exposure block at the end of the file)
 - `gameState` is intentionally declared OUTSIDE the IIFE (as a global `var`) so both commander-ui.js and ai-commander.js can access it
 
 **Currently exposed on `window`:**
-- `logCommander`, `saveState`, `showCommanderGame`, `cmdSnapshot`, `renderBoardView`
+- `logCommander`, `saveState`, `showCommanderGame`, `cmdSnapshot`, `renderBoardView`, `renderOpponentSettingsSummary`, `onThemeChange`
 
 **If ai-commander.js needs a new function from commander-ui.js:** add `window.newFn = newFn;` in the exposure block.
 
 ## Adding a New Commander Deck
 
-```
-1. Create js/data/decks/my-deck.js:
-
-var MY_DECK = {
-  id: "my-deck",
-  name: "Display Name",
-  commander: { name:"...", ico:"...", p:4, t:4, kws:["..."], cost:5 },
-  color: "#hexcode",
-  summary: "One-line description.",
-  winCondition: { type: "commanderDamage", threshold: 21 },
-  cards: { creatures:[...], gear:[...], protection:[...], ... },
-  deckComposition: { creatures:14, gear:12, ... },
-  cpuNames: [{ name:"...", ico:"...", color:"..." }],
-  commanderBase: { p:4, t:4, kws:["..."], cost:5 },
-  maxCpuHandSize: 7,
-  strategies: { ... },
-  strategyLabels: { ... }
-};
-
-2. In index.js, add to registry:
-   var DECK_REGISTRY = [GRUUL_VOLTRON, MY_DECK];
-
-3. In HTML, add script tag BEFORE index.js:
-   <script src="js/data/decks/my-deck.js?v=N"></script>
-
-4. (Future) Add AI hooks if the archetype plays differently than Voltron.
-   Currently executeOpponentTurn has Voltron logic inline — 
-   this will need refactoring to deck.ai.* dispatch for different playstyles.
-```
+1. Create `js/data/decks/my-deck.js` (pure data, `var MY_DECK = (function(){ ... return {...}; })();`)
+   with `id`, `name` (display), `archetype`, `color`, `summary`, `winCondition`
+   (`{type:"commanderDamage", threshold:21}` | `{type:"life"}`), `commander`, `commanderBase`, `cpuNames[seat]`,
+   `cards` (typed pools), `deckComposition` + `libraryCounts` (99-card library), `fallbackRampCreature`,
+   `maxCpuHandSize`, `strategies` / `strategyLabels`, optional `commanderTrigger`, and `ai`:
+   - `ai.mainPhase(opp, ctx)` — decide only (no `gameState`/DOM); call ctx steps such as `ctx.castCommander()`,
+     `ctx.castRamp()`, `ctx.castGear()`, `ctx.castTokenMaker()`, `ctx.castSecondary([...])`.
+   - `ai.attackPolicy` — `{commanderAlwaysAttacks, minPower, goWide, goWideMargin, commanderRaces}`.
+   - Card roles are **flags**, never names: `protect`, `wipeProtect`, `removal` (+ `removalInstruction`,
+     `removalLeavesToken`), `ruleRemoval`, `permanent {effect, types}`, `makesTokens`, `haymaker`, `draw`, `regrowth`.
+   Full spec: `docs/OVERHAUL_CONTRACT.md` → "Wave 3 — decks" and "Wave 4 — naming pass".
+2. Register it in `DECK_REGISTRY` (`js/data/decks/index.js`) and add its `<script>` tag to `index.html`
+   BEFORE `index.js`.
+3. Card names must be original (no real-world card names). When renaming a shipped card, deck or title,
+   add an `[old, new]` pair to `LEGACY_CARD_NAMES` / `LEGACY_TITLE_NAMES` so saves migrate; never change a
+   deck `id`.
+4. Run `npm test -- --strict` (sims cover every registry deck).
 
 ## State Objects
 

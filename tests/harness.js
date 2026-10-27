@@ -1,7 +1,7 @@
 /* =====================================================================
    tests/harness.js — headless loader for the game engine.
 
-   Loads every non-UI <script> from "Magic No Gathering.html" (in HTML
+   Loads every non-UI <script> from "index.html" (in HTML
    order) into a Node `vm` context with:
      - a seeded PRNG (mulberry32) replacing Math.random
      - auto-generated no-op stubs for every function defined in js/ui/*
@@ -17,7 +17,7 @@ var fs = require("fs");
 var path = require("path");
 
 var ROOT = path.resolve(__dirname, "..");
-var HTML_FILE = path.join(ROOT, "Magic No Gathering.html");
+var HTML_FILE = path.join(ROOT, "index.html");
 var DEFAULT_CALL_TIMEOUT_MS = 2000;
 
 /* ---------- script list (kept in sync with the HTML) ---------- */

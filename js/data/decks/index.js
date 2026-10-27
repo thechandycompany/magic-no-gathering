@@ -3,6 +3,8 @@
 
    Provides a central registry of all available commander deck definitions.
    Load this file AFTER all individual deck files (e.g., gruul-voltron.js).
+   Deck ids / file names / GRUUL_VOLTRON-style identifiers are internal and
+   kept for save compatibility; display names live in each deck's `name`.
    ===================================================================== */
 
 var DECK_REGISTRY = [GRUUL_VOLTRON, BOROS_TOKENS];
@@ -30,3 +32,43 @@ var STRATEGIES = GRUUL_VOLTRON.strategies;
 var STRATEGY_LABELS = GRUUL_VOLTRON.strategyLabels;
 var FALLBACK_RAMP_CREATURE = GRUUL_VOLTRON.fallbackRampCreature;
 var LIBRARY_COUNTS = GRUUL_VOLTRON.libraryCounts;
+
+/* --- Pre-rename display names → current names ---
+   Saves made before the rename hold the old names in typedHand, graveyard,
+   exile, tokens, stored results and the log. migrateLegacyNames()
+   (js/engine/state.js) rewrites them on load. Internal only. */
+var LEGACY_CARD_NAMES = [
+  ["Llanowar Emissary", "Mossborn Emissary"],
+  ["Fyndhorn Scout", "Thicketborn Scout"],
+  ["Territorial Gorger", "Ridgeback Gorger"],
+  ["Primal Hydra", "Mossback Hydra"],
+  ["Grove Guardian", "Canopy Sentinel"],
+  ["Blossoming Defense", "Bloomshield Ward"],
+  ["Vines of Vastwood", "Tanglevine Veil"],
+  ["Heroic Intervention", "Wildheart Rally"],
+  ["Tamiyo's Safekeeping", "Warden's Keeping"],
+  ["Wild Ricochet", "Ricochet Spark"],
+  ["Beast Within", "Feral Unmaking"],
+  ["Ram Through", "Gore Through"],
+  ["Chaos Warp", "Riftchurn"],
+  ["Return to Nature", "Rot to Root"],
+  ["Bolt Bend", "Arc Deflection"],
+  ["Hunter's Insight", "Tracker's Insight"],
+  ["Rishkar's Expertise", "Grovewise Bounty"],
+  ["Return of the Wildspeaker", "Call of the Pack Elder"],
+  ["Harmonize", "Elderbark Counsel"],
+  ["Greater Good", "Feral Offering"],
+  ["Overwhelming Stampede", "Thunderhoof Stampede"],
+  ["Blasphemous Act", "Cinderstorm Rite"],
+  ["Chain Reaction", "Cascading Sparks"],
+  ["Chandra's Ignition", "Wildfire Conduit"],
+  ["Eternal Witness", "Rootbound Remembrancer"],
+  ["Regrowth", "Loamcall Recovery"],
+  ["Reckless Impulse", "Brash Gamble"],
+  ["Outpost Siege", "Frontier Watchpost"],
+  ["Lifecrafter's Bestiary", "Beastkeeper's Codex"],
+  ["Skullclamp", "Bonelatch Clamp"],
+  ["Wrath of the Wilds", "Ruin of the Wilds"],
+  ["Gruul Voltron", "Wildheart Armory"],
+  ["Boros Tokens", "Dawnmarch Legion"]
+];

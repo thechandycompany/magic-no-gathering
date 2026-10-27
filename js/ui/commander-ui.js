@@ -336,6 +336,7 @@ function renderLethalStrip(state,hud){
 }
 
 function renderBoardView(state){
+  updateCommanderTurnBanner(state);
   const originalBoard=document.getElementById('board');
   if(originalBoard)originalBoard.style.display='none';
   let board=document.getElementById('commanderBoardOverlay');
@@ -706,7 +707,7 @@ function askPlayerRemovalChoice(opp,action){
   const name=action.wipeName||action.cardName||action.playerRemoval?.cardName||"Spell";
   const instruction=action.playerRemoval?.instruction||(isWipe?"Destroy all non-commander creatures you control.":"Resolve the spell at the table.");
   const defaultLost=isWipe?player.creatures:(action.type==="removal"&&!(player.planeswalkers||[]).length?Math.min(1,player.creatures):0);
-  const defaultGained=/Beast Within/i.test(name)?1:0;
+  const defaultGained=action.playerRemoval?.leavesToken?1:0;
   const pws=player.planeswalkers||[];
   return new Promise(res=>{
     inputResolver=res;
@@ -760,6 +761,18 @@ function cleanupCommanderUI(){
 
 function saveState(){if(gameState)safeSet(SAVE_KEY,JSON.stringify({...gameState,_type:"commander"}));}
 
+/* Screen-reader turn banner (#turnBanner, shared with Adventure mode): says whose turn it is. */
+function updateCommanderTurnBanner(state){
+  const b=document.getElementById('turnBanner');
+  if(!b||!state)return;
+  const active=state.phase==="cpu"?oppById(state.activeOppId):null;
+  b.className=`turn-banner ${active?"garruk":"player"} sr-only`;
+  b.removeAttribute('aria-hidden');
+  const ico=document.getElementById('tbIco'),text=document.getElementById('tbText'),sub=document.getElementById('tbSub');
+  if(ico)ico.textContent=active?(active.ico||"⚔"):"🗡️";
+  if(text)text.textContent=active?`${nm(active)}'s Turn (Turn ${state.turn})`:state.phase==="cpu"?`Opponents' Turn (Turn ${state.turn})`:`Your Turn (Turn ${state.turn})`;
+  if(sub)sub.textContent=active?"— respond, then continue":"— take your turn, then end it";
+}
 function showCommanderGame(){
   if(!gameState)return;
   ensureCommanderEffectState(gameState);
@@ -768,6 +781,7 @@ function showCommanderGame(){
   document.getElementById('turnNum').textContent=gameState.turn;
   const active=oppById(gameState.activeOppId);
   document.getElementById('phasePill').textContent=gameState.phase==="cpu"&&active?`${nm(active)}'s Turn`:gameState.phase==="cpu"?"Opponents' Turn":"Your Turn";
+  updateCommanderTurnBanner(gameState);
   renderLifeHud(gameState);
   const playerHud=document.querySelector('.player-hud');
   if(playerHud)playerHud.style.display='none';
@@ -1088,13 +1102,8 @@ function ensureLastTurnSection(){
   }
   return el;
 }
-function commanderDeckCardByName(name){
-  if(!name||typeof VOLTRON_CARDS==="undefined")return null;
-  for(const cards of Object.values(VOLTRON_CARDS)){
-    const card=(cards||[]).find(candidate=>candidate.name===name);
-    if(card)return card;
-  }
-  return null;
+function commanderDeckCardByName(name,opp){
+  return name?cardDefinitionByName(name,opp):null;
 }
 function commanderActionCards(opp,action){
   if(action.cards?.length)return action.cards;
@@ -1106,7 +1115,7 @@ function commanderActionCards(opp,action){
   if(!cardName)return [];
   const gear=[...(opp.attachedGear||[]),...(opp.looseGear||[])].find(candidate=>candidate.name===cardName);
   if(gear)return [{...gear,ico:"⚙",type:"Artifact — Equipment"}];
-  const card=commanderDeckCardByName(cardName);
+  const card=commanderDeckCardByName(cardName,opp);
   return card?[card]:[];
 }
 function renderLastTurnSection(opp,result){
