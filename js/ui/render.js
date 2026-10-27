@@ -1,5 +1,5 @@
 /* ---------- toast ---------- */
-let toastT;
+var toastT;
 function toast(msg){
   let el=document.getElementById('toast');
   if(!el){ el=document.createElement('div'); el.id='toast'; el.setAttribute('role','status'); el.setAttribute('aria-live','polite'); el.style.cssText="position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1e1810;border:1px solid var(--gold-dim);color:var(--gold);padding:10px 18px;border-radius:8px;z-index:99;font-size:13px;box-shadow:0 6px 20px rgba(0,0,0,.5);transition:opacity .3s;"; document.body.appendChild(el); }
@@ -124,8 +124,8 @@ function render(){
   const holdingBackCount=readyCount-attackerCount;
   let atkText=attackerCount?`Attacking: ${attackerCount} for ${totalPower()}`:"";
   if(holdingBackCount>0)atkText+=`${atkText?" · ":""}${holdingBackCount} holding back`;
-  if(sickCount)atkText+=`${atkText?" · ":""}${sickCount} summoning sick`;
-  document.getElementById('atkNote').textContent=atkText;
+  if(sickCount)atkText+=`${atkText?" · ":""}${sickCount} summoning sick`+helpTip("Creatures can't attack the turn they enter unless they have haste.");
+  document.getElementById('atkNote').innerHTML=atkText;
   renderTokens();updateUndoBtn();
 }
 function renderTokens(){
@@ -165,7 +165,8 @@ async function manualRemove(i){
   if(S.mode==="voltron"&&token.kind==="commander"){
     const ok=await askConfirm(`Return ${token.name} to the command zone?`,`<strong>${token.name}</strong> leaves the battlefield and goes back to the command zone. Its equipment falls off and recasting costs more.`,"Return to zone","Cancel");
     if(!ok)return;
-    const outcome=removeEnemyBattlefieldToken(i);if(!outcome)return;
+    snapshot();
+    const outcome=removeEnemyBattlefieldToken(i);if(!outcome){undoStack.pop();updateUndoBtn();return;}
     reindexSelectedCasualties(i);
     logP(outcome.commanderReturn);
     render();
@@ -183,7 +184,8 @@ async function manualRemove(i){
   const dest=await askRemovalDestination(token);
   if(!dest)return; // cancelled
 
-  const outcome=removeEnemyBattlefieldToken(i);if(!outcome)return;
+  snapshot();
+  const outcome=removeEnemyBattlefieldToken(i);if(!outcome){undoStack.pop();updateUndoBtn();return;}
   reindexSelectedCasualties(i);
   if(dest==="exile"){
     sendToEnemyExile(outcome.token);
@@ -270,7 +272,7 @@ function setBanner(who){
     document.getElementById('tbSub').textContent=`— ${timing.stepLabel}`;
   }else{
     b.className="turn-banner garruk sr-only";document.getElementById('tbIco').textContent=modeConfig().icon;
-    document.getElementById('tbText').textContent=`${enemyName()}'s Turn (Turn ${S.turn})`;document.getElementById('tbSub').textContent="— respond, then End Turn";
+    document.getElementById('tbText').textContent=`${enemyName()}'s Turn (Turn ${S.turn})`;document.getElementById('tbSub').textContent="— respond, then Resolve Enemy Turn";
   }
 }
 
@@ -281,3 +283,150 @@ function helpTip(text){
 }
 // A help marker inside a <summary> or button must not toggle/press its parent
 document.addEventListener('click',event=>{if(event.target.closest&&event.target.closest('.help-tip'))event.preventDefault();},true);
+
+/* =====================================================================
+   ADVENTURE TURN VIEWS
+   Called by the engine (showGarrukTurn / showPlayerTurn / endGame in
+   ai-adventure.js) after it has updated S. These only draw.
+   ===================================================================== */
+/* Main turn button: label + outcome-preview pill + key hint (same markup as Commander's). */
+function setEndTurnButton(label,className){
+  const btn=document.getElementById('endTurnBtn');
+  if(!btn)return;
+  btn.className=className;
+  btn.innerHTML=`<span class="cmd-preview" hidden></span><span class="cmd-label">${label}</span><kbd class="cmd-key" aria-hidden="true">Space</kbd>`;
+}
+function renderEnemyTurnView(){
+  const decl=document.getElementById('declare');
+  decl.className="declare garruk compact-declare";
+  const actionCount=(S.actionSteps||[]).length;
+  const attackerCount=S.tokens.filter(t=>t.attacking).length;
+  document.getElementById('declareTitle').textContent=`${actionCount} enemy action${actionCount===1?"":"s"}`;
+  document.getElementById('declareFlavor').textContent=S.attackPower>0?`${attackerCount} attacker${attackerCount===1?"":"s"} · ${S.attackPower} incoming power`:"No incoming combat damage";
+  document.getElementById('declareMech').innerHTML=`<button type="button" class="detail-link" id="enemyActionsBtn">Review actions</button>`;
+  document.getElementById('enemyActionsBtn').onclick=showEnemyActions;
+  document.getElementById('huntTitle').textContent=`${enemyName()}'s Turn`;
+  setEndTurnButton("Resolve Enemy Turn ▸","endturn garruk");
+  document.getElementById('quickEndBtn').hidden=true;
+  setBanner("garruk");render();renderContextualInputs();renderPhaseBar();
+}
+function renderPlayerTurnView(){
+  const cfg=modeConfig();
+  const timing=currentTimingInfo();
+  const decl=document.getElementById('declare');decl.className="declare player compact-declare";
+  document.getElementById('declareTitle').textContent="Objective";
+  document.getElementById('declareFlavor').textContent=`Defeat ${cfg.enemy} · ${S.loyalty} ${cfg.resource.toLowerCase()} remaining`;
+  let mech="";
+  if(S.spellLock)mech+=`<span class="lock-note">\u{1F512} ${S.spellLock}</span>`;
+  if(S.tokens.length>0&&timing.isCombat){
+    const potentialBlockers=S.tokens.filter(t=>!t.attacking&&!t.summoningSick);
+    const blockToughness=potentialBlockers.reduce((a,t)=>a+tokenToughness(t),0);
+    const deathTouchers=potentialBlockers.filter(t=>t.kws.includes("Deathtouch")).length;
+    const tappedCount=S.tokens.filter(t=>t.attacking).length;
+    mech+=`<span class="combat-outlook">${potentialBlockers.length} blocker${potentialBlockers.length===1?"":"s"} · ${blockToughness} toughness${deathTouchers?` · ${deathTouchers} deathtouch`:""}${tappedCount?` · ${tappedCount} tapped out`:""}</span>`;
+  }else if(S.tokens.length===0&&timing.isCombat){
+    mech+=`<span class="combat-outlook clear">No blockers</span>`;
+  }
+  document.getElementById('declareMech').innerHTML=mech;
+  document.getElementById('huntTitle').textContent=`Your Turn · ${timing.stepLabel}`;
+  let label="Continue ▸";
+  if(S.playerStep===TURN_STEPS.UPKEEP||S.playerStep===TURN_STEPS.DRAW)label="Continue to Main Phase ▸";
+  else if(timing.isMainPhase&&S.playerStep===TURN_STEPS.PRECOMBAT_MAIN)label="Continue to Combat ▸";
+  else if(timing.isCombat)label="Resolve Combat ▸";
+  else if(timing.isMainPhase&&S.playerStep===TURN_STEPS.POSTCOMBAT_MAIN)label="End Turn ▸";
+  setEndTurnButton(label,"endturn");
+  const quickEnd=document.getElementById('quickEndBtn');
+  quickEnd.textContent="Skip to End Turn";
+  quickEnd.title="Apply the current entries and end your turn";
+  quickEnd.hidden=S.playerStep===TURN_STEPS.POSTCOMBAT_MAIN||S.playerStep===TURN_STEPS.END_STEP;
+  setBanner("player");render();renderContextualInputs();renderPhaseBar();
+}
+function showEndGameModal(won,reason){
+  const m=document.getElementById('modal'),o=document.getElementById('overlay'),cfg=modeConfig();
+  if(won){
+    const victory=reason||(S.mode==="horde"?"The final corpse falls and the Horde deck is empty.":`${cfg.enemy}'s ${cfg.resource.toLowerCase()} reaches 0.`);
+    m.className="modal";m.innerHTML=`<div class="big-ico">\u{1F3C6}</div><h2>Victory!</h2><p>${victory}<br>You survived <b>${S.turn}</b> turns of ${cfg.name}.</p><button class="cta" onclick="restart()">Choose Another Encounter</button>`;
+  }else{
+    m.className="modal lose";m.innerHTML=`<div class="big-ico">\u{1F480}</div><h2>Defeated</h2><p>${reason||`${cfg.enemy} defeated you.`}<br><br>${cfg.resource} remaining: <b>${S.loyalty}</b>.</p><button class="cta" onclick="restart()">Try Another Encounter</button>`;
+  }
+  o.classList.add("show");
+}
+function hideGameOverlay(){
+  const o=document.getElementById('overlay');
+  if(o)o.classList.remove('show');
+}
+function updateUndoBtn(){
+  const b=document.getElementById('undoBtn');
+  if(b)b.disabled=undoStack.length===0;
+}
+
+/* =====================================================================
+   SHARED RESPONSE STEPS (both modes)
+   ===================================================================== */
+/* One numbered response step. `key` links it to its live status chip. */
+function responseStepHtml(number,key,title,hint,body,modifier){
+  return `<section class="resolution-step response-step ${modifier||""}" data-step="${key}">
+    <div class="resolution-step-h"><span>${number}</span><strong>${title}</strong><em class="step-status" data-step-status="${key}"></em></div>
+    ${hint?`<p class="step-hint">${hint}</p>`:""}
+    <div class="resolution-step-b">${body}</div>
+  </section>`;
+}
+/* Status text on the right of a step header; `isSet` highlights the step as used. */
+function setStepStatus(panel,key,text,isSet){
+  if(!panel)return;
+  const step=panel.querySelector(`.response-step[data-step="${key}"]`);
+  if(!step)return;
+  step.classList.toggle('is-set',!!isSet);
+  const status=step.querySelector('.step-status');
+  if(status)status.textContent=text||"Optional";
+}
+
+/* =====================================================================
+   SPACE / ENTER ADVANCES THE TURN (both modes)
+   Presses Commander's #cmdConfirmBtn when it is on screen, otherwise the
+   Adventure #endTurnBtn. Ignored while typing, while a control has focus
+   (so it keeps its native behaviour), or while a dialog is open.
+   ===================================================================== */
+/* commander-ui.js still has its own Space/Enter handler. While it does, this one
+   stays out of Commander mode so one key press can't fire twice. Set to false
+   when that handler is removed. */
+var ADVANCE_KEY_DEFERS_TO_COMMANDER=true;
+function commanderGameActive(){return typeof gameState!=="undefined"&&!!gameState;}
+function advanceKeyTarget(){
+  // Only trust Commander's button while a Commander game is live (a stale bar must not be pressed in Adventure)
+  if(commanderGameActive()){
+    const cmd=document.getElementById('cmdConfirmBtn');
+    return cmd&&cmd.offsetParent!==null&&!cmd.disabled?cmd:null;
+  }
+  if(!S||gameOver)return null;
+  const btn=document.getElementById('endTurnBtn');
+  if(!btn||btn.disabled||btn.offsetParent===null)return null;
+  return btn;
+}
+document.addEventListener('keydown',event=>{
+  if(commanderGameActive()&&(ADVANCE_KEY_DEFERS_TO_COMMANDER||gameState.gameOver))return;
+  if(event.repeat||(event.key!=="Enter"&&event.key!==" "))return;
+  if(event.metaKey||event.ctrlKey||event.altKey)return;
+  if(document.querySelector('.overlay.show'))return;
+  const active=document.activeElement;
+  if(active&&active!==document.body){
+    if(active.tagName==="INPUT"){
+      // Enter commits a typed number (and refreshes the preview); press again to continue
+      if(event.key==="Enter"&&active.type==="number"){event.preventDefault();active.blur();}
+      return;
+    }
+    if(active.matches('select,textarea,button,summary,a,[role="button"],[contenteditable]'))return;
+  }
+  const target=advanceKeyTarget();
+  if(!target)return;
+  event.preventDefault();
+  target.click();
+});
+/* A mouse click shouldn't leave focus on a stepper or card — otherwise the next
+   Space/Enter is swallowed by that control. (event.detail is 0 for keyboard
+   activation, so keyboard users keep their focus.) Commander has its own copy. */
+document.addEventListener('click',event=>{
+  if(!S||commanderGameActive()||event.detail===0)return;
+  const btn=event.target.closest&&event.target.closest('button');
+  if(btn&&btn.id!=="menuBtn"&&!btn.closest('.overlay'))btn.blur();
+});

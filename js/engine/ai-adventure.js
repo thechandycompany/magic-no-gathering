@@ -326,60 +326,17 @@ function appendAttackStep(){
   }
 }
 
-/* --- Engine-to-UI bridge: accesses DOM directly --- */
+/* Turn views: the engine sets the phase, the UI (render.js) draws it. */
 function showGarrukTurn(){
   S.phase="garruk";
-  var decl=document.getElementById('declare');
-  decl.className="declare garruk compact-declare";
-  var actionCount=(S.actionSteps||[]).length;
-  var attackerCount=S.tokens.filter(t=>t.attacking).length;
-  document.getElementById('declareTitle').textContent=`${actionCount} enemy action${actionCount===1?"":"s"}`;
-  document.getElementById('declareFlavor').textContent=S.attackPower>0?`${attackerCount} attacker${attackerCount===1?"":"s"} · ${S.attackPower} incoming power`:"No incoming combat damage";
-  document.getElementById('declareMech').innerHTML=`<button type="button" class="detail-link" id="enemyActionsBtn">Review actions</button>`;
-  document.getElementById('enemyActionsBtn').onclick=showEnemyActions;
-  document.getElementById('huntTitle').textContent=`${enemyName()}'s Turn`;
-  var btn=document.getElementById('endTurnBtn');btn.className="endturn garruk";btn.textContent="Resolve Enemy Turn ▸";
-  document.getElementById('quickEndBtn').hidden=true;
-  setBanner("garruk");render();renderContextualInputs();renderPhaseBar();checkEnd();
+  renderEnemyTurnView();
+  checkEnd();
 }
 
-/* --- Engine-to-UI bridge: accesses DOM directly --- */
 function showPlayerTurn(){
   S.phase="player";
-  var cfg=modeConfig();
-  var timing=currentTimingInfo();
-  var decl=document.getElementById('declare');decl.className="declare player compact-declare";
-  document.getElementById('declareTitle').textContent="Objective";
-  document.getElementById('declareFlavor').textContent=`Defeat ${cfg.enemy} · ${S.loyalty} ${cfg.resource.toLowerCase()} remaining`;
-  var mech="";
-  if(S.spellLock)mech+=`<span class="lock-note">\u{1F512} ${S.spellLock}</span>`;
-  if(S.tokens.length>0 && timing.isCombat){
-    var potentialBlockers=S.tokens.filter(t=>!t.attacking&&!t.summoningSick);
-    var blockToughness=potentialBlockers.reduce((a,t)=>a+tokenToughness(t),0);
-    var deathTouchers=potentialBlockers.filter(t=>t.kws.includes("Deathtouch")).length;
-    var tappedCount=S.tokens.filter(t=>t.attacking).length;
-    mech+=`<span class="combat-outlook">${potentialBlockers.length} blocker${potentialBlockers.length===1?"":"s"} · ${blockToughness} toughness${deathTouchers?` · ${deathTouchers} deathtouch`:""}${tappedCount?` · ${tappedCount} tapped out`:""}</span>`;
-  }else if(S.tokens.length===0 && timing.isCombat){
-    mech+=`<span class="combat-outlook clear">No blockers</span>`;
-  }
-  document.getElementById('declareMech').innerHTML=mech;
-  document.getElementById('huntTitle').textContent=`Your Turn · ${timing.stepLabel}`;
-  var btn=document.getElementById('endTurnBtn');
-  if(S.playerStep===TURN_STEPS.UPKEEP||S.playerStep===TURN_STEPS.DRAW){
-    btn.textContent="I Drew a Card ▸";
-  } else if(timing.isMainPhase && S.playerStep===TURN_STEPS.PRECOMBAT_MAIN){
-    btn.textContent="Continue to Combat ▸";
-  } else if(timing.isCombat){
-    btn.textContent="Resolve Combat ▸";
-  } else if(timing.isMainPhase && S.playerStep===TURN_STEPS.POSTCOMBAT_MAIN){
-    btn.textContent="End Turn ▸";
-  } else {
-    btn.textContent="Continue ▸";
-  }
-  btn.className="endturn";
-  var quickEnd=document.getElementById('quickEndBtn');
-  quickEnd.hidden=S.playerStep===TURN_STEPS.POSTCOMBAT_MAIN||S.playerStep===TURN_STEPS.END_STEP;
-  setBanner("player");render();renderContextualInputs();renderPhaseBar();checkEnd();
+  renderPlayerTurnView();
+  checkEnd();
 }
 
 function startPlayerTurn(){
@@ -610,7 +567,7 @@ function endPlayerTurnNow(){
 function checkPhase(){
   if(S.mode!=="vanilla"&&S.mode!=="hard"){S.enraged=false;return;}
   var was=S.enraged;S.enraged=S.loyalty<=8&&S.loyalty>0;
-  if(S.enraged&&!was)logBig(`${enemyName()} enters an ENRAGED phase!`);
+  if(S.enraged&&!was)logBig(`${enemyName()} enters an enraged phase.`);
 }
 
 function checkEnd(){
@@ -622,15 +579,7 @@ function checkEnd(){
   return false;
 }
 
-/* --- Engine-to-UI bridge: accesses DOM directly --- */
 function endGame(won,reason){
   if(gameOver)return;gameOver=true;save();
-  var m=document.getElementById('modal'),o=document.getElementById('overlay'),cfg=modeConfig();
-  if(won){
-    var victory=reason||( S.mode==="horde"?"The final corpse falls and the Horde deck is empty.":`${cfg.enemy}'s ${cfg.resource.toLowerCase()} reaches 0.`);
-    m.className="modal";m.innerHTML=`<div class="big-ico">\u{1F3C6}</div><h2>Victory!</h2><p>${victory}<br>You survived <b>${S.turn}</b> turns of ${cfg.name}.</p><button class="cta" onclick="restart()">Choose Another Encounter</button>`;
-  }else{
-    m.className="modal lose";m.innerHTML=`<div class="big-ico">\u{1F480}</div><h2>Defeated</h2><p>${reason||`${cfg.enemy} defeated you.`}<br><br>${cfg.resource} remaining: <b>${S.loyalty}</b>.</p><button class="cta" onclick="restart()">Try Another Encounter</button>`;
-  }
-  o.classList.add("show");
+  showEndGameModal(won,reason);
 }

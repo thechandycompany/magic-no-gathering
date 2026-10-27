@@ -6,7 +6,7 @@
    Globals expected from other modules: MODES, CONCLAVE_UNITS,
    PLAYER_TURN_SEQUENCE, TURN_STEPS, TURN_PHASES, turnInput,
    currentTurnInputKey, logSys, render, renderLog, showPlayerTurn,
-   showGarrukTurn.
+   showGarrukTurn, and the UI globals updateUndoBtn / hideGameOverlay.
    ===================================================================== */
 
 /* ---------- constants ---------- */
@@ -90,7 +90,9 @@ function push(cls,who,msg){
   S.log.unshift(entry); if(S.log.length>80)S.log.pop(); if(typeof renderLog==='function')renderLog();
 }
 
-/* ---------- persistence ---------- */
+/* ---------- persistence ----------
+   Canonical storage helpers for every mode: localStorage when available,
+   an in-memory fallback when it is blocked (sandboxed iframes, private mode). */
 var memStore = {};
 function safeGet(k){ try{ return localStorage.getItem(k); }catch(e){ return (k in memStore)?memStore[k]:null; } }
 function safeSet(k,v){ try{ localStorage.setItem(k,v); }catch(e){ memStore[k]=v; } }
@@ -119,19 +121,19 @@ function load(){
 }
 
 /* ---------- undo ---------- */
-function snapshot(){ undoStack.push(JSON.stringify(S)); if(undoStack.length>25) undoStack.shift(); updateUndoBtn(); }
-function updateUndoBtn(){ var b=document.getElementById('undoBtn'); if(b) b.disabled = undoStack.length===0; }
+/* updateUndoBtn() and hideGameOverlay() are UI globals (js/ui/render.js); called at runtime only. */
+function snapshot(){ undoStack.push(JSON.stringify(S)); if(undoStack.length>25) undoStack.shift(); if(typeof updateUndoBtn==='function') updateUndoBtn(); }
 function undo(){
   if(undoStack.length===0) return;
   S = JSON.parse(undoStack.pop());
   turnInput = null;
   gameOver = false;
-  document.getElementById('overlay').classList.remove('show');
+  if(typeof hideGameOverlay==='function') hideGameOverlay();
   if(typeof render==='function') render();
   if(typeof renderLog==='function') renderLog();
   if(S.phase==="player"){ if(typeof showPlayerTurn==='function') showPlayerTurn(); }
   else{ if(typeof showGarrukTurn==='function') showGarrukTurn(); }
-  updateUndoBtn();
-  if(typeof logSys==='function') logSys("↶ Reverted the last resolved turn.");
+  if(typeof updateUndoBtn==='function') updateUndoBtn();
+  if(typeof logSys==='function') logSys("↶ Reverted to the previous step.");
   save();
 }

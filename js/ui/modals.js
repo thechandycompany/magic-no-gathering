@@ -1,7 +1,7 @@
 /* =====================================================================
    CUSTOM MODAL INPUTS (native prompt/confirm are blocked in sandboxed iframes)
    ===================================================================== */
-let inputResolver=null;
+var inputResolver=null;
 function closeInput(){ document.getElementById('inputOverlay').classList.remove('show'); inputResolver=null; }
 function askNumber(title, def){
   if(def==null) def=1;
@@ -24,26 +24,6 @@ function askNumber(title, def){
     document.getElementById('inputCancel').onclick=()=>{ closeInput(); res(null); };
     document.getElementById('inputOverlay').classList.add('show');
     setTimeout(()=>{ inp.focus(); inp.select(); },60);
-  });
-}
-function pickTokenModal(){
-  return new Promise(res=>{
-    if(S.tokens.length===0){ res(null); return; }
-    if(S.tokens.length===1){ res(0); return; }
-    inputResolver=res;
-    document.getElementById('inputTitle').textContent="Which of Garruk's creatures?";
-    const body=document.getElementById('inputBody');
-    body.innerHTML="";
-    S.tokens.forEach((t,i)=>{
-      const b=document.createElement('button');
-      b.type="button"; b.className="pick-row card-choice";
-      b.innerHTML=cardReferenceHtml(t);
-      b.onclick=()=>{ closeInput(); res(i); };
-      body.appendChild(b);
-    });
-    const acts=document.getElementById('inputActions'); acts.className="input-actions hide-ok";
-    document.getElementById('inputCancel').onclick=()=>{ closeInput(); res(null); };
-    document.getElementById('inputOverlay').classList.add('show');
   });
 }
 function pickMultiTokenModal(){
@@ -156,7 +136,7 @@ function askRemovalDestination(token){
 }
 
 /* ---------- contextual detail pop-up ---------- */
-let infoReturnFocus=null;
+var infoReturnFocus=null;
 function openInfoModal(title,html){
   infoReturnFocus=document.activeElement;
   document.getElementById('infoTitle').textContent=title;
@@ -169,7 +149,7 @@ function closeInfoModal(){
   if(infoReturnFocus&&typeof infoReturnFocus.focus==="function")infoReturnFocus.focus();
   infoReturnFocus=null;
 }
-let logReturnFocus=null;
+var logReturnFocus=null;
 function openLog(){
   logReturnFocus=document.getElementById('menuBtn');
   document.getElementById('logOverlay').classList.add('show');

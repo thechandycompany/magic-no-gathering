@@ -1143,3 +1143,11 @@ header.app-bar{
 .help-tip:hover,.help-tip:focus-visible{color:var(--gold); border-color:var(--gold-dim); outline:none;}
 .help-tip::after{content:attr(data-tip); position:absolute; left:50%; bottom:calc(100% + 8px); transform:translateX(-50%); z-index:60; width:max-content; max-width:240px; padding:8px 10px; border-radius:var(--radius-sm); border:1px solid var(--border-lt); background:var(--panel2); color:var(--ink); box-shadow:var(--shadow); font:400 11.5px/1.4 var(--font); text-align:left; white-space:normal; opacity:0; pointer-events:none; transition:opacity .12s;}
 .help-tip:hover::after,.help-tip:focus-visible::after{opacity:1;}
+
+/* ===== Adventure turn flow ===== */
+/* Main turn button carries the same outcome pill + key hint as Commander's confirm bar */
+.turn-actions .endturn{display:inline-flex; align-items:center; justify-content:center; gap:10px;}
+.turn-actions .endturn .cmd-preview{font-family:var(--font); letter-spacing:0;}
+.turn-actions .endturn .cmd-preview[hidden]{display:none;}
+.atk-note .help-tip{margin-left:4px;}
+@media(max-width:760px){.turn-actions .endturn .cmd-key{display:none;}}

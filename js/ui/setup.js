@@ -1,5 +1,5 @@
 /* ===== THEME SYSTEM ===== */
-const THEME_KEY="mng_theme";
+var THEME_KEY="mng_theme";
 var THEMES=[
   {id:"classic",name:"Classic"},
   {id:"light",name:"Light"},
@@ -16,7 +16,7 @@ function currentTheme(){return normalizeTheme(document.documentElement.getAttrib
 function applyTheme(theme){
   theme=normalizeTheme(theme);
   document.documentElement.setAttribute('data-theme',theme);
-  try{localStorage.setItem(THEME_KEY,theme);}catch(e){}
+  safeSet(THEME_KEY,theme);
   // Every picker on the page (setup screen + settings) reflects the same choice
   document.querySelectorAll('.theme-btn').forEach(btn=>{
     const on=btn.dataset.theme===theme;
@@ -44,7 +44,7 @@ function applyUiScale(){
 applyUiScale();
 window.addEventListener('resize',applyUiScale);
 function loadSavedTheme(){
-  try{applyTheme(localStorage.getItem(THEME_KEY)||"classic");}catch(e){applyTheme("classic");}
+  applyTheme(safeGet(THEME_KEY)||"classic");
 }
 function wireThemePicker(){
   document.querySelectorAll('.theme-btn').forEach(btn=>{btn.onclick=()=>applyTheme(btn.dataset.theme);});
@@ -102,12 +102,14 @@ function beginGame(){
 async function confirmRestart(){const ok=await askConfirm("Restart encounter?","This clears the current encounter and returns to mode selection. This cannot be undone.","Restart");if(ok)restart();}
 function restart(){safeRemove(SAVE_KEY);safeRemove(LEGACY_SAVE_KEY);S=null;turnInput=null;undoStack=[];gameOver=false;document.getElementById('overlay').classList.remove("show");document.getElementById('inputOverlay').classList.remove("show");document.getElementById('logOverlay').classList.remove("show");showSetup();}
 function manualAddEnemy(){
+  if(!S||gameOver)return;
+  snapshot();
   let added=true;
   if(S.mode==="horde")addHordeUnit();
   else if(S.mode==="conclave")nextConclaveUnit();
   else if(S.mode==="voltron")added=addVoltronSupport();
   else addWolf();
-  if(!added){toast("No drawn ramp source is available");return;}
+  if(!added){undoStack.pop();updateUndoBtn();toast("No drawn ramp source is available");return;}
   logSys(`Creature added manually to ${enemyName()}'s battlefield.`);render();
   if(turnInput){
     const timing=S.phase==="player"?currentTimingInfo():null;
