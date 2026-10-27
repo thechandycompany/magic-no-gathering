@@ -5,24 +5,28 @@
    game.js (adventure engine) and commander.js (commander battle).
    ===================================================================== */
 
+/* Working title, shown in the window title, header and setup screen.
+   Defined once here; every display reads GAME_TITLE. */
+var GAME_TITLE = "Rivals at the Table";
+
 var MODES = {
   vanilla: {
     id: "vanilla",
-    name: "Easy Garruk",
-    enemy: "Garruk, the Slayer",
+    name: "Easy Ulvar",
+    enemy: "Ulvar, the Huntmaster",
     icon: "🐺",
     boardIcon: "🌲",
-    boardTitle: "Garruk's Battlefield",
+    boardTitle: "Ulvar's Battlefield",
     resource: "Loyalty",
     startResource: 20,
     life: 40,
     category: "adventure",
-    summary: "The baseline hunt: 2/2 Wolves, steady +2 loyalty, and cautious removal after Garruk builds a pack."
+    summary: "The baseline hunt: 2/2 Wolves, steady +2 loyalty, and cautious removal after Ulvar builds a pack."
   },
   hard: {
     id: "hard",
-    name: "Hard Garruk",
-    enemy: "Garruk, Apex Slayer",
+    name: "Hard Ulvar",
+    enemy: "Ulvar, Apex Huntmaster",
     icon: "😤",
     boardIcon: "🔥",
     boardTitle: "The Apex Hunting Ground",
@@ -47,11 +51,11 @@ var MODES = {
   },
   conclave: {
     id: "conclave",
-    name: "Aether Conclave",
+    name: "Arcane Conclave",
     enemy: "Vaelora, Conclave Ascendant",
     icon: "🔮",
     boardIcon: "✦",
-    boardTitle: "The Aether Conclave",
+    boardTitle: "The Arcane Conclave",
     resource: "Resolve",
     startResource: 32,
     life: 40,
@@ -60,7 +64,8 @@ var MODES = {
   },
   voltron: {
     id: "voltron",
-    name: "Commander Rival: Gruul Voltron",
+    name: "Commander Rival",
+    deckId: "gruul-voltron", // display name appends the deck's own name (see modeDisplayName)
     enemy: "Rukha, Wildheart Vanguard",
     icon: "🪓",
     boardIcon: "🔥",

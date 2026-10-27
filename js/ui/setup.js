@@ -1,5 +1,5 @@
 /* ===== THEME SYSTEM ===== */
-var THEME_KEY="mng_theme";
+var THEME_KEY="ratt_theme";
 var THEMES=[
   {id:"classic",name:"Classic"},
   {id:"light",name:"Light"},
@@ -83,11 +83,11 @@ function showSetup(){
     <div class="big-ico">🎴</div><h2>Choose an encounter</h2>
     <p>Five solo modes. You start at 40 life.</p>
     <div class="mode-grid" role="radiogroup" aria-label="Encounter mode">
-      <label class="mode-option"><input type="radio" name="encounterMode" value="vanilla" checked><div class="mode-card"><div class="mode-title">🐺 Easy Garruk</div><div class="mode-desc">Steady Wolves and cautious removal.</div><span class="mode-tag">Baseline</span></div></label>
-      <label class="mode-option"><input type="radio" name="encounterMode" value="hard"><div class="mode-card"><div class="mode-title">🔥 Hard Garruk</div><div class="mode-desc">Scaling Wolves and aggressive removal.</div><span class="mode-tag">Escalating</span></div></label>
+      <label class="mode-option"><input type="radio" name="encounterMode" value="vanilla" checked><div class="mode-card"><div class="mode-title">🐺 Easy Ulvar</div><div class="mode-desc">Steady Wolves and cautious removal.</div><span class="mode-tag">Baseline</span></div></label>
+      <label class="mode-option"><input type="radio" name="encounterMode" value="hard"><div class="mode-card"><div class="mode-title">🔥 Hard Ulvar</div><div class="mode-desc">Scaling Wolves and aggressive removal.</div><span class="mode-tag">Escalating</span></div></label>
       <label class="mode-option"><input type="radio" name="encounterMode" value="horde"><div class="mode-card"><div class="mode-title">🧟 Horde Mode</div><div class="mode-desc">Survive growing waves and empty the deck.</div><span class="mode-tag">Survival</span></div></label>
-      <label class="mode-option"><input type="radio" name="encounterMode" value="conclave"><div class="mode-card"><div class="mode-title">✦ Aether Conclave</div><div class="mode-desc">Break a randomized network of synergies.</div><span class="mode-tag">Puzzle</span></div></label>
-      <label class="mode-option"><input type="radio" name="encounterMode" value="voltron"><div class="mode-card commander-mode"><div class="mode-title">🪓 Commander Rival: Gruul Voltron</div><div class="mode-desc">Stop a ramping commander before 21 commander damage gets through.</div><span class="mode-tag">Commander</span></div></label>
+      <label class="mode-option"><input type="radio" name="encounterMode" value="conclave"><div class="mode-card"><div class="mode-title">✦ Arcane Conclave</div><div class="mode-desc">Break a randomized network of synergies.</div><span class="mode-tag">Puzzle</span></div></label>
+      <label class="mode-option"><input type="radio" name="encounterMode" value="voltron"><div class="mode-card commander-mode"><div class="mode-title">🪓 ${modeDisplayName(MODES.voltron)}</div><div class="mode-desc">Stop a ramping commander before 21 commander damage gets through.</div><span class="mode-tag">Commander</span></div></label>
     </div>
     <button class="cta" onclick="beginGame()">Begin Encounter</button>`;
   o.classList.add("show");
@@ -97,12 +97,12 @@ function beginGame(){
   const mode=chosen?chosen.value:"vanilla";
   S=freshState(mode);turnInput=null;gameOver=false;undoStack=[];updateUndoBtn();
   document.getElementById('overlay').classList.remove("show");
-  logBig(`${modeConfig().name} begins. ${enemyName()} enters with ${S.loyalty} ${modeConfig().resource.toLowerCase()}.`);
+  logBig(`${modeDisplayName()} begins. ${enemyName()} enters with ${S.loyalty} ${modeConfig().resource.toLowerCase()}.`);
   logSys(`${modeConfig().summary} Starting life: ${S.player.life}.`);
-  startGarrukTurn();
+  startEnemyTurn();
 }
 async function confirmRestart(){const ok=await askConfirm("Restart encounter?","This clears the current encounter and returns to mode selection. This cannot be undone.","Restart");if(ok)restart();}
-function restart(){safeRemove(SAVE_KEY);safeRemove(LEGACY_SAVE_KEY);S=null;turnInput=null;undoStack=[];gameOver=false;document.getElementById('overlay').classList.remove("show");document.getElementById('inputOverlay').classList.remove("show");document.getElementById('logOverlay').classList.remove("show");showSetup();}
+function restart(){safeRemove(SAVE_KEY);S=null;turnInput=null;undoStack=[];gameOver=false;document.getElementById('overlay').classList.remove("show");document.getElementById('inputOverlay').classList.remove("show");document.getElementById('logOverlay').classList.remove("show");showSetup();}
 function manualAddEnemy(){
   if(!S||gameOver)return;
   snapshot();
@@ -115,7 +115,7 @@ function manualAddEnemy(){
   logSys(`Creature added manually to ${enemyName()}'s battlefield.`);render();
   if(turnInput){
     const timing=S.phase==="player"?currentTimingInfo():null;
-    turnInput.allowEnemyDeaths=S.tokens.length>0&&(S.phase==="garruk"||timing.canCastInstant);
+    turnInput.allowEnemyDeaths=S.tokens.length>0&&(S.phase==="enemy"||timing.canCastInstant);
     syncIncomingDamageToAttack();
     renderContextualInputs();
   }
@@ -171,25 +171,31 @@ window._adventureEngine = {
   start: function(mode) {
     S=freshState(mode);turnInput=null;gameOver=false;undoStack=[];updateUndoBtn();
     document.getElementById('overlay').classList.remove("show");
-    logBig(`${modeConfig().name} begins. ${enemyName()} enters with ${S.loyalty} ${modeConfig().resource.toLowerCase()}.`);
+    logBig(`${modeDisplayName()} begins. ${enemyName()} enters with ${S.loyalty} ${modeConfig().resource.toLowerCase()}.`);
     logSys(`${modeConfig().summary} Starting life: ${S.player.life}.`);
-    startGarrukTurn();
+    startEnemyTurn();
   },
   resume: function(savedState) {
     S=normalizeState(savedState);gameOver=false;undoStack=[];
     turnInput=restoreTurnInput(S.pendingTurnInput);S.pendingTurnInput=null;
     render();renderLog();
     if(S.phase==="player")showPlayerTurn();
-    else if(S.pendingDecl)showGarrukTurn();
-    else startGarrukTurn();
-    updateUndoBtn();logSys(`${modeConfig().name} resumed from save.`);
+    else if(S.pendingDecl)showEnemyTurn();
+    else startEnemyTurn();
+    updateUndoBtn();logSys(`${modeDisplayName()} resumed from save.`);
   },
   isActive: function() { return S !== null && S.turn > 0 && !gameOver; }
 };
 
 /* ---------- boot ---------- */
+/* Writes GAME_TITLE (js/data/modes.js) into the window title and header. */
+function applyGameTitle(){
+  document.title=`${GAME_TITLE} — Solo Encounter Engine`;
+  const h=document.getElementById('brandTitle');if(h)h.textContent=GAME_TITLE;
+}
 function bootGame(){
   console.log("[BOOT] bootGame called. _commanderMain:", !!window._commanderMain);
+  applyGameTitle();
   wire();
   // Let the commander module handle boot — it checks for commander saves,
   // resumes adventure saves via _adventureEngine, or shows the setup screen.
@@ -209,9 +215,9 @@ function bootGame(){
     turnInput=restoreTurnInput(S.pendingTurnInput);S.pendingTurnInput=null;
     render();renderLog();
     if(S.phase==="player")showPlayerTurn();
-    else if(S.pendingDecl)showGarrukTurn();
-    else startGarrukTurn();
-    updateUndoBtn();logSys(`${modeConfig().name} resumed from save.`);
+    else if(S.pendingDecl)showEnemyTurn();
+    else startEnemyTurn();
+    updateUndoBtn();logSys(`${modeDisplayName()} resumed from save.`);
   }else{
     showSetup();
   }

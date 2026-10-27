@@ -26,22 +26,22 @@ function cardReferenceType(card){
   if(category==="draw"||category==="haymakers"||category==="boardwipes")return "Sorcery";
   if(card?.equip!=null||card?.bonus!=null)return "Artifact — Equipment";
   if(card?.p!=null&&card?.t!=null)return "Creature";
-  if(card?.loyalty!=null)return "Planeswalker";
+  if(card?.loyalty!=null)return "PW";
   return "Permanent";
 }
 function cardReferenceHtml(card,options={}){
   if(!card)return "";
   const type=cardReferenceType(card);
   const commander=card.kind==="commander"||/commander/i.test(type);
-  const classes=["card","card-reference",options.className||"",commander?"commander":"",/artifact/i.test(type)?"artifact":"",/land/i.test(type)?"land":"",/planeswalker/i.test(type)?"pw-card":""].filter(Boolean).join(" ");
+  const classes=["card","card-reference",options.className||"",commander?"commander":"",/artifact/i.test(type)?"artifact":"",/land/i.test(type)?"land":"",/\bpw\b|planeswalker/i.test(type)?"pw-card":""].filter(Boolean).join(" ");
   const name=escapeCardReferenceHtml(card.name||"Unnamed card");
-  const icon=escapeCardReferenceHtml(card.ico||card.icon||(commander?"⚜":/artifact/i.test(type)?"⚙":/land/i.test(type)?"🌲":/planeswalker/i.test(type)?"⬡":"🃏"));
+  const icon=escapeCardReferenceHtml(card.ico||card.icon||(commander?"⚜":/artifact/i.test(type)?"⚙":/land/i.test(type)?"🌲":/\bpw\b|planeswalker/i.test(type)?"⬡":"🃏"));
   const keywords=(card.baseKws||card.kws||[]).filter(Boolean).join(" · ");
   const hasStats=card.p!=null&&card.t!=null;
   const statText=hasStats?`${escapeCardReferenceHtml(card.p)}/${escapeCardReferenceHtml(card.t)}`:card.loyalty!=null?`L ${escapeCardReferenceHtml(card.loyalty)}`:"";
   const details=[type,card.effect].filter(Boolean).join(" · ");
   return `<span class="${classes}" title="${escapeCardReferenceHtml(details)}" aria-label="${name}${details?`: ${escapeCardReferenceHtml(details)}`:""}">
-    <span class="c-name"><span>${name}</span><span class="mana">${commander?"⚜":/artifact/i.test(type)?"⚙":/land/i.test(type)?"◇":/planeswalker/i.test(type)?"⬡":"✦"}</span></span>
+    <span class="c-name"><span>${name}</span><span class="mana">${commander?"⚜":/artifact/i.test(type)?"⚙":/land/i.test(type)?"◇":/\bpw\b|planeswalker/i.test(type)?"⬡":"✦"}</span></span>
     <span class="c-art">${icon}</span>
     <span class="c-type">${escapeCardReferenceHtml(type)}</span>
     ${keywords?`<span class="c-kw">${escapeCardReferenceHtml(keywords)}</span>`:""}
@@ -58,17 +58,17 @@ function cardReferenceListHtml(cards,className=""){
    RENDER
    ===================================================================== */
 function modeHelpHtml(){
-  if(S.mode==="voltron")return `<div class="tt-header">🔥 Commander Rival: Gruul Voltron</div><div class="tt-passive"><span class="tt-cost tt-free">40 life</span> Rukha is a Commander opponent. Reduce her life to 0, while avoiding a 21 commander-damage defeat.</div><div class="tt-ability"><b>Finite mana deck</b><br>Rukha uses a virtual 99-card deck with 37 lands, 10 normal ramp sources, and 1 rare fast-mana rock. Drawn sources leave the deck and only become mana after they are played.</div><div class="tt-ability"><b>Command zone</b><br>Rukha is cast once her drawn mana sources reach her current cost. When she leaves the battlefield, she returns to the command zone and her next cast costs 2 more.</div><div class="tt-ability"><b>Voltron plan</b><br>With spare mana, Rukha adds gear for permanent power, toughness, trample, and later ward.</div><div class="tt-note">Remove Rukha before combat to stop the attack. If commander damage gets through, record only the unblocked portion.</div>`;
-  if(S.mode==="hard")return `<div class="tt-header">🔥 Hard Garruk</div><div class="tt-passive"><span class="tt-cost tt-free">Scaling</span> Loyalty income increases every two turns: +2, +3, +4, up to +6.</div><div class="tt-ability"><span class="tt-cost">[0]</span><b>Summon Wolf</b><br>2/2 through turn 4; every new Wolf is 4/4 from turn 5 onward.</div><div class="tt-ability"><span class="tt-cost tt-gain">[+4]</span><b>Rip and Tear</b><br>+1/+0, deathtouch, and +4 loyalty.</div><div class="tt-note">Garruk normally goes wide, but Hard mode checks board deficits first. With enough loyalty it uses Slay while keeping 8–10 loyalty, or Overrun while keeping at least 8.</div>`;
+  if(S.mode==="voltron")return `<div class="tt-header">🔥 ${modeDisplayName()}</div><div class="tt-passive"><span class="tt-cost tt-free">40 life</span> Rukha is a Commander opponent. Reduce her life to 0, while avoiding a 21 commander-damage defeat.</div><div class="tt-ability"><b>Finite mana deck</b><br>Rukha uses a virtual 99-card deck with 37 lands, 10 normal ramp sources, and 1 rare fast-mana rock. Drawn sources leave the deck and only become mana after they are played.</div><div class="tt-ability"><b>Command zone</b><br>Rukha is cast once her drawn mana sources reach her current cost. When she leaves the battlefield, she returns to the command zone and her next cast costs 2 more.</div><div class="tt-ability"><b>Voltron plan</b><br>With spare mana, Rukha adds gear for permanent power, toughness, trample, and later ward.</div><div class="tt-note">Remove Rukha before combat to stop the attack. If commander damage gets through, record only the unblocked portion.</div>`;
+  if(S.mode==="hard")return `<div class="tt-header">🔥 ${modeDisplayName()}</div><div class="tt-passive"><span class="tt-cost tt-free">Scaling</span> Loyalty income increases every two turns: +2, +3, +4, up to +6.</div><div class="tt-ability"><span class="tt-cost">[0]</span><b>Summon Wolf</b><br>2/2 through turn 4; every new Wolf is 4/4 from turn 5 onward.</div><div class="tt-ability"><span class="tt-cost tt-gain">[+4]</span><b>Rip and Tear</b><br>+1/+0, deathtouch, and +4 loyalty.</div><div class="tt-note">Ulvar normally goes wide, but Hard mode checks board deficits first. With enough loyalty it uses Slay while keeping 8–10 loyalty, or Overrun while keeping at least 8.</div>`;
   if(S.mode==="horde")return `<div class="tt-header">☠️ Horde Mode</div><div class="tt-passive"><span class="tt-cost tt-free">60 cards</span> Each revealed creature and each damage dealt to the Horde mills its deck.</div><div class="tt-ability"><b>Automatic waves</b><br>Wave size grows every two turns. Horde creatures have haste and attack each turn.</div><div class="tt-ability"><b>Events</b><br>Grave Frenzy boosts attacks; Dread Edict forces a sacrifice.</div><div class="tt-note">You win only when the Horde deck is empty and no Horde creatures remain.</div>`;
-  if(S.mode==="conclave")return `<div class="tt-header">✦ Aether Conclave</div><div class="tt-passive"><span class="tt-cost tt-free">Random roster</span> Unique named creatures enter in a different order each game.</div><div class="tt-ability"><b>Shared network</b><br>War Song, Bulwark, ward, spell locks, and threshold bonuses disappear when their key creature dies.</div><div class="tt-ability"><b>Vaelora</b><br>Builds Ascension at 3+ allies and casts Prismatic Ruin against wide player boards.</div><div class="tt-note">Identify and remove the key creature holding each synergy together.</div>`;
-  return `<div class="tt-header">🐺 Easy Garruk</div><div class="tt-passive"><span class="tt-cost tt-free">Passive</span> +2 loyalty at the start of each turn.</div><div class="tt-ability"><span class="tt-cost">[0]</span><b>Summon Wolf</b><br>Put a 2/2 Wolf onto the battlefield.</div><div class="tt-ability"><span class="tt-cost tt-gain">[+4]</span><b>Rip and Tear</b><br>+1/+0, deathtouch, and +4 loyalty.</div><div class="tt-ability"><span class="tt-cost tt-spend">[-10]</span><b>Slay</b> — destroy a creature.</div><div class="tt-ability"><span class="tt-cost tt-spend">[-25]</span><b>Overrun the Weak</b> — clear the player's board.</div><div class="tt-note">Baseline encounter: Wolves remain 2/2 for the entire game.</div>`;
+  if(S.mode==="conclave")return `<div class="tt-header">✦ ${modeDisplayName()}</div><div class="tt-passive"><span class="tt-cost tt-free">Random roster</span> Unique named creatures enter in a different order each game.</div><div class="tt-ability"><b>Shared network</b><br>War Song, Bulwark, ward, spell locks, and threshold bonuses disappear when their key creature dies.</div><div class="tt-ability"><b>Vaelora</b><br>Builds Ascension at 3+ allies and casts Prismatic Ruin against wide player boards.</div><div class="tt-note">Identify and remove the key creature holding each synergy together.</div>`;
+  return `<div class="tt-header">🐺 ${modeDisplayName()}</div><div class="tt-passive"><span class="tt-cost tt-free">Passive</span> +2 loyalty at the start of each turn.</div><div class="tt-ability"><span class="tt-cost">[0]</span><b>Summon Wolf</b><br>Put a 2/2 Wolf onto the battlefield.</div><div class="tt-ability"><span class="tt-cost tt-gain">[+4]</span><b>Rip and Tear</b><br>+1/+0, deathtouch, and +4 loyalty.</div><div class="tt-ability"><span class="tt-cost tt-spend">[-10]</span><b>Slay</b> — destroy a creature.</div><div class="tt-ability"><span class="tt-cost tt-spend">[-25]</span><b>Reckoning of the Wild</b> — clear the player's board.</div><div class="tt-note">Baseline encounter: Wolves remain 2/2 for the entire game.</div>`;
 }
 function updateModePresentation(){
   const cfg=modeConfig();
-  document.getElementById('brandTitle').textContent="Magic No Gathering";
-  document.getElementById('brandSub').textContent=cfg.name;
-  document.getElementById('modePill').textContent=cfg.name;
+  document.getElementById('brandTitle').textContent=GAME_TITLE;
+  document.getElementById('brandSub').textContent=modeDisplayName(cfg);
+  document.getElementById('modePill').textContent=modeDisplayName(cfg);
   document.getElementById('boardIcon').textContent=cfg.boardIcon;
   document.getElementById('boardTitle').textContent=cfg.boardTitle;
   document.getElementById('enemyName').textContent=cfg.enemy;
@@ -81,7 +81,7 @@ function render(){
   if(!S)return;
   updateModePresentation();
   document.getElementById('turnNum').textContent=S.turn;
-  document.getElementById('phasePill').textContent=S.phase==="garruk"?`${enemyName()}'s Turn`:"Your Turn";
+  document.getElementById('phasePill').textContent=S.phase==="enemy"?`${enemyName()}'s Turn`:"Your Turn";
   document.getElementById('phasePill').classList.toggle('active',S.phase==="player");
   document.getElementById('loyaltyNum').textContent=S.loyalty;
   const baseline=modeConfig().startResource;
@@ -172,7 +172,7 @@ async function manualRemove(i){
     render();
     if(turnInput){
       const timing=S.phase==="player"?currentTimingInfo():null;
-      turnInput.allowEnemyDeaths=S.tokens.length>0&&(S.phase==="garruk"||timing.canCastInstant);
+      turnInput.allowEnemyDeaths=S.tokens.length>0&&(S.phase==="enemy"||timing.canCastInstant);
       syncIncomingDamageToAttack();
       renderContextualInputs();
     }
@@ -197,7 +197,7 @@ async function manualRemove(i){
   render();
   if(turnInput){
     const timing=S.phase==="player"?currentTimingInfo():null;
-    turnInput.allowEnemyDeaths=S.tokens.length>0&&(S.phase==="garruk"||timing.canCastInstant);
+    turnInput.allowEnemyDeaths=S.tokens.length>0&&(S.phase==="enemy"||timing.canCastInstant);
     syncIncomingDamageToAttack();
     renderContextualInputs();
   }
@@ -286,7 +286,7 @@ document.addEventListener('click',event=>{if(event.target.closest&&event.target.
 
 /* =====================================================================
    ADVENTURE TURN VIEWS
-   Called by the engine (showGarrukTurn / showPlayerTurn / endGame in
+   Called by the engine (showEnemyTurn / showPlayerTurn / endGame in
    ai-adventure.js) after it has updated S. These only draw.
    ===================================================================== */
 /* Main turn button: label + outcome-preview pill + key hint (same markup as Commander's). */
@@ -345,7 +345,7 @@ function showEndGameModal(won,reason){
   const m=document.getElementById('modal'),o=document.getElementById('overlay'),cfg=modeConfig();
   if(won){
     const victory=reason||(S.mode==="horde"?"The final corpse falls and the Horde deck is empty.":`${cfg.enemy}'s ${cfg.resource.toLowerCase()} reaches 0.`);
-    m.className="modal";m.innerHTML=`<div class="big-ico">\u{1F3C6}</div><h2>Victory!</h2><p>${victory}<br>You survived <b>${S.turn}</b> turns of ${cfg.name}.</p><button class="cta" onclick="restart()">Choose Another Encounter</button>`;
+    m.className="modal";m.innerHTML=`<div class="big-ico">\u{1F3C6}</div><h2>Victory!</h2><p>${victory}<br>You survived <b>${S.turn}</b> turns of ${modeDisplayName(cfg)}.</p><button class="cta" onclick="restart()">Choose Another Encounter</button>`;
   }else{
     m.className="modal lose";m.innerHTML=`<div class="big-ico">\u{1F480}</div><h2>Defeated</h2><p>${reason||`${cfg.enemy} defeated you.`}<br><br>${cfg.resource} remaining: <b>${S.loyalty}</b>.</p><button class="cta" onclick="restart()">Try Another Encounter</button>`;
   }

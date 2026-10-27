@@ -171,7 +171,7 @@ function trapDialogFocus(event,overlay){
   if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus();}
   else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}
 }
-function showModeRules(){openInfoModal(`${modeConfig().name} rules`,modeHelpHtml());}
+function showModeRules(){openInfoModal(`${modeDisplayName()} rules`,modeHelpHtml());}
 function adventureActionCards(step){
   if(step.cards?.length)return step.cards;
   const label=step.label||"";
