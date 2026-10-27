@@ -60,3 +60,14 @@ top level outside the commander-ui IIFE, no modules, load order).
 - `gameState.cpuQueueIds` (remaining opponent ids this round), `gameState.activeOppId`,
   `gameState.activeResult`, `gameState.responseStage` (`"main"`|`"combat"`),
   `gameState.playerStep`. Reload/undo re-shows the stored result; it never re-runs a CPU phase.
+
+## Wave 2 additions
+- `beginCommanderRound(state)` (engine, ai-commander.js) — the UI calls it once at the start
+  of every round (before the first seat acts). Resets per-round AI bookkeeping such as
+  `state.roundTargets` (how many CPUs have already chosen each player as their attack target).
+- `resolveCpuResponse(opp, result, response)` (engine, js/engine/commander-turn.js — owned by the
+  UI agent) — all response-window state changes (counters, kills/blocks by uid, damage to player
+  or planeswalker, CPU-vs-CPU combat, flash creatures, instant damage) live here, not in the UI,
+  so the simulation test exercises the same code. The UI only collects the `response` object.
+- Commander cast from hand (after a bounce) costs its base cost with NO tax; tax only applies
+  to casts from the command zone (engine tracks `opp.commanderInHand`).
