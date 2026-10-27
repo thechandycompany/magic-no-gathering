@@ -132,16 +132,20 @@ var GRUUL_VOLTRON = (function() {
     GRUDGE: "grudge",
     THREAT: "threat",
     VULNERABLE: "vulnerable",
-    GANG_UP: "gangUp"
+    GANG_UP: "gangUp",
+    LETHAL: "lethal",
+    OPENING: "opening"
   };
 
   var strategyLabels = {};
   strategyLabels[strategies.LAST_HITTER] = "Retaliate against the last attacker";
   strategyLabels[strategies.MOST_DAMAGE] = "Retaliate against the most damage";
   strategyLabels[strategies.GRUDGE] = "Long-standing grudge";
-  strategyLabels[strategies.THREAT] = "Largest threat";
+  strategyLabels[strategies.THREAT] = "Table leader (largest threat)";
   strategyLabels[strategies.VULNERABLE] = "Most vulnerable player";
   strategyLabels[strategies.GANG_UP] = "Focus the weakest player";
+  strategyLabels[strategies.LETHAL] = "Lethal attack available";
+  strategyLabels[strategies.OPENING] = "Best open attack (leader already under pressure)";
 
   /* --- Public deck object --- */
   return {

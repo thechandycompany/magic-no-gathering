@@ -69,11 +69,20 @@ function deployVoltronCommander(){
 }
 
 /* ---------- voltron deck simulation ---------- */
-function newVoltronDeck(){return {lands:37,ramp:10,explosive:1,other:51};}
+function newVoltronDeck(){var other=0;for(var key in VOLTRON_DECK_COMPOSITION)if(VOLTRON_DECK_COMPOSITION.hasOwnProperty(key))other+=VOLTRON_DECK_COMPOSITION[key];return {lands:37,ramp:10,explosive:1,other:other};}
 function voltronDeckTotal(){var deck=S.voltronDeck;return deck?deck.lands+deck.ramp+deck.explosive+deck.other:0;}
+/**
+ * Canonical Voltron draw (adventure mode). Keeps the invariants
+ *   S.voltronOtherDeck.length === S.voltronDeck.other and
+ *   S.voltronHand.other === S.voltronTypedHand.length:
+ * a generic "other" draw always pops its typed card from voltronOtherDeck.
+ * (Same class of bug as the Commander fix in 7bfeed6: draws and draw spells
+ * used to move the count model and the typed pile independently.)
+ */
 function drawVoltronCard(){
   var deck=S.voltronDeck,hand=S.voltronHand,total=voltronDeckTotal();
   if(!deck||total<=0)return "none";
+  if(!S.voltronOtherDeck)S.voltronOtherDeck=generateVoltronOtherDeck();
   var roll=Math.floor(Math.random()*total),category="lands";
   var keys=["lands","ramp","explosive","other"];
   for(var k=0;k<keys.length;k++){
@@ -81,19 +90,38 @@ function drawVoltronCard(){
     if(roll<deck[key]){category=key;break;}
     roll-=deck[key];
   }
-  deck[category]--;hand[category]++;
+  deck[category]--;
+  if(category==="other"){
+    var ref=S.voltronOtherDeck.pop();
+    if(ref){var card=resolveVoltronCard(ref);S.voltronTypedHand.push(Object.assign({},card,{ref:ref}));}
+    S.voltronLastTypedDraw=ref?S.voltronTypedHand[S.voltronTypedHand.length-1]:null;
+  }
+  syncVoltronHandCount();
+  if(category!=="other")hand[category]++;
   return category;
 }
+/** hand.other mirrors the typed hand (typed cards are removed from it when cast). */
+function syncVoltronHandCount(){if(S.voltronHand)S.voltronHand.other=(S.voltronTypedHand||[]).length;}
 function drawVoltronCards(count){var drawn=[];for(var i=0;i<count;i++)drawn.push(drawVoltronCard());return drawn;}
+/** Mulligan bottom: the least useful card leaves the hand (it is no longer drawable). */
 function bottomVoltronCard(){
   var hand=S.voltronHand,bottom=S.voltronBottom;
+  syncVoltronHandCount();
   var category=["other","ramp","explosive","lands"].find(function(key){return hand[key]>0;});
   if(!category)return "none";
-  hand[category]--;bottom[category]++;
+  if(category==="other"){
+    var typed=S.voltronTypedHand,worst=0;
+    for(var i=1;i<typed.length;i++)if((typed[i].cost||0)>(typed[worst].cost||0))worst=i;
+    typed.splice(worst,1);
+    syncVoltronHandCount();
+  }else hand[category]--;
+  bottom[category]++;
   return category;
 }
 function resetVoltronOpeningHand(){
   S.voltronDeck=newVoltronDeck();
+  S.voltronOtherDeck=generateVoltronOtherDeck();
+  S.voltronTypedHand=[];
   S.voltronHand={lands:0,ramp:0,explosive:0,other:0};
   drawVoltronCards(7);
 }
@@ -134,16 +162,12 @@ function resolveVoltronCard(ref){
 }
 
 /**
- * Draw a typed card from the voltronOtherDeck when a generic "other" card is drawn.
- * Returns the resolved card data or null if the typed deck is empty.
+ * Legacy helper: draws one card through the canonical drawVoltronCard and
+ * returns the typed card when an "other" card was drawn (null otherwise).
  */
 function drawTypedVoltronCard(){
-  if(!S.voltronOtherDeck)S.voltronOtherDeck=generateVoltronOtherDeck();
-  if(S.voltronOtherDeck.length===0)return null;
-  var ref=S.voltronOtherDeck.pop();
-  var card=resolveVoltronCard(ref);
-  S.voltronTypedHand.push({...card,ref:ref});
-  return card;
+  var drawn=drawVoltronCard();
+  return drawn==="other"?S.voltronLastTypedDraw:null;
 }
 
 /**
@@ -213,8 +237,8 @@ function voltronCastSupportCards(manaAvailable,commanderOnField,maxCasts){
       logG("casts "+card.name+" ("+p+"/"+t+").");
     }else if(card.ref?.category==="draw"){
       // Card draw — draw extra typed cards
-      var extraDraws=Math.min(3,S.voltronOtherDeck?.length||0);
-      for(var i=0;i<extraDraws;i++)drawTypedVoltronCard();
+      var extraDraws=Math.min(3,voltronDeckTotal());
+      drawVoltronCards(extraDraws);
       cast.push({label:"Cast "+card.name+" ("+card.cost+" mana)",detail:card.effect+" Rukha draws "+extraDraws+" card"+(extraDraws===1?"":"s")+"."});
       logG("casts "+card.name+" and draws "+extraDraws+" cards.");
     }else if(card.ref?.category==="haymakers"){
@@ -235,6 +259,7 @@ function voltronCastSupportCards(manaAvailable,commanderOnField,maxCasts){
 
   // Remove cast/held cards from hand (descending order to preserve indices)
   castIndices.sort(function(a,b){return b-a;}).forEach(function(i){hand.splice(i,1);});
+  syncVoltronHandCount();
   S.voltronMana=mana;
   return cast;
 }
@@ -246,6 +271,7 @@ function addVoltronSupport(){
   if(creature){
     var idx=S.voltronTypedHand.indexOf(creature);
     S.voltronTypedHand.splice(idx,1);
+    syncVoltronHandCount();
     var p=creature.p||2,t=creature.t||2;
     S.tokens.push({name:creature.name,ico:creature.ico||"\u{1F43E}",kind:creature.rampValue?"voltron-support":"voltron-creature",type:creature.type||"Creature",p:p,t:t,baseP:p,baseT:t,kws:creature.kws?[].concat(creature.kws):[],effect:creature.effect||"",summoningSick:!creature.haste});
     if(creature.rampValue)S.voltronRampInPlay=(S.voltronRampInPlay||0)+creature.rampValue;

@@ -228,15 +228,14 @@ function startVoltronTurn(){
     var drawDetail;
     if(drawn==="none")drawDetail="The virtual deck is empty.";
     else if(drawn==="other"){
-      var typedCard=drawTypedVoltronCard();
+      var typedCard=S.voltronLastTypedDraw;
       drawDetail=typedCard?`Rukha draws ${typedCard.name} (${typedCard.ref?.category}).`:"Rukha draws a spell.";
     }else{
       drawDetail=`Rukha draws a ${drawn==="lands"?"land":drawn==="ramp"?"ramp source":"fast-mana rock"}.`;
     }
     actions.push({label:"Draw",detail:drawDetail});
   }else{
-    // Opening hand: draw typed cards for the "other" slots in the opening hand
-    for(var i=0;i<S.voltronHand.other;i++)drawTypedVoltronCard();
+    // Opening hand: its "other" cards were typed when they were drawn (drawVoltronCard).
     actions.push({label:"Keep opening hand",detail:`Rukha keeps ${S.voltronHand.lands} land${S.voltronHand.lands===1?"":"s"} and ${S.voltronTypedHand.length} spell${S.voltronTypedHand.length===1?"":"s"}.`});
   }
 
@@ -283,6 +282,7 @@ function startVoltronTurn(){
       commander.effect=`Commander — ${S.voltronGear} gear; ${commander.kws.join(", ").toLowerCase()}.`;
       var gearIdx=S.voltronTypedHand.indexOf(bestGear);
       if(gearIdx>=0)S.voltronTypedHand.splice(gearIdx,1);
+      syncVoltronHandCount();
       actions.push({label:`Cast + equip ${bestGear.name} (${bestGear.cost}+${bestGear.equip||0} mana)`,detail:`${bestGear.effect}. Now ${tokenPower(commander)}/${tokenToughness(commander)}.`});
       logG(`equips ${bestGear.name}; now ${tokenPower(commander)}/${tokenToughness(commander)}.`);
     }
