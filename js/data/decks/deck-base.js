@@ -417,7 +417,7 @@ function refreshCommanderGear(opp, commanderBase) {
       if (commander.kws.indexOf(commander.pumpKws[pk]) === -1) commander.kws.push(commander.pumpKws[pk]);
     }
   }
-  commander.effect = opp.gear ? "Commander — " + opp.gear + " gear." : "Commander";
+  commander.effect = opp.gear ? "Commander, " + opp.gear + " gear." : "Commander";
   if (typeof gameState !== "undefined" && gameState && typeof applyBattlefieldRuleModifiers === "function") applyBattlefieldRuleModifiers();
 }
 

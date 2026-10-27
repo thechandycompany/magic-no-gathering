@@ -168,7 +168,7 @@ function startHordeTurn(){
   }
   declareAttackers();
   S.attackPower=totalPower();
-  S.declFlavor="The dead pour forward without fear or strategy—only hunger.";
+  S.declFlavor="The dead pour forward without fear or strategy, only hunger.";
   appendAttackStep();
   logG(`reveals a wave of ${spawned.length}; ${S.loyalty} cards remain in the Horde deck.`);
   showEnemyTurn();
@@ -179,7 +179,7 @@ function startConclaveTurn(){
   var unit=nextConclaveUnit();
   S.actionSteps=[];
   if(unit){
-    S.actionSteps.push({label:`Summon ${unit.name}`,detail:`${unit.p}/${unit.t} — ${unit.effect}${unit.haste?" It attacks immediately.":""}`});
+    S.actionSteps.push({label:`Summon ${unit.name}`,detail:`${unit.p}/${unit.t}. ${unit.effect}${unit.haste?" It attacks immediately.":""}`});
     logG(`summons ${unit.name} (${unit.p}/${unit.t}).`);
   }else{
     S.actionSteps.push({label:"Roster complete",detail:"Every unique Conclave creature is already on the battlefield."});
@@ -279,7 +279,7 @@ function startVoltronTurn(){
       commander.baseP+=bonus;commander.baseT+=bonus;commander.p=commander.baseP;commander.t=commander.baseT;
       S.voltronGear=(S.voltronGear||0)+1;
       if(bestGear.kw&&!commander.kws.includes(bestGear.kw))commander.kws.push(bestGear.kw);
-      commander.effect=`Commander — ${S.voltronGear} gear; ${commander.kws.join(", ").toLowerCase()}.`;
+      commander.effect=`Commander, ${S.voltronGear} gear; ${commander.kws.join(", ").toLowerCase()}.`;
       var gearIdx=S.voltronTypedHand.indexOf(bestGear);
       if(gearIdx>=0)S.voltronTypedHand.splice(gearIdx,1);
       syncVoltronHandCount();
@@ -450,7 +450,7 @@ function evaluateEnemyReaction(){
       if(unbuffed.length>0){
         return {
           type:"ability",
-          description:`${enemyName()} activates a combat trick — a creature gains deathtouch until end of turn.`,
+          description:`${enemyName()} activates a combat trick. A creature gains deathtouch until end of turn.`,
           apply:()=>{
             var target=unbuffed[0];
             if(!target.kws.includes("Deathtouch")) target.kws.push("Deathtouch");
@@ -504,7 +504,7 @@ function resolveTurn(){
     render();
     if(checkEnd())return;
     S.tokens.forEach(t=>{t.summoningSick=false;});
-    logSys(`— ${enemyName()}'s turn ${S.turn} ends —`);
+    logSys(`${enemyName()}'s turn ${S.turn} ends`);
     startPlayerTurn();save();
     return;
   }
@@ -531,7 +531,7 @@ function resolveTurn(){
     return;
   }
   if(S.playerStep===TURN_STEPS.POSTCOMBAT_MAIN||S.playerStep===TURN_STEPS.END_STEP){
-    logSys(`— Your turn ${S.turn} ends —`);
+    logSys(`Your turn ${S.turn} ends`);
     S.turn++;
     if(checkEnd())return;
     startEnemyTurn();save();
@@ -540,7 +540,7 @@ function resolveTurn(){
 
   var turnEnded=advancePlayerStep();
   if(turnEnded){
-    logSys(`— Your turn ${S.turn} ends —`);
+    logSys(`Your turn ${S.turn} ends`);
     S.turn++;
     if(checkEnd())return;
     startEnemyTurn();save();
@@ -557,7 +557,7 @@ function endPlayerTurnNow(){
   turnInput=null;
   render();
   if(checkEnd())return;
-  logSys(`— Your turn ${S.turn} ends —`);
+  logSys(`Your turn ${S.turn} ends`);
   S.turn++;
   if(checkEnd())return;
   startEnemyTurn();

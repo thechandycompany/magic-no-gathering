@@ -397,7 +397,7 @@ function resolveEnemyTurnInputs(input){
   // Enemy abilities resolve before combat.
   if(S.pendingDecl==="slay"){
     if(input.slayOutcome==="protected"){
-      logP("You protect the targeted creature — Slay is negated after Garruk spends 10 loyalty.");
+      logP("You protect the targeted creature. Slay is negated after Garruk spends 10 loyalty.");
     }else if(S.player.creatures>0){
       adjust("creatures",-1);
       gainLoyalty(input.slayToughness);
@@ -409,7 +409,7 @@ function resolveEnemyTurnInputs(input){
     if(input.wipeOutcome==="protected")logP(`Your creatures survive ${label}.`);
     else{
       setStat("creatures",input.wipeSurvivors);
-      logP(`${label} resolves — ${input.wipeSurvivors} of your creatures survive.`);
+      logP(`${label} resolves. ${input.wipeSurvivors} of your creatures survive.`);
     }
   }
 

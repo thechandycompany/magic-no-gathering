@@ -233,7 +233,7 @@ function voltronCastSupportCards(manaAvailable,commanderOnField,maxCasts){
         commander.baseP+=bonus;commander.baseT+=bonus;commander.p=commander.baseP;commander.t=commander.baseT;
         S.voltronGear=(S.voltronGear||0)+1;
         if(card.kw&&!commander.kws.includes(card.kw))commander.kws.push(card.kw);
-        commander.effect="Commander — "+S.voltronGear+" gear; "+commander.kws.join(", ").toLowerCase()+".";
+        commander.effect="Commander, "+S.voltronGear+" gear; "+commander.kws.join(", ").toLowerCase()+".";
         cast.push({label:"Cast + equip "+card.name+" to "+commander.name,detail:card.effect+". Now "+tokenPower(commander)+"/"+tokenToughness(commander)+"."});
         logG("equips "+card.name+" on "+commander.name+"; now "+tokenPower(commander)+"/"+tokenToughness(commander)+".");
       }
@@ -243,7 +243,7 @@ function voltronCastSupportCards(manaAvailable,commanderOnField,maxCasts){
       var kws=card.kws?[].concat(card.kws):[];
       S.tokens.push({name:card.name,ico:card.ico||"\u{1F43E}",kind:card.rampValue?"voltron-support":"voltron-creature",type:card.type||"Creature",p:p,t:t,baseP:p,baseT:t,kws:kws,effect:card.effect||"",summoningSick:!card.haste});
       if(card.rampValue)S.voltronRampInPlay=(S.voltronRampInPlay||0)+card.rampValue;
-      cast.push({label:"Cast "+card.name+" ("+card.cost+" mana)",detail:p+"/"+t+(kws.length?" · "+kws.join(", "):"")+(" — "+card.effect)});
+      cast.push({label:"Cast "+card.name+" ("+card.cost+" mana)",detail:p+"/"+t+(kws.length?" · "+kws.join(", "):"")+(". "+card.effect)});
       logG("casts "+card.name+" ("+p+"/"+t+").");
     }else if(card.ref?.category==="draw"){
       // Card draw — draw extra typed cards

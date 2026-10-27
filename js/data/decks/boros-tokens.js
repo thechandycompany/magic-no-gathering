@@ -181,7 +181,7 @@ var BOROS_TOKENS = (function() {
     archetype: "tokens",
     commander: commander,
     color: "#e67e22",
-    summary: "A rallying rival floods the board with Soldier tokens — Ysolde makes one every combat — and swings wide, saving an anthem for the lethal turn.",
+    summary: "A rallying rival floods the board with Soldier tokens and swings wide. Ysolde makes one every combat and saves an anthem for the lethal turn.",
     winCondition: {type: "life"},
     commanderTrigger: {when: "beginCombat", tokens: soldiers(1), text: "At the beginning of combat on your turn, create a 1/1 white Soldier creature token."},
     ai: ai,

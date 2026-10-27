@@ -23,7 +23,7 @@ var ABILITIES = {
     cost: +4,
     label: "[+4] Rip and Tear",
     flavor: [
-      "Garruk snarls — a wolf's fangs blacken with venom.",
+      "Garruk snarls, and a wolf's fangs blacken with venom.",
       "The Slayer channels raw savagery into his pack.",
       "One beast swells with lethal fury."
     ],
@@ -35,7 +35,7 @@ var ABILITIES = {
     flavor: [
       "Garruk hurls his axe. \"Nothing survives the hunt.\"",
       "The Slayer marks his prey.",
-      "Steel flashes — and Garruk drinks the fallen's strength."
+      "Steel flashes, and Garruk drinks the fallen's strength."
     ],
     mech: "Destroy target creature. Garruk gains loyalty equal to its toughness."
   },
@@ -59,16 +59,16 @@ var HORDE_UNITS = [
 ];
 
 var CONCLAVE_UNITS = [
-  {id: "kael", name: "Kael, Prism Warden", ico: "🛡️", p: 2, t: 4, effect: "Bulwark Aura — other Conclave creatures get +0/+1.", auraT: 1},
-  {id: "nyra", name: "Nyra, Ember Cantor", ico: "🔥", p: 3, t: 2, effect: "War Song — other Conclave creatures get +1/+0.", auraP: 1},
-  {id: "orryx", name: "Orryx, Spell-Eater", ico: "🌀", p: 2, t: 3, effect: "Null Field — noncreature spells cost 2 more next turn.", lock: "Noncreature spells cost 2 more this turn."},
-  {id: "thalen", name: "Thalen, Root Architect", ico: "🌿", p: 2, t: 5, effect: "Network — at 3+ Conclave creatures, the team gets +1/+1.", threshold: true},
-  {id: "mirael", name: "Mirael, Veil Sovereign", ico: "🌙", p: 3, t: 4, effect: "Veil Aura — other Conclave creatures have ward 2.", ward: true},
-  {id: "voss", name: "Voss, Null Apostle", ico: "🔒", p: 4, t: 3, effect: "Seal — players can't cast artifacts next turn.", lock: "Artifact spells can't be cast this turn."},
-  {id: "elyra", name: "Elyra, Dawn Resonant", ico: "☀️", p: 3, t: 3, effect: "Resonance — Vaelora gains 1 resolve for each aura bearer.", healer: true},
-  {id: "dravik", name: "Dravik, Rift Talon", ico: "⚡", p: 5, t: 2, effect: "Riftstrike — attacks immediately when summoned.", haste: true},
-  {id: "selune", name: "Selune, Glass Oracle", ico: "🔷", p: 1, t: 4, effect: "Foresight — the next Conclave summon gets +1/+1.", foretell: true},
-  {id: "kharos", name: "Kharos, Chain Arbiter", ico: "⛓️", p: 3, t: 5, effect: "Edict — at 4+ allies, players can't cast more than one spell.", thresholdLock: true}
+  {id: "kael", name: "Kael, Prism Warden", ico: "🛡️", p: 2, t: 4, effect: "Bulwark Aura: other Conclave creatures get +0/+1.", auraT: 1},
+  {id: "nyra", name: "Nyra, Ember Cantor", ico: "🔥", p: 3, t: 2, effect: "War Song: other Conclave creatures get +1/+0.", auraP: 1},
+  {id: "orryx", name: "Orryx, Spell-Eater", ico: "🌀", p: 2, t: 3, effect: "Null Field: noncreature spells cost 2 more next turn.", lock: "Noncreature spells cost 2 more this turn."},
+  {id: "thalen", name: "Thalen, Root Architect", ico: "🌿", p: 2, t: 5, effect: "Network: at 3+ Conclave creatures, the team gets +1/+1.", threshold: true},
+  {id: "mirael", name: "Mirael, Veil Sovereign", ico: "🌙", p: 3, t: 4, effect: "Veil Aura: other Conclave creatures have ward 2.", ward: true},
+  {id: "voss", name: "Voss, Null Apostle", ico: "🔒", p: 4, t: 3, effect: "Seal: players can't cast artifacts next turn.", lock: "Artifact spells can't be cast this turn."},
+  {id: "elyra", name: "Elyra, Dawn Resonant", ico: "☀️", p: 3, t: 3, effect: "Resonance: Vaelora gains 1 resolve for each aura bearer.", healer: true},
+  {id: "dravik", name: "Dravik, Rift Talon", ico: "⚡", p: 5, t: 2, effect: "Riftstrike: attacks immediately when summoned.", haste: true},
+  {id: "selune", name: "Selune, Glass Oracle", ico: "🔷", p: 1, t: 4, effect: "Foresight: the next Conclave summon gets +1/+1.", foretell: true},
+  {id: "kharos", name: "Kharos, Chain Arbiter", ico: "⛓️", p: 3, t: 5, effect: "Edict: at 4+ allies, players can't cast more than one spell.", thresholdLock: true}
 ];
 
 var SLAY_TARGETS = [

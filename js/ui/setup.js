@@ -194,7 +194,7 @@ window._adventureEngine = {
 /* ---------- boot ---------- */
 /* Writes GAME_TITLE (js/data/modes.js) into the window title and header. */
 function applyGameTitle(){
-  document.title=`${GAME_TITLE}${GAME_STAGE?` (${GAME_STAGE})`:""} — ${GAME_TAGLINE}`;
+  document.title=`${GAME_TITLE}${GAME_STAGE?` (${GAME_STAGE})`:""} · ${GAME_TAGLINE}`;
   const h=document.getElementById('brandTitle');if(h)h.innerHTML=gameTitleHtml();
   const sub=document.getElementById('brandSub');if(sub)sub.textContent=GAME_TAGLINE;
   applyAboutInfo();
@@ -208,7 +208,7 @@ function gameTitleHtml(){return `${escapeText(GAME_TITLE)}${GAME_STAGE?` <span c
 /* One quiet line of project links, shared by the title screen and Settings → About. */
 function projectLinksHtml(){
   const mail=typeof FEEDBACK_EMAIL==="string"&&/^[^@\s]+@[^@\s]+$/.test(FEEDBACK_EMAIL)?`mailto:${FEEDBACK_EMAIL}?subject=${encodeURIComponent(`${GAME_TITLE} ${GAME_STAGE} feedback`.replace(/\s+/g," ").trim())}`:"";
-  const links=[[mail,"Feedback",`Email ${FEEDBACK_EMAIL}`],[externalUrl(SOURCE_URL),"Source code","View the source on GitHub"],[externalUrl(DONATION_URL),"Tip on Ko-fi","Optional — tips unlock nothing"]]
+  const links=[[mail,"Feedback",`Email ${FEEDBACK_EMAIL}`],[externalUrl(SOURCE_URL),"Source code","View the source on GitHub"],[externalUrl(DONATION_URL),"Tip on Ko-fi","Optional tip"]]
     .filter(([href])=>href).map(([href,label,title])=>`<a href="${escapeText(href)}" title="${escapeText(title)}"${href.startsWith("mailto:")?"":' target="_blank" rel="noopener noreferrer"'}>${label}</a>`);
   return links.join('<span aria-hidden="true">·</span>');
 }
@@ -216,7 +216,7 @@ function applyAboutInfo(){
   const notice=document.getElementById('fanNotice');
   if(notice)notice.textContent=FAN_CONTENT_NOTICE;
   const title=document.getElementById('aboutTitle');
-  if(title)title.textContent=`${GAME_TITLE} — a free fan project`;
+  if(title)title.textContent=`${GAME_TITLE}, a free fan project`;
   const links=document.getElementById('projectLinks');
   if(links){links.innerHTML=projectLinksHtml();links.hidden=!links.innerHTML;}
 }

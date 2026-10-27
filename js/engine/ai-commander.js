@@ -1963,7 +1963,7 @@ function counterOpponentAction(opp, action){
       return `You counter ${who}'s ramp spell. It goes to the graveyard.`;
     }
     case "draw":
-      return `You counter ${name}. ${who} already drew the cards — they stay in hand.`;
+      return `You counter ${name}. ${who} already drew the cards, so they stay in hand.`;
     case "wipe":case "haymaker":case "ruleRemoval":case "spell":case "removal":{
       const notes=undoRecord(action.undo);
       if(action.utilityName){
@@ -1999,7 +1999,7 @@ function cpuCastHeldProtection(opp,names,reason){
   removeTypedCardFromHand(opp,card);
   addOpponentGraveyardCard(opp,typedGraveyardCard(card));
   opp.heldMana=Math.max(0,(opp.heldMana||0)-casting.cost);
-  return {cardName:card.name,label:`${shortName(opp)} casts ${card.name}${reason?` — ${reason}`:""}`};
+  return {cardName:card.name,label:`${shortName(opp)} casts ${card.name}${reason?`: ${reason}`:""}`};
 }
 function heldProtectionOptions(opp,names){
   const match=typeof names==="function"?names:(card=>names.includes(card.name));
@@ -2101,7 +2101,7 @@ function cpuLethalWarnings(state){
     const commander=commanderOnField(opp);
     const commanderHit=commander?commander.p*combatStrikeCount(commander):0;
     const plan=isPlayerDead(s)?{lethal:false}:lethalPlan(opp,projection,{assumeUntapped:true});
-    if(plan.lethal&&plan.kind==="commander")warnings.push({oppId:opp.id,text:`${name}: ${cmd}/21 commander damage to you — lethal next hit (${commanderHit} power)`});
+    if(plan.lethal&&plan.kind==="commander")warnings.push({oppId:opp.id,text:`${name}: ${cmd}/21 commander damage to you, lethal next hit (${commanderHit} power)`});
     else if(cmd>=15)warnings.push({oppId:opp.id,text:`${name}: ${cmd}/21 commander damage to you`});
     const power=boardPower(opp);
     if(plan.lethal&&plan.kind==="life")warnings.push({oppId:opp.id,text:`${name}: can deal lethal damage next turn (${power} power on board vs your ${player.life} life)`});
@@ -2259,20 +2259,20 @@ function activeBattlefieldRules(kind){return battlefieldRules().filter(rule=>!ki
 function battlefieldRuleLabel(rule){
   const source=rule.sourceName||"Unnamed rule";
   switch(rule.kind){
-    case "artifactCastBan":return `${source} — CPU artifacts can't be cast`;
-    case "noncreatureCastBan":return `${source} — CPU noncreature spells can't be cast`;
-    case "cpuSpellLimit":return `${source} — CPU can cast only one spell each turn`;
-    case "cpuCreatureAttackBan":return `${source} — CPU creatures can't attack`;
-    case "cpuCreatureBlockBan":return `${source} — CPU creatures can't block`;
-    case "noncreatureTax":return `${source} — CPU noncreature spells cost ${rule.amount} more`;
-    case "creatureTax":return `${source} — CPU creature spells cost ${rule.amount} more`;
-    case "preventCpuDamage":return `${source} — prevent next ${rule.remaining||0} CPU damage`;
-    case "cpuGraveyardExile":return `${source} — CPU cards going to graveyards are exiled instead`;
-    case "cpuDamageReduction":return `${source} — CPU combat damage is reduced by ${rule.amount}`;
-    case "cpuCreaturePT":return `${source} — CPU creatures get ${formatSigned(rule.power)}/${formatSigned(rule.toughness)}`;
-    case "cpuCreatureMinusPT":return `${source} — CPU creatures get -${Math.max(0,parseInt(rule.power)||0)}/-${Math.max(0,parseInt(rule.toughness)||0)}`;
-    case "cpuCreaturePowerCap":return `${source} — CPU creature power can't exceed ${rule.amount}`;
-    case "cpuCreatureKeywordLoss":return `${source} — CPU creatures lose modeled keywords`;
+    case "artifactCastBan":return `${source}: CPU artifacts can't be cast`;
+    case "noncreatureCastBan":return `${source}: CPU noncreature spells can't be cast`;
+    case "cpuSpellLimit":return `${source}: CPU can cast only one spell each turn`;
+    case "cpuCreatureAttackBan":return `${source}: CPU creatures can't attack`;
+    case "cpuCreatureBlockBan":return `${source}: CPU creatures can't block`;
+    case "noncreatureTax":return `${source}: CPU noncreature spells cost ${rule.amount} more`;
+    case "creatureTax":return `${source}: CPU creature spells cost ${rule.amount} more`;
+    case "preventCpuDamage":return `${source}: prevent next ${rule.remaining||0} CPU damage`;
+    case "cpuGraveyardExile":return `${source}: CPU cards going to graveyards are exiled instead`;
+    case "cpuDamageReduction":return `${source}: CPU combat damage is reduced by ${rule.amount}`;
+    case "cpuCreaturePT":return `${source}: CPU creatures get ${formatSigned(rule.power)}/${formatSigned(rule.toughness)}`;
+    case "cpuCreatureMinusPT":return `${source}: CPU creatures get -${Math.max(0,parseInt(rule.power)||0)}/-${Math.max(0,parseInt(rule.toughness)||0)}`;
+    case "cpuCreaturePowerCap":return `${source}: CPU creature power can't exceed ${rule.amount}`;
+    case "cpuCreatureKeywordLoss":return `${source}: CPU creatures lose modeled keywords`;
     default:return source;
   }
 }

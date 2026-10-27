@@ -18,7 +18,7 @@ var GRUUL_VOLTRON = (function() {
     t: 4,
     type: "Legendary Creature — Human Warrior",
     kws: ["Trample"],
-    effect: "Commander — grows through gear and deals commander damage when combat damage reaches you.",
+    effect: "Commander. Grows through gear and deals commander damage when combat damage reaches you.",
     cost: 5
   };
 

@@ -123,7 +123,7 @@ function renderSetupScreen(onStartAdventure, onStartCommander) {
         ${themePickerButtonsHtml()}
       </div>
     </div>
-    <footer class="project-foot"><p class="project-links">${projectLinksHtml()}</p><p class="setup-fan-note">Free, unofficial fan project — not approved or endorsed by Wizards of the Coast.</p></footer>`;
+    <footer class="project-foot"><p class="project-links">${projectLinksHtml()}</p><p class="setup-fan-note">Free, unofficial fan project, not approved or endorsed by Wizards of the Coast.</p></footer>`;
   overlay.classList.add("show");
 
   const persist=()=>saveCommanderSetup(setup);
@@ -403,7 +403,7 @@ function renderSingleView(state,board){
   const tokensHtml=opp.tokens.length===0?'<div class="empty-field">No creatures</div>':
     opp.tokens.map(t=>{
       const kws=t.kws&&t.kws.length?t.kws.join(' · '):'';
-      const tooltip=`${t.name} — ${t.p}/${t.t}${t.kws&&t.kws.length?' · '+t.kws.join(', '):''}${t.effect?' — '+t.effect:''}`;
+      const tooltip=`${t.name}, ${t.p}/${t.t}${t.kws&&t.kws.length?' · '+t.kws.join(', '):''}${t.effect?'. '+t.effect:''}`;
       return `<div class="card ${t.kind==='commander'?'commander':''} ${t.summoningSick?'sick':''} ${t.attacking||t.tapped?'tapped':''}" title="${escapeHtml(tooltip)}">
       ${dead?"":`<button type="button" class="c-remove" data-opp="${opp.id}" data-rm-uid="${escapeHtml(t.uid)}" title="${t.kind==='commander'?`Return ${escapeHtml(t.name)} to the command zone`:`Remove ${escapeHtml(t.name)} from the battlefield`}" aria-label="Remove ${escapeHtml(t.name)}">✕<span class="c-remove-label"> Remove</span></button>`}
       <span class="c-name"><span>${t.name}</span><span class="mana">${t.kind==='commander'?'⚜':'🌲'}</span></span>
@@ -424,7 +424,7 @@ function renderSingleView(state,board){
   </div><div class="board-inner commander-board-inner"><div class="garruk-col">
     <div class="commander-board-stats">
       <div class="cbs-item"><span class="cbs-label">Life</span><div class="cbs-adj"><button type="button" class="cbs-btn" data-opp-stat="life" data-opp-id="${opp.id}" data-d="-1">−</button><span class="cbs-val ${opp.life<=10?'warn':''}">${opp.life}</span><button type="button" class="cbs-btn" data-opp-stat="life" data-opp-id="${opp.id}" data-d="1">+</button></div></div>
-      <div class="cbs-item cbs-cmdr-dmg"><span class="cbs-label">⚜ Commander damage to you ${helpTip("Combat damage this opponent’s commander has dealt to you. 21 from a single commander eliminates you.")}</span><div class="cbs-adj"><button type="button" class="cbs-btn" data-cmdr-from="${opp.id}" data-d="-1">−</button><span class="cbs-val ${cdFromOpp>=14?'warn':''}">${cdFromOpp}/21</span><button type="button" class="cbs-btn" data-cmdr-from="${opp.id}" data-d="1">+</button></div></div>
+      <div class="cbs-item cbs-cmdr-dmg"><span class="cbs-label">⚜ Commander damage to you ${helpTip("Combat damage this opponent’s commander has dealt you. 21 from one commander eliminates you.")}</span><div class="cbs-adj"><button type="button" class="cbs-btn" data-cmdr-from="${opp.id}" data-d="-1">−</button><span class="cbs-val ${cdFromOpp>=14?'warn':''}">${cdFromOpp}/21</span><button type="button" class="cbs-btn" data-cmdr-from="${opp.id}" data-d="1">+</button></div></div>
       <div class="cbs-item"><span class="cbs-label">Mana</span><span class="cbs-val">${manaAvailable(opp)}${opp.heldMana?` · ${opp.heldMana} open`:""}</span></div>
       <div class="cbs-item"><span class="cbs-label">Hand</span><span class="cbs-val">🃏 ${opponentHandSize(opp)}/${MAX_CPU_HAND_SIZE}</span></div>
       <div class="cbs-item cbs-wide"><span class="cbs-label">Hand contents</span><span class="cbs-val cbs-small">${handBreakdownText(opp)}</span></div>
@@ -433,7 +433,7 @@ function renderSingleView(state,board){
       <div class="cbs-item"><span class="cbs-label">Commander ${helpTip("Commander tax: each recast from the command zone costs 2 more mana.")}</span><span class="cbs-val">${commanderOnField(opp)?'Battlefield':opp.commanderInHand?'In hand (no tax)':'Command zone (+'+opp.commanderTax+')'}</span></div>
       <div class="cbs-item cbs-wide"><span class="cbs-label">Equipment</span><span class="cbs-val cbs-small">${gearNames.length?escapeHtml(gearNames.join(", ")):"None"}</span></div>
       ${(opp.utilityPermanents||[]).length?`<div class="cbs-item cbs-wide"><span class="cbs-label">Other permanents</span><span class="cbs-val cbs-small">${opp.utilityPermanents.map((u,i)=>`<span class="cbs-util">${escapeHtml(u.ico||"✦")} ${escapeHtml(u.name)}${dead?"":`<button type="button" class="cbs-util-remove" data-opp="${opp.id}" data-perm-key="util:${i}" data-perm-name="${escapeHtml(u.name)}" data-perm-ico="${escapeHtml(u.ico||"✦")}" aria-label="Remove ${escapeHtml(u.name)}">✕</button>`}</span>`).join("")}</span></div>`:""}
-      ${intent?`<div class="cbs-item cbs-wide"><span class="cbs-label">Likely next attack ${helpTip("A prediction from this CPU's current targeting priorities. It can change before its turn.")}</span><span class="cbs-val cbs-small">${escapeHtml(intent)}</span></div>`:""}
+      ${intent?`<div class="cbs-item cbs-wide"><span class="cbs-label">Likely next attack ${helpTip("A prediction. It can change before this CPU's turn.")}</span><span class="cbs-val cbs-small">${escapeHtml(intent)}</span></div>`:""}
       <div class="cbs-item"><span class="cbs-label">Graveyard</span><button type="button" class="cbs-zone-btn" data-graveyard-owner="${opp.id}">⚰ ${opp.graveyardCount}</button></div>
       <div class="cbs-item"><span class="cbs-label">Exile</span><button type="button" class="cbs-zone-btn" data-exile-owner="${opp.id}">✦ ${opp.exileCount}</button></div>
     </div></div>
@@ -605,11 +605,11 @@ function tableCardHtml(card,opts={}){
   const ptClass=!hasStats?"":(card.p>baseP||card.t>baseT)?"buffed":(card.p<baseP||card.t<baseT)?"shrunk":"";
   const kws=(card.kws||[]).filter(Boolean);
   const gear=opts.gear||[];
-  const tooltip=[`${count>1?`${count}× `:""}${card.name}${hasStats?` — ${card.p}/${card.t}`:""}`,kws.join(", "),card.effect||"",gear.length?`Equipped: ${gear.map(g=>g.name).join(", ")}`:"",tapped?"Tapped":"",card.summoningSick?"Summoning sick":""].filter(Boolean).join(" · ");
+  const tooltip=[`${count>1?`${count}× `:""}${card.name}${hasStats?`, ${card.p}/${card.t}`:""}`,kws.join(", "),card.effect||"",gear.length?`Equipped: ${gear.map(g=>g.name).join(", ")}`:"",tapped?"Tapped":"",card.summoningSick?"Summoning sick":""].filter(Boolean).join(" · ");
   const classes=["tt-card",opts.className||"",commander?"commander":"",card.isToken?"token":"",card.summoningSick?"sick":"",count>1?"stacked":"",count>2?"stacked-3":""].filter(Boolean).join(" ");
   const stat=opts.stat!=null?opts.stat:hasStats?`${card.p}/${card.t}`:"";
   const peekIndex=tablePeek.push({card,count,gear,tapped,stat:opts.stat,className:opts.className||""})-1;
-  const gearHtml=gear.map((g,i)=>`<span class="tt-gear ${animAttrs(g.anim).cls}" style="--i:${i};${animAttrs(g.anim).style}" title="${escapeHtml(`${g.name}${g.effect?` — ${g.effect}`:""}`)}">⚙ ${escapeHtml(g.name)}</span>`).join("");
+  const gearHtml=gear.map((g,i)=>`<span class="tt-gear ${animAttrs(g.anim).cls}" style="--i:${i};${animAttrs(g.anim).style}" title="${escapeHtml(`${g.name}${g.effect?`, ${g.effect}`:""}`)}">⚙ ${escapeHtml(g.name)}</span>`).join("");
   const removeTarget=opts.permKey?`data-perm-key="${escapeHtml(opts.permKey)}" data-perm-name="${escapeHtml(card.name)}" data-perm-ico="${escapeHtml(card.ico||"✦")}"`:opts.pwId?`data-pw-remove="${escapeHtml(opts.pwId)}"`:`data-rm-uid="${escapeHtml(card.uid)}"`;
   const removeHtml=opts.removeOpp||opts.pwId?`<button type="button" class="tt-remove" data-opp="${escapeHtml(opts.removeOpp||"")}" ${removeTarget} title="${commander?"Return to the command zone":count>1?"Remove one from the battlefield":"Remove from the battlefield"}" aria-label="Remove ${count>1?"one ":""}${escapeHtml(card.name)}">✕</button>`:"";
   const a=animAttrs(opts.anim);
@@ -719,7 +719,7 @@ function tablePeekHtml(entry){
   return `<div class="tt-peek-h"><span class="tt-peek-ico">${escapeHtml(card.ico||"🃏")}</span><strong>${escapeHtml(card.name)}</strong>${count>1?`<span class="tt-peek-count">×${count}</span>`:""}</div>
     <div class="tt-peek-type">${escapeHtml(type)}${hasStats?`<span class="tt-peek-pt ${changed?(card.p>=baseP&&card.t>=baseT?"buffed":"shrunk"):""}">${card.p}/${card.t}</span>`:entry.stat?`<span class="tt-peek-pt">${escapeHtml(entry.stat)}</span>`:""}</div>
     ${changed?`<div class="tt-peek-sub">Printed ${baseP}/${baseT}</div>`:""}
-    ${kws.length?`<ul class="tt-peek-kws">${kws.map(k=>{const r=keywordReminder(k);return `<li><b>${escapeHtml(k)}</b>${r?` — ${escapeHtml(r)}`:""}</li>`;}).join("")}</ul>`:""}
+    ${kws.length?`<ul class="tt-peek-kws">${kws.map(k=>{const r=keywordReminder(k);return `<li><b>${escapeHtml(k)}</b>${r?`: ${escapeHtml(r)}`:""}</li>`;}).join("")}</ul>`:""}
     ${card.effect?`<p class="tt-peek-effect">${escapeHtml(card.effect)}</p>`:""}
     ${gear.length?`<div class="tt-peek-gear"><span>Equipped</span>${gear.map(g=>`<div>⚙ ${escapeHtml(g.name)}${g.effect?` <em>${escapeHtml(g.effect)}</em>`:""}</div>`).join("")}</div>`:""}
     ${state.length?`<div class="tt-peek-state">${state.map(x=>`<span>${escapeHtml(x)}</span>`).join("")}</div>`:""}`;
@@ -934,7 +934,7 @@ function updateCommanderTurnBanner(state){
   const ico=document.getElementById('tbIco'),text=document.getElementById('tbText'),sub=document.getElementById('tbSub');
   if(ico)ico.textContent=active?(active.ico||"⚔"):"🗡️";
   if(text)text.textContent=active?`${nm(active)}'s Turn (Turn ${state.turn})`:state.phase==="cpu"?`Opponents' Turn (Turn ${state.turn})`:`Your Turn (Turn ${state.turn})`;
-  if(sub)sub.textContent=active?"— respond, then continue":"— take your turn, then end it";
+  if(sub)sub.textContent=active?"Respond, then continue":"Take your turn, then end it";
 }
 function showCommanderGame(){
   if(!gameState)return;
@@ -1507,7 +1507,7 @@ function playerActionHtml(draft,effect,help){
   const actionOptions=PLAYER_ACTIONS.map(a=>`<option value="${a.value}" ${a.value===draft.action?"selected":""}>${a.label}</option>`).join("");
   const cardTypeOptions=PLAYER_ACTION_CARD_TYPES.map(t=>`<option value="${t}" ${t===draft.cardType?"selected":""}>${t[0].toUpperCase()+t.slice(1)}</option>`).join("");
   const targets=effectTargets(gameState,effect,draft.targetId);
-  let html=`<details class="context-disclosure player-action-disclosure"${draft.actionOpen?" open":""}><summary><span>Create Player Action ${helpTip("Resolve a spell or ability you control that affects players: discard, mill, destroy, bounce, draw, life, poison, or tokens. CPUs respond automatically.")}</span><small></small></summary><div class="context-disclosure-body"><div class="context-section player-effect-section">
+  let html=`<details class="context-disclosure player-action-disclosure"${draft.actionOpen?" open":""}><summary><span>Create Player Action ${helpTip("Resolve your spell or ability that affects players: discard, mill, destroy, bounce, draw, life, poison, or tokens.")}</span><small></small></summary><div class="context-disclosure-body"><div class="context-section player-effect-section">
     <div class="player-action-grid">
       ${isGlobal||isTokens?"":`<label>Scope<select data-pa="scope">${scopeOptions}</select></label>`}
       <label>Action<select data-pa="action">${actionOptions}</select></label>
@@ -1654,7 +1654,7 @@ function buildBattlefieldRulesPanel(){
   const activeHtml=active.length
     ?active.map(rule=>`<li class="battlefield-rule-item"><div><strong>${escapeHtml(rule.sourceName||"Unnamed battlefield rule")}</strong><span>${escapeHtml(battlefieldRuleLabel(rule))}</span></div><button type="button" class="battlefield-rule-remove" data-rule-remove-id="${rule.id}">Remove</button></li>`).join("")
     :"<li class=\"battlefield-rule-empty\">No persistent CPU rules are active.</li>";
-  return `<details class="rules-disclosure" id="battlefieldRulesDisclosure"${battlefieldRulesOpen?" open":""}><summary><span>🛡 Battlefield Rules ${helpTip("Ongoing effects you control that restrict the CPUs, such as Stony Silence. CPUs follow them automatically.")}${active.length?` <em class="rules-count">${active.length} active</em>`:""}</span><small></small></summary>
+  return `<details class="rules-disclosure" id="battlefieldRulesDisclosure"${battlefieldRulesOpen?" open":""}><summary><span>🛡 Battlefield Rules ${helpTip("Ongoing effects you control that restrict the CPUs, such as Stony Silence.")}${active.length?` <em class="rules-count">${active.length} active</em>`:""}</span><small></small></summary>
   <section class="battlefield-rules-panel" aria-label="Battlefield Rules and Permissions">
     <div class="battlefield-rules-heading"><small>Track effects on your own permanents at the table.</small></div>
     <div class="battlefield-rule-builder">
@@ -1915,7 +1915,7 @@ function renderAttackReview(panel,draft){
     const opp=oppById(entry.oppId);
     const killed=entry.kills.map(uid=>findTokenByUid(opp,uid)).filter(Boolean);
     return `<div class="context-section combat-opp-section" style="border-left:3px solid ${oppColor(opp)}">
-      <div class="context-section-title">${opp.ico} ${nm(opp)} — ${opp.life} life → ${Math.max(0,opp.life-entry.damage)}</div>
+      <div class="context-section-title">${opp.ico} ${nm(opp)}, ${opp.life} life → ${Math.max(0,opp.life-entry.damage)}</div>
       <ul class="attack-outcome">
         ${entry.blocks.length?entry.blocks.map(b=>`<li>🛡 ${escapeHtml(b)}</li>`).join(""):"<li>No blockers.</li>"}
         <li>⚔ ${entry.damage} combat damage${entry.commanderDamage?` · ⚜ ${entry.commanderDamage} commander damage (${((opp.commanderDamageReceived||{}).player||0)+entry.commanderDamage}/21)`:""}</li>
@@ -1953,7 +1953,7 @@ function renderManualCombat(panel,alive){
   alive.forEach(opp=>{
     const e=m.perOpp[opp.id]=m.perOpp[opp.id]||{damage:0,commanderDamage:0};
     html+=`<div class="context-section combat-opp-section" data-opp-section="${opp.id}" style="border-left:3px solid ${oppColor(opp)}">
-      <div class="context-section-title">${opp.ico} ${nm(opp)} — ${opp.life} life</div>
+      <div class="context-section-title">${opp.ico} ${nm(opp)}, ${opp.life} life</div>
       <div class="commander-player-actions">${stepperHtml("damage","Damage from other creatures",e.damage)}${stepperHtml("commanderDamage","Commander damage",e.commanderDamage)}</div></div>`;
   });
   html+=`<div class="context-section manual-you"><div class="context-section-title">You</div><div class="commander-player-actions">

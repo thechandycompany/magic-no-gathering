@@ -62,7 +62,7 @@ function modeHelpHtml(){
   if(S.mode==="hard")return `<div class="tt-header">🔥 ${modeDisplayName()}</div><div class="tt-passive"><span class="tt-cost tt-free">Scaling</span> Loyalty income increases every two turns: +2, +3, +4, up to +6.</div><div class="tt-ability"><span class="tt-cost">[0]</span><b>Summon Wolf</b><br>2/2 through turn 4; every new Wolf is 4/4 from turn 5 onward.</div><div class="tt-ability"><span class="tt-cost tt-gain">[+4]</span><b>Rip and Tear</b><br>+1/+0, deathtouch, and +4 loyalty.</div><div class="tt-note">Garruk normally goes wide, but Hard mode checks board deficits first. With enough loyalty it uses Slay while keeping 8–10 loyalty, or Overrun while keeping at least 8.</div>`;
   if(S.mode==="horde")return `<div class="tt-header">☠️ Horde Mode</div><div class="tt-passive"><span class="tt-cost tt-free">60 cards</span> Each revealed creature and each damage dealt to the Horde mills its deck.</div><div class="tt-ability"><b>Automatic waves</b><br>Wave size grows every two turns. Horde creatures have haste and attack each turn.</div><div class="tt-ability"><b>Events</b><br>Grave Frenzy boosts attacks; Dread Edict forces a sacrifice.</div><div class="tt-note">You win only when the Horde deck is empty and no Horde creatures remain.</div>`;
   if(S.mode==="conclave")return `<div class="tt-header">✦ ${modeDisplayName()}</div><div class="tt-passive"><span class="tt-cost tt-free">Random roster</span> Unique named creatures enter in a different order each game.</div><div class="tt-ability"><b>Shared network</b><br>War Song, Bulwark, ward, spell locks, and threshold bonuses disappear when their key creature dies.</div><div class="tt-ability"><b>Vaelora</b><br>Builds Ascension at 3+ allies and casts Prismatic Ruin against wide player boards.</div><div class="tt-note">Identify and remove the key creature holding each synergy together.</div>`;
-  return `<div class="tt-header">🐺 ${modeDisplayName()}</div><div class="tt-passive"><span class="tt-cost tt-free">Passive</span> +2 loyalty at the start of each turn.</div><div class="tt-ability"><span class="tt-cost">[0]</span><b>Summon Wolf</b><br>Put a 2/2 Wolf onto the battlefield.</div><div class="tt-ability"><span class="tt-cost tt-gain">[+4]</span><b>Rip and Tear</b><br>+1/+0, deathtouch, and +4 loyalty.</div><div class="tt-ability"><span class="tt-cost tt-spend">[-10]</span><b>Slay</b> — destroy a creature.</div><div class="tt-ability"><span class="tt-cost tt-spend">[-25]</span><b>Overrun the Weak</b> — clear the player's board.</div><div class="tt-note">Baseline encounter: Wolves remain 2/2 for the entire game.</div>`;
+  return `<div class="tt-header">🐺 ${modeDisplayName()}</div><div class="tt-passive"><span class="tt-cost tt-free">Passive</span> +2 loyalty at the start of each turn.</div><div class="tt-ability"><span class="tt-cost">[0]</span><b>Summon Wolf</b><br>Put a 2/2 Wolf onto the battlefield.</div><div class="tt-ability"><span class="tt-cost tt-gain">[+4]</span><b>Rip and Tear</b><br>+1/+0, deathtouch, and +4 loyalty.</div><div class="tt-ability"><span class="tt-cost tt-spend">[-10]</span><b>Slay</b>: destroy a creature.</div><div class="tt-ability"><span class="tt-cost tt-spend">[-25]</span><b>Overrun the Weak</b>: clear the player's board.</div><div class="tt-note">Baseline encounter: Wolves remain 2/2 for the entire game.</div>`;
 }
 function updateModePresentation(){
   const cfg=modeConfig();
@@ -269,10 +269,10 @@ function setBanner(who){
     const timing=currentTimingInfo();
     b.className="turn-banner player sr-only";document.getElementById('tbIco').textContent="🗡️";
     document.getElementById('tbText').textContent=`Your Turn (Turn ${S.turn})`;
-    document.getElementById('tbSub').textContent=`— ${timing.stepLabel}`;
+    document.getElementById('tbSub').textContent=timing.stepLabel;
   }else{
     b.className="turn-banner garruk sr-only";document.getElementById('tbIco').textContent=modeConfig().icon;
-    document.getElementById('tbText').textContent=`${enemyName()}'s Turn (Turn ${S.turn})`;document.getElementById('tbSub').textContent="— respond, then Resolve Enemy Turn";
+    document.getElementById('tbText').textContent=`${enemyName()}'s Turn (Turn ${S.turn})`;document.getElementById('tbSub').textContent="Respond, then Resolve Enemy Turn";
   }
 }
 
