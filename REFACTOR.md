@@ -117,7 +117,7 @@ Or hard refresh: Cmd+Shift+R.
 | `X is not defined` in commander-ui.js | Function should be in ai-commander.js but wasn't extracted | Add it to ai-commander.js |
 | `Cannot read property of null` on `S` | Adventure function called when no game is active | Check `if(!S) return` guard |
 | `Cannot read property of null` on `gameState` | Commander function called before battle starts | Check `if(!gameState) return` guard |
-| Game starts as vanilla Ulvar on load | Stale save in localStorage | Clear localStorage |
+| Game starts as vanilla Garruk on load | Stale save in localStorage | Clear localStorage |
 | Setup screen never appears | `_commanderMain` not set (IIFE crashed) | Check console for earlier error |
 
 ---

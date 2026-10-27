@@ -1,10 +1,10 @@
 # Rivals at the Table — Project Guide
 
-> Working title, defined once as `GAME_TITLE` in `js/data/modes.js`. Entry file: `index.html`.
+> Title defined once as `GAME_TITLE` in `js/data/modes.js`. Entry file: `index.html`.
 
 ## What This Is
 
-A solo card game engine playable via `file://` (no server required). Two modes: **Solo Adventures** (1v1 scripted encounters) and **Commander Battle** (1-4 CPU opponents with full deck simulation). Built with vanilla HTML/CSS/JS — no frameworks, no bundler, no modules.
+A free, unofficial **Magic: The Gathering fan project**: a solo Commander table where the player plays their real paper deck and the app runs 1–4 CPU opponents (**Commander Battle**), plus scripted 1v1 encounters (**Solo Adventures**). Released as a free static web page (itch.io / GitHub Pages) with optional donations — no Steam, no desktop build, no paid content. Plays from `file://` or any static host. Vanilla HTML/CSS/JS — no frameworks, no bundler, no modules, no server.
 
 ## Architecture
 
@@ -13,12 +13,12 @@ index.html                 ← single entry point, loads all scripts in order (b
 styles.css                 ← all styles (themes via CSS variables)
 js/
 ├── data/                  ← PURE DATA. No functions that modify state. No DOM.
-│   ├── modes.js           ← GAME_TITLE + mode configs (name, icon, resource, life, summary)
+│   ├── modes.js           ← GAME_TITLE, FAN_CONTENT_NOTICE, DONATION_URL/SOURCE_URL + mode configs
 │   ├── cards-adventure.js ← Card/unit definitions for adventure encounters
 │   └── decks/             ← One file per commander deck archetype
 │       ├── deck-base.js   ← Shared deck utilities (shuffle, draw, mana math)
-│       ├── gruul-voltron.js ← "Wildheart Armory": Rukha, equipment-focused commander
-│       ├── boros-tokens.js  ← "Dawnmarch Legion": Ysolde, go-wide Soldier tokens
+│       ├── gruul-voltron.js ← "Gruul Voltron": Rukha, equipment-focused commander
+│       ├── boros-tokens.js  ← "Boros Tokens": Ysolde, go-wide Soldier tokens
 │       └── index.js       ← Registry, backward-compat aliases, LEGACY_CARD_NAMES
 │
 ├── engine/                ← GAME LOGIC. May reference globals (S, gameState).
@@ -77,7 +77,14 @@ docs/OVERHAUL_CONTRACT.md  ← engine ↔ UI contract (function shapes, saved st
 
 6. **Load order matters.** A file can only reference globals defined by files loaded BEFORE it in the HTML. Check the script order before adding cross-file calls.
 
-7. **No third-party game IP in user-facing text.** Original card / deck / character names only; say "PW", not the long card-type word. Internal ids, identifiers and CSS classes may keep legacy names.
+7. **Fan Content rules (Wizards of the Coast Fan Content Policy).** The game is free and unofficial:
+   - Real MTG card names, characters, and rules terms (planeswalker, commander, mana…) are fine in text.
+   - Never charge for access or put any feature behind payment. Donations stay optional (`DONATION_URL`); nothing is unlocked by them.
+   - Never ship Wizards' logos, set symbols, mana-symbol artwork, or card images in the repo. Use emoji/original art.
+   - Never imply the project is official or endorsed. Keep `FAN_CONTENT_NOTICE` visible in Settings → About (and on any store page).
+   - Keep the product name original (`GAME_TITLE`); "Magic: The Gathering" is used only descriptively.
+
+8. **Saves live in this browser's localStorage** under `ratt_*` keys (Settings → Export/Import backup moves them). Rename a key only with a `LEGACY_STORAGE_KEYS` migration in `js/engine/state.js`.
 
 ## The IIFE Boundary (commander-ui.js)
 

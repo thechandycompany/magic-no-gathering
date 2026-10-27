@@ -1,5 +1,5 @@
 /* =====================================================================
-   gruul-voltron.js — "Wildheart Armory" deck definition (equipment-focused
+   gruul-voltron.js — "Gruul Voltron" deck definition (equipment-focused
    commander; the file name / id / GRUUL_VOLTRON identifier are kept for save
    compatibility)
 
@@ -26,8 +26,8 @@ var GRUUL_VOLTRON = (function() {
   var cards = {
     // 14 creatures: mostly mana dorks and small utility bodies.
     creatures: [
-      {name: "Mossborn Emissary", ico: "🌱", p: 1, t: 1, cost: 1, kind: "dork", effect: "Adds one mana on future turns.", rampValue: 1},
-      {name: "Thicketborn Scout", ico: "🌿", p: 1, t: 1, cost: 1, kind: "dork", effect: "Adds one mana on future turns.", rampValue: 1},
+      {name: "Llanowar Emissary", ico: "🌱", p: 1, t: 1, cost: 1, kind: "dork", effect: "Adds one mana on future turns.", rampValue: 1},
+      {name: "Fyndhorn Scout", ico: "🌿", p: 1, t: 1, cost: 1, kind: "dork", effect: "Adds one mana on future turns.", rampValue: 1},
       {name: "Arbor Channeler", ico: "🌳", p: 0, t: 3, cost: 2, kind: "dork", effect: "Adds one mana on future turns.", rampValue: 1},
       {name: "Bloodfern Cultivator", ico: "🌺", p: 1, t: 3, cost: 2, kind: "dork", effect: "Adds one mana on future turns.", rampValue: 1},
       {name: "Sylvan Reclaimer", ico: "🍃", p: 1, t: 2, cost: 2, kind: "utility", effect: "When this enters, search your library for a land and put it into your hand."},
@@ -36,10 +36,10 @@ var GRUUL_VOLTRON = (function() {
       {name: "Stampede Elder", ico: "🦬", p: 2, t: 3, cost: 4, kind: "utility", effect: "Other creatures get +1/+0."},
       {name: "Trailguide Ranger", ico: "🏹", p: 2, t: 1, cost: 2, kind: "utility", effect: "Haste.", kws: ["Haste"], haste: true},
       {name: "Wildspark Elemental", ico: "⚡", p: 2, t: 1, cost: 2, kind: "utility", effect: "Haste.", kws: ["Haste"], haste: true},
-      {name: "Ridgeback Gorger", ico: "🐗", p: 2, t: 2, cost: 3, kind: "utility", effect: "No abilities.", kws: []},
+      {name: "Territorial Gorger", ico: "🐗", p: 2, t: 2, cost: 3, kind: "utility", effect: "No abilities.", kws: []},
       {name: "Thornhide Brute", ico: "🦏", p: 2, t: 3, cost: 3, kind: "utility", effect: "No abilities.", kws: []},
-      {name: "Mossback Hydra", ico: "🐉", p: 2, t: 2, cost: 4, kind: "utility", effect: "At the beginning of your upkeep, put a +1/+1 counter on this creature.", kws: []},
-      {name: "Canopy Sentinel", ico: "🌲", p: 1, t: 5, cost: 4, kind: "utility", effect: "Reach.", kws: ["Reach"]}
+      {name: "Primal Hydra", ico: "🐉", p: 2, t: 2, cost: 4, kind: "utility", effect: "At the beginning of your upkeep, put a +1/+1 counter on this creature.", kws: []},
+      {name: "Grove Guardian", ico: "🌲", p: 1, t: 5, cost: 4, kind: "utility", effect: "Reach.", kws: ["Reach"]}
     ],
     // 12 equipment/aura — the gear pipeline for Rukha
     gear: [
@@ -58,49 +58,49 @@ var GRUUL_VOLTRON = (function() {
     ],
     // 10 protection/interaction instants
     protection: [
-      {name: "Bloomshield Ward", cost: 1, effect: "Target creature gets +2/+2 and hexproof until end of turn.", protect: true},
-      {name: "Tanglevine Veil", cost: 1, effect: "Target creature can't be the target of spells this turn. With 2 extra mana: +4/+4.", protect: true},
-      {name: "Wildheart Rally", cost: 2, effect: "Your permanents gain hexproof and indestructible until end of turn.", protect: true, wipeProtect: true},
-      {name: "Warden's Keeping", cost: 1, effect: "Target permanent gains hexproof and indestructible until end of turn.", protect: true},
-      {name: "Ricochet Spark", cost: 4, effect: "Copy target instant or sorcery; you may choose new targets."},
-      {name: "Feral Unmaking", cost: 3, effect: "Destroy target permanent. Its controller creates a 3/3 Beast.", removal: true, ruleRemoval: "any",
+      {name: "Blossoming Defense", cost: 1, effect: "Target creature gets +2/+2 and hexproof until end of turn.", protect: true},
+      {name: "Vines of Vastwood", cost: 1, effect: "Target creature can't be the target of spells this turn. With 2 extra mana: +4/+4.", protect: true},
+      {name: "Heroic Intervention", cost: 2, effect: "Your permanents gain hexproof and indestructible until end of turn.", protect: true, wipeProtect: true},
+      {name: "Tamiyo's Safekeeping", cost: 1, effect: "Target permanent gains hexproof and indestructible until end of turn.", protect: true},
+      {name: "Wild Ricochet", cost: 4, effect: "Copy target instant or sorcery; you may choose new targets."},
+      {name: "Beast Within", cost: 3, effect: "Destroy target permanent. Its controller creates a 3/3 Beast.", removal: true, ruleRemoval: "any",
         removalInstruction: "Destroy {target}. You create a 3/3 green Beast creature token.", removalLeavesToken: {name: "Beast", ico: "🐗", p: 3, t: 3}},
-      {name: "Gore Through", cost: 2, effect: "Target creature you control deals damage equal to its power to target creature you don't control."},
-      {name: "Riftchurn", cost: 3, effect: "Shuffle target permanent into its owner's library; reveal top card.", removal: true, ruleRemoval: "any",
+      {name: "Ram Through", cost: 2, effect: "Target creature you control deals damage equal to its power to target creature you don't control."},
+      {name: "Chaos Warp", cost: 3, effect: "Shuffle target permanent into its owner's library; reveal top card.", removal: true, ruleRemoval: "any",
         removalInstruction: "Shuffle {target} into your library, then reveal the top card; if it's a permanent card, put it onto the battlefield."},
-      {name: "Rot to Root", cost: 2, effect: "Destroy target artifact or enchantment.", ruleRemoval: "artifactEnchantment"},
-      {name: "Arc Deflection", cost: 4, effect: "Change the target of target spell or ability with a single target."}
+      {name: "Return to Nature", cost: 2, effect: "Destroy target artifact or enchantment.", ruleRemoval: "artifactEnchantment"},
+      {name: "Bolt Bend", cost: 4, effect: "Change the target of target spell or ability with a single target."}
     ],
     // 5 card draw / advantage
     draw: [
-      {name: "Tracker's Insight", cost: 3, effect: "Draw cards equal to combat damage dealt by target creature.", draw: {mode: "power", max: 4}},
-      {name: "Grovewise Bounty", cost: 6, effect: "Draw cards equal to greatest power among creatures you control; cast a free spell.", draw: {mode: "power", max: 5}},
-      {name: "Call of the Pack Elder", cost: 5, effect: "Draw cards equal to greatest power, or creatures get +3/+3.", draw: {mode: "power", max: 5}},
-      {name: "Elderbark Counsel", cost: 4, effect: "Draw three cards.", draw: {mode: "fixed", count: 3}},
-      {name: "Feral Offering", cost: 4, effect: "Sacrifice a creature: draw cards equal to its power, then discard 3.", draw: {mode: "sacrifice", discard: 3}}
+      {name: "Hunter's Insight", cost: 3, effect: "Draw cards equal to combat damage dealt by target creature.", draw: {mode: "power", max: 4}},
+      {name: "Rishkar's Expertise", cost: 6, effect: "Draw cards equal to greatest power among creatures you control; cast a free spell.", draw: {mode: "power", max: 5}},
+      {name: "Return of the Wildspeaker", cost: 5, effect: "Draw cards equal to greatest power, or creatures get +3/+3.", draw: {mode: "power", max: 5}},
+      {name: "Harmonize", cost: 4, effect: "Draw three cards.", draw: {mode: "fixed", count: 3}},
+      {name: "Greater Good", cost: 4, effect: "Sacrifice a creature: draw cards equal to its power, then discard 3.", draw: {mode: "sacrifice", discard: 3}}
     ],
     // 4 haymakers / board control
     haymakers: [
-      {name: "Thunderhoof Stampede", cost: 5, effect: "All your creatures get +X/+X and trample until end of turn, where X is the greatest power among them.", haymaker: "pumpTeam"},
-      {name: "Cinderstorm Rite", cost: 9, effect: "Deal 13 damage to each creature. Costs 1 less for each creature on the battlefield.", scaleCost: true, haymaker: "damageEach", damage: 13},
-      {name: "Cascading Sparks", cost: 4, effect: "Deal damage to each creature equal to the number of creatures on the battlefield.", haymaker: "damageEach", damage: "creatureCount"},
-      {name: "Wildfire Conduit", cost: 5, effect: "Target creature you control deals damage equal to its power to each other creature and each opponent.", haymaker: "ignition"}
+      {name: "Overwhelming Stampede", cost: 5, effect: "All your creatures get +X/+X and trample until end of turn, where X is the greatest power among them.", haymaker: "pumpTeam"},
+      {name: "Blasphemous Act", cost: 9, effect: "Deal 13 damage to each creature. Costs 1 less for each creature on the battlefield.", scaleCost: true, haymaker: "damageEach", damage: 13},
+      {name: "Chain Reaction", cost: 4, effect: "Deal damage to each creature equal to the number of creatures on the battlefield.", haymaker: "damageEach", damage: "creatureCount"},
+      {name: "Chandra's Ignition", cost: 5, effect: "Target creature you control deals damage equal to its power to each other creature and each opponent.", haymaker: "ignition"}
     ],
     // 6 misc utility (card selection, recursion, value engines)
     utility: [
-      {name: "Rootbound Remembrancer", cost: 3, effect: "When this enters, return a card from your graveyard to your hand.", isCreature: true, p: 2, t: 1, regrowth: true},
-      {name: "Loamcall Recovery", cost: 2, effect: "Return target card from your graveyard to your hand.", regrowth: true},
-      {name: "Brash Gamble", cost: 2, effect: "Exile the top two cards; you may play them this turn.", draw: {mode: "fixed", count: 1}},
-      {name: "Frontier Watchpost", cost: 4, effect: "At the beginning of your upkeep, exile top card; you may play it this turn.",
+      {name: "Eternal Witness", cost: 3, effect: "When this enters, return a card from your graveyard to your hand.", isCreature: true, p: 2, t: 1, regrowth: true},
+      {name: "Regrowth", cost: 2, effect: "Return target card from your graveyard to your hand.", regrowth: true},
+      {name: "Reckless Impulse", cost: 2, effect: "Exile the top two cards; you may play them this turn.", draw: {mode: "fixed", count: 1}},
+      {name: "Outpost Siege", cost: 4, effect: "At the beginning of your upkeep, exile top card; you may play it this turn.",
         permanent: {effect: "upkeepCard", types: ["Enchantment"]}},
-      {name: "Beastkeeper's Codex", cost: 3, effect: "At upkeep, scry 1. Whenever you cast a creature, draw a card.",
+      {name: "Lifecrafter's Bestiary", cost: 3, effect: "At upkeep, scry 1. Whenever you cast a creature, draw a card.",
         permanent: {effect: "creatureDraw", types: ["Artifact"]}},
-      {name: "Bonelatch Clamp", cost: 1, effect: "Equipped creature gets +1/-1. When it dies, draw two cards.",
+      {name: "Skullclamp", cost: 1, effect: "Equipped creature gets +1/-1. When it dies, draw two cards.",
         permanent: {effect: "none", types: ["Artifact", "Equipment"]}}
     ],
     // 2 board wipes (from commander.js multiplayer extension)
     boardwipes: [
-      {name: "Ruin of the Wilds", cost: 6, effect: "Destroy all creatures. They can't be regenerated.", wipeType: "symmetric"},
+      {name: "Wrath of the Wilds", cost: 6, effect: "Destroy all creatures. They can't be regenerated.", wipeType: "symmetric"},
       {name: "Savage Decree", cost: 8, effect: "Destroy all creatures target player controls.", wipeType: "targeted"}
     ]
   };
@@ -112,7 +112,7 @@ var GRUUL_VOLTRON = (function() {
   // Base composition (51 "other" cards for solo adventure mode)
   var deckCompositionBase = {creatures: 14, gear: 12, protection: 10, draw: 5, haymakers: 4, utility: 6};
   // Multiplayer composition (51 "other" cards — adds 2 boardwipes, so one
-  // protection spell (Arc Deflection) and one utility card (Bonelatch Clamp) are cut)
+  // protection spell (Bolt Bend) and one utility card (Skullclamp) are cut)
   var deckComposition = {creatures: 14, gear: 12, protection: 9, draw: 5, haymakers: 4, utility: 5, boardwipes: 2};
 
   /* --- CPU identities for multiplayer --- */
@@ -177,7 +177,7 @@ var GRUUL_VOLTRON = (function() {
   /* --- Public deck object --- */
   return {
     id: "gruul-voltron",
-    name: "Wildheart Armory",
+    name: "Gruul Voltron",
     archetype: "voltron",
     commander: commander,
     color: "#c0392b",

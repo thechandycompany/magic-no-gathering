@@ -214,7 +214,7 @@ function renderEnemyTurnInputs(){
         {value:"dies",label:"Target dies"},{value:"protected",label:"I protected it"}
       ])}${input.slayOutcome==="dies"?numberFieldHtml("slayToughness","Destroyed creature's toughness","",null,"Added to the enemy's loyalty."):""}</div>`;
     }else{
-      const label=S.pendingDecl==="conclaveWipe"?"Prismatic Ruin":"Reckoning of the Wild";
+      const label=S.pendingDecl==="conclaveWipe"?"Prismatic Ruin":"Overrun the Weak";
       actionHtml=`<div class="context-section"><div class="context-section-title">${label}</div>${outcomeChoiceHtml("wipeOutcome",[
         {value:"wiped",label:"Resolve the board clear"},{value:"protected",label:"I protected my board"}
       ])}${input.wipeOutcome==="wiped"?numberFieldHtml("wipeSurvivors","Your creatures that survive","Defaults to zero.",S.player.creatures):""}</div>`;
@@ -397,15 +397,15 @@ function resolveEnemyTurnInputs(input){
   // Enemy abilities resolve before combat.
   if(S.pendingDecl==="slay"){
     if(input.slayOutcome==="protected"){
-      logP("You protect the targeted creature — Slay is negated after Ulvar spends 10 loyalty.");
+      logP("You protect the targeted creature — Slay is negated after Garruk spends 10 loyalty.");
     }else if(S.player.creatures>0){
       adjust("creatures",-1);
       gainLoyalty(input.slayToughness);
-      logP(`The targeted creature dies; Ulvar gains ${input.slayToughness} loyalty → ${S.loyalty}.`);
+      logP(`The targeted creature dies; Garruk gains ${input.slayToughness} loyalty → ${S.loyalty}.`);
     }
   }
   if(S.pendingDecl==="wipe"||S.pendingDecl==="conclaveWipe"){
-    const label=S.pendingDecl==="conclaveWipe"?"Prismatic Ruin":"Reckoning of the Wild";
+    const label=S.pendingDecl==="conclaveWipe"?"Prismatic Ruin":"Overrun the Weak";
     if(input.wipeOutcome==="protected")logP(`Your creatures survive ${label}.`);
     else{
       setStat("creatures",input.wipeSurvivors);

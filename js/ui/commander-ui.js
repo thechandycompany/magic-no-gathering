@@ -122,7 +122,8 @@ function renderSetupScreen(onStartAdventure, onStartCommander) {
       <div class="theme-btns" id="themeBtns">
         ${themePickerButtonsHtml()}
       </div>
-    </div>`;
+    </div>
+    <p class="setup-fan-note">Free, unofficial fan project — not approved or endorsed by Wizards of the Coast.${externalUrl(DONATION_URL)?` <a href="${externalUrl(DONATION_URL)}" target="_blank" rel="noopener noreferrer">Support development</a>`:""}</p>`;
   overlay.classList.add("show");
 
   const persist=()=>saveCommanderSetup(setup);
@@ -550,11 +551,11 @@ function renderPlayerBoardView(state,board,totalViews){
       ${stat("handSize","Hand",p.handSize||0,(p.handSize||0)>7)}
       ${stat("librarySize","Library",p.librarySize||0,(p.librarySize||0)<=5)}
       ${stat("poison","Poison",p.poison||0,(p.poison||0)>=7)}
-      <div class="cbs-item"><span class="cbs-label">PWs</span><span class="cbs-val">⬡ ${pws.length}</span></div>
+      <div class="cbs-item"><span class="cbs-label">Planeswalkers</span><span class="cbs-val">⬡ ${pws.length}</span></div>
       <div class="cbs-item"><span class="cbs-label">Graveyard</span><button type="button" class="cbs-zone-btn" data-graveyard-owner="player">⚰ ${p.graveyardCount}</button></div>
       <div class="cbs-item"><span class="cbs-label">Exile</span><button type="button" class="cbs-zone-btn" data-exile-owner="player">✦ ${p.exileCount}</button></div>
     </div></div>
-    <div class="field-col"><div class="field-h"><span class="lbl">Your battlefield</span><button class="btn-ghost" data-pw-add type="button">+ PW</button></div><div class="tokens">${pwHtml}${playerTokensHtml}</div></div></div></div>`;
+    <div class="field-col"><div class="field-h"><span class="lbl">Your battlefield</span><button class="btn-ghost" data-pw-add type="button">+ Planeswalker</button></div><div class="tokens">${pwHtml}${playerTokensHtml}</div></div></div></div>`;
 
   document.getElementById('prevOppBtn').onclick=()=>{state.viewTarget=state.opponents.length-1;renderBoardView(state);};
   document.getElementById('nextOppBtn').onclick=()=>{state.viewTarget=0;renderBoardView(state);};
@@ -578,12 +579,12 @@ function renderAllView(state,board){
   const planeswalkers=player.planeswalkers||[];
   const playerPlaneswalkersHtml=planeswalkers.length
     ?`<div class="all-pw-list">${planeswalkers.map(pw=>`<div class="all-pw-card"><span class="all-pw-name" title="${escapeHtml(pw.name)}">⬡ ${escapeHtml(pw.name)}</span><div class="all-pw-controls"><button type="button" class="cbs-btn" data-pw-loyalty="${pw.id}" data-d="-1" aria-label="Decrease ${escapeHtml(pw.name)} loyalty">−</button><span class="all-pw-loyalty">${pw.loyalty}</span><button type="button" class="cbs-btn" data-pw-loyalty="${pw.id}" data-d="1" aria-label="Increase ${escapeHtml(pw.name)} loyalty">+</button><button type="button" class="all-pw-remove" data-pw-remove="${pw.id}" title="Remove ${escapeHtml(pw.name)} from the battlefield" aria-label="Remove ${escapeHtml(pw.name)}">✕</button></div></div>`).join('')}</div>`
-    :'<span class="all-pw-empty">No PWs on your battlefield.</span>';
+    :'<span class="all-pw-empty">No planeswalkers on your battlefield.</span>';
   let html=`<div class="board-h"><span class="ico">⊞</span><span>All Players</span><div class="view-controls"><button class="btn-ghost view-btn" id="singleViewBtn" title="Open the active player view" aria-label="Open the active player view">◻</button></div></div><div class="all-opponents-grid">`;
   html+=`<div class="all-opp-card player-card" data-idx="-1" style="border-color:var(--gold-dim)">
     <div class="all-opp-header"><span>🗡️</span><span class="all-opp-name">You</span><span class="all-opp-life">${player.life}</span></div>
-    <div class="all-opp-body"><span>♟ ${plural(player.creatures,"creature")}</span><span>⬡ ${plural(planeswalkers.length,"PW")}</span><span title="Cards in hand">🃏 ${player.handSize||0} in hand</span><span title="Cards in library">📚 ${player.librarySize||0} in library</span><span>⚰ ${player.graveyardCount}</span>${(player.poison||0)>0?`<span>☣ ${player.poison}/10 poison</span>`:`<span>✦ ${player.exileCount}</span>`}</div>
-    <div class="all-opp-pws"><div class="all-pw-heading"><span>PWs</span><button type="button" class="all-pw-add" data-pw-add>+ Add</button></div>${playerPlaneswalkersHtml}</div>
+    <div class="all-opp-body"><span>♟ ${plural(player.creatures,"creature")}</span><span>⬡ ${plural(planeswalkers.length,"planeswalker")}</span><span title="Cards in hand">🃏 ${player.handSize||0} in hand</span><span title="Cards in library">📚 ${player.librarySize||0} in library</span><span>⚰ ${player.graveyardCount}</span>${(player.poison||0)>0?`<span>☣ ${player.poison}/10 poison</span>`:`<span>✦ ${player.exileCount}</span>`}</div>
+    <div class="all-opp-pws"><div class="all-pw-heading"><span>Planeswalkers</span><button type="button" class="all-pw-add" data-pw-add>+ Add</button></div>${playerPlaneswalkersHtml}</div>
   </div>`;
   state.opponents.forEach((opp,i)=>{
     const dead=isOpponentDead(opp);const commander=commanderOnField(opp);
@@ -686,7 +687,7 @@ function askCommanderRemovalDestination(token){
 function askPlaneswalkerName(){
   return new Promise(res=>{
     inputResolver=res;
-    openInputDialog({title:"Add PW",okLabel:"Next",bodyHtml:`<div class="confirm-msg"><label class="cmd-text-field">PW name<input type="text" id="pwNameInput" placeholder="e.g. Mirelle, Storm Seer" maxlength="60"></label></div>`});
+    openInputDialog({title:"Add Planeswalker",okLabel:"Next",bodyHtml:`<div class="confirm-msg"><label class="cmd-text-field">Planeswalker name<input type="text" id="pwNameInput" placeholder="e.g. Jace, the Mind Sculptor" maxlength="60"></label></div>`});
     const done=()=>{const v=document.getElementById('pwNameInput').value.trim();closeInput();res(v||null);};
     document.getElementById('inputOk').onclick=done;
     document.getElementById('pwNameInput').onkeydown=e=>{if(e.key==="Enter"){e.preventDefault();done();}};
@@ -719,7 +720,7 @@ function askPlayerRemovalChoice(opp,action){
       <div class="cmd-dialog-steppers">
         <div class="inline-stepper"><label>Creatures you lose</label><button type="button" data-dlg="lost" data-delta="-1">−</button><input type="number" id="dlgLost" min="0" max="${player.creatures}" value="${defaultLost}"><button type="button" data-dlg="lost" data-delta="1">+</button></div>
         ${action.type==="removal"?`<div class="inline-stepper"><label>Creature tokens you create</label><button type="button" data-dlg="gained" data-delta="-1">−</button><input type="number" id="dlgGained" min="0" max="20" value="${defaultGained}"><button type="button" data-dlg="gained" data-delta="1">+</button></div>`:""}
-        ${action.type==="removal"&&pws.length?`<div class="cmd-dialog-pws"><span>PW removed</span>${pws.map(pw=>`<label><input type="checkbox" data-dlg-pw="${pw.id}"> ⬡ ${escapeHtml(pw.name)} (${pw.loyalty})</label>`).join("")}</div>`:""}
+        ${action.type==="removal"&&pws.length?`<div class="cmd-dialog-pws"><span>Planeswalker removed</span>${pws.map(pw=>`<label><input type="checkbox" data-dlg-pw="${pw.id}"> ⬡ ${escapeHtml(pw.name)} (${pw.loyalty})</label>`).join("")}</div>`:""}
       </div>`});
     body.querySelectorAll('[data-dlg]').forEach(btn=>{btn.onclick=()=>{
       const inp=btn.parentElement.querySelector('input');const mx=parseInt(inp.max)||0;
@@ -1207,7 +1208,7 @@ function renderCpuWindowForm(){
     const title=pw?`${oppName} attacks ⬡ ${escapeHtml(pw.name)} (${pw.loyalty}) for ${result.attackPower}`:`${oppName} attacks you for ${result.attackPower}`;
     const edited=Object.keys(draft.overrides).length>0;
     html+=responseStepHtml(stepNo++,"damage",title,
-      `Calculated from unblocked attackers${pw?" and aimed at your PW":""}. Adjust for effects the app does not track.${edited?` <button type="button" class="btn-quiet" id="resetDamageBtn">Use calculated values</button>`:""}`,
+      `Calculated from unblocked attackers${pw?" and aimed at your planeswalker":""}. Adjust for effects the app does not track.${edited?` <button type="button" class="btn-quiet" id="resetDamageBtn">Use calculated values</button>`:""}`,
       `<div class="commander-player-actions">
         ${pw?stepperHtml("damageToPW",`Damage to ⬡ ${escapeHtml(pw.name)}`,val("damageToPW",raw.pwDamage)):""}
         ${stepperHtml("damageToPlayer","Damage to you",val("damageToPlayer",raw.playerDamage))}
@@ -1272,7 +1273,7 @@ function cpuWindowPreviewText(opp,result){
   const p=previewCpuResponse(opp,result,r);
   const parts=[p.countered&&`Counter ${p.countered}`,p.removed&&`Remove ${p.removed}`,p.blocked&&`Block ${p.blocked}`];
   if(p.attack){
-    if(p.attack.pwDamage)parts.push(`⬡ ${p.attack.planeswalker?nm(p.attack.planeswalker):"PW"} takes ${p.attack.pwDamage}`);
+    if(p.attack.pwDamage)parts.push(`⬡ ${p.attack.planeswalker?nm(p.attack.planeswalker):"Planeswalker"} takes ${p.attack.pwDamage}`);
     if(p.attack.playerDamage||!p.attack.pwDamage)parts.push(`Take ${p.attack.playerDamage}${p.attack.commanderDamage?` (${p.attack.commanderDamage} commander)`:""}`);
     if(p.attack.prevented)parts.push(`${p.attack.prevented} prevented`);
   }
@@ -1491,13 +1492,13 @@ function buildBattlefieldRulesPanel(){
   const activeHtml=active.length
     ?active.map(rule=>`<li class="battlefield-rule-item"><div><strong>${escapeHtml(rule.sourceName||"Unnamed battlefield rule")}</strong><span>${escapeHtml(battlefieldRuleLabel(rule))}</span></div><button type="button" class="battlefield-rule-remove" data-rule-remove-id="${rule.id}">Remove</button></li>`).join("")
     :"<li class=\"battlefield-rule-empty\">No persistent CPU rules are active.</li>";
-  return `<details class="rules-disclosure" id="battlefieldRulesDisclosure"${battlefieldRulesOpen?" open":""}><summary><span>🛡 Battlefield Rules ${helpTip("Ongoing effects you control that restrict the CPUs, such as an artifact-lockdown enchantment. CPUs follow them automatically.")}${active.length?` <em class="rules-count">${active.length} active</em>`:""}</span><small></small></summary>
+  return `<details class="rules-disclosure" id="battlefieldRulesDisclosure"${battlefieldRulesOpen?" open":""}><summary><span>🛡 Battlefield Rules ${helpTip("Ongoing effects you control that restrict the CPUs, such as Stony Silence. CPUs follow them automatically.")}${active.length?` <em class="rules-count">${active.length} active</em>`:""}</span><small></small></summary>
   <section class="battlefield-rules-panel" aria-label="Battlefield Rules and Permissions">
     <div class="battlefield-rules-heading"><small>Track effects on your own permanents at the table.</small></div>
     <div class="battlefield-rule-builder">
       <div class="player-action-grid">
         <label>Rule<select id="battlefieldRuleType">${battlefieldRuleTypeOptions(draft.kind)}</select></label>
-        <label>Source name (optional)<input type="text" id="battlefieldRuleSource" maxlength="80" value="${escapeHtml(draft.sourceName)}" placeholder="e.g. Iron Hush Ward"></label>
+        <label>Source name (optional)<input type="text" id="battlefieldRuleSource" maxlength="80" value="${escapeHtml(draft.sourceName)}" placeholder="e.g. Stony Silence"></label>
         <label>Source type<select id="battlefieldRuleSourceType"><option value="Enchantment" ${draft.sourceType==="Enchantment"?"selected":""}>Enchantment</option><option value="Artifact" ${draft.sourceType==="Artifact"?"selected":""}>Artifact</option><option value="Rule" ${draft.sourceType==="Rule"?"selected":""}>Other / rule</option></select></label>
         ${needsAmount?`<label>${battlefieldRuleAmountLabel(draft.kind)}<input type="number" id="battlefieldRuleAmount" min="${amountMinimum}" max="99" value="${amountValue}"></label>`:""}
         ${needsStats?`<label>${statsAreReductions?"Power reduction":"Power"}<input type="number" id="battlefieldRulePower" min="${statMinimum}" max="20" value="${powerValue}"></label><label>${statsAreReductions?"Toughness reduction":"Toughness"}<input type="number" id="battlefieldRuleToughness" min="${statMinimum}" max="20" value="${toughnessValue}"></label>`:""}

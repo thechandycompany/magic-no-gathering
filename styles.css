@@ -1260,3 +1260,10 @@ header.app-bar{
 @media(max-width:430px){.opp-summary{grid-template-columns:1fr;} .difficulty-name{font-size:8.5px;}}
 .setup-modal{max-height:96vh; overflow:auto;}
 @media(min-width:621px){.setup-columns{grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);}}
+
+/* ===== Fan project: About, notice, backup ===== */
+.settings-about .fan-notice{margin:0; font-size:11px; line-height:1.45; color:var(--muted);}
+.settings-links{display:flex; flex-wrap:wrap; gap:8px;}
+.settings-links a[hidden]{display:none;}
+.setup-fan-note{margin-top:14px; font-size:10.5px; color:var(--muted); text-align:center;}
+.setup-fan-note a{color:var(--gold);}

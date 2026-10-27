@@ -83,10 +83,10 @@ function showSetup(){
     <div class="big-ico">🎴</div><h2>Choose an encounter</h2>
     <p>Five solo modes. You start at 40 life.</p>
     <div class="mode-grid" role="radiogroup" aria-label="Encounter mode">
-      <label class="mode-option"><input type="radio" name="encounterMode" value="vanilla" checked><div class="mode-card"><div class="mode-title">🐺 Easy Ulvar</div><div class="mode-desc">Steady Wolves and cautious removal.</div><span class="mode-tag">Baseline</span></div></label>
-      <label class="mode-option"><input type="radio" name="encounterMode" value="hard"><div class="mode-card"><div class="mode-title">🔥 Hard Ulvar</div><div class="mode-desc">Scaling Wolves and aggressive removal.</div><span class="mode-tag">Escalating</span></div></label>
+      <label class="mode-option"><input type="radio" name="encounterMode" value="vanilla" checked><div class="mode-card"><div class="mode-title">🐺 Easy Garruk</div><div class="mode-desc">Steady Wolves and cautious removal.</div><span class="mode-tag">Baseline</span></div></label>
+      <label class="mode-option"><input type="radio" name="encounterMode" value="hard"><div class="mode-card"><div class="mode-title">🔥 Hard Garruk</div><div class="mode-desc">Scaling Wolves and aggressive removal.</div><span class="mode-tag">Escalating</span></div></label>
       <label class="mode-option"><input type="radio" name="encounterMode" value="horde"><div class="mode-card"><div class="mode-title">🧟 Horde Mode</div><div class="mode-desc">Survive growing waves and empty the deck.</div><span class="mode-tag">Survival</span></div></label>
-      <label class="mode-option"><input type="radio" name="encounterMode" value="conclave"><div class="mode-card"><div class="mode-title">✦ Arcane Conclave</div><div class="mode-desc">Break a randomized network of synergies.</div><span class="mode-tag">Puzzle</span></div></label>
+      <label class="mode-option"><input type="radio" name="encounterMode" value="conclave"><div class="mode-card"><div class="mode-title">✦ Aether Conclave</div><div class="mode-desc">Break a randomized network of synergies.</div><span class="mode-tag">Puzzle</span></div></label>
       <label class="mode-option"><input type="radio" name="encounterMode" value="voltron"><div class="mode-card commander-mode"><div class="mode-title">🪓 ${modeDisplayName(MODES.voltron)}</div><div class="mode-desc">Stop a ramping commander before 21 commander damage gets through.</div><span class="mode-tag">Commander</span></div></label>
     </div>
     <button class="cta" onclick="beginGame()">Begin Encounter</button>`;
@@ -141,6 +141,10 @@ function wire(){
   document.getElementById('portrait').onkeydown=event=>{if(event.key==="Enter"||event.key===" "){event.preventDefault();showModeRules();}};
   document.getElementById('infoClose').onclick=closeInfoModal;
   document.getElementById('logBtn').onclick=()=>{closeSettings();openLog();};
+  document.getElementById('exportBackupBtn').onclick=exportBackup;
+  const backupFile=document.getElementById('importBackupFile');
+  document.getElementById('importBackupBtn').onclick=()=>{backupFile.value="";backupFile.click();};
+  backupFile.onchange=()=>{closeSettings();readBackupFile(backupFile.files&&backupFile.files[0]);};
   document.getElementById('logClose').onclick=closeLog;
   // Click/tap on the dimmed backdrop closes the popup. The press must also START on the
   // backdrop, so dragging a text selection out of a dialog doesn't close it.
@@ -192,7 +196,69 @@ window._adventureEngine = {
 function applyGameTitle(){
   document.title=`${GAME_TITLE} — Solo Encounter Engine`;
   const h=document.getElementById('brandTitle');if(h)h.textContent=GAME_TITLE;
+  applyAboutInfo();
 }
+
+/* ===== ABOUT: fan-content notice + optional links (constants in js/data/modes.js) ===== */
+function externalUrl(url){return typeof url==="string"&&/^https:\/\//.test(url)?url:"";}
+function applyAboutInfo(){
+  const notice=document.getElementById('fanNotice');
+  if(notice)notice.textContent=FAN_CONTENT_NOTICE;
+  const title=document.getElementById('aboutTitle');
+  if(title)title.textContent=`${GAME_TITLE} — a free fan project`;
+  [['donateLink',DONATION_URL],['sourceLink',SOURCE_URL]].forEach(([id,url])=>{
+    const link=document.getElementById(id);if(!link)return;
+    const safe=externalUrl(url);
+    link.hidden=!safe;
+    if(safe)link.href=safe;else link.removeAttribute('href');
+  });
+}
+
+/* ===== BACKUP: export / import every ratt_* key (saves + settings) =====
+   The web version keeps everything in this browser's localStorage, so clearing
+   site data erases it. A backup file is the only way to move or restore a game. */
+var BACKUP_APP_ID="rivals-at-the-table";
+var BACKUP_KEY_PREFIX="ratt_";
+function exportBackup(){
+  const data={};
+  try{
+    for(let i=0;i<localStorage.length;i++){
+      const key=localStorage.key(i);
+      if(key&&key.indexOf(BACKUP_KEY_PREFIX)===0)data[key]=localStorage.getItem(key);
+    }
+  }catch(e){toast("Backups need browser storage, which is unavailable here");return;}
+  if(!Object.keys(data).length){toast("Nothing to back up yet");return;}
+  const payload={app:BACKUP_APP_ID,format:1,exportedAt:new Date().toISOString(),data};
+  const blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"});
+  const link=document.createElement('a');
+  link.href=URL.createObjectURL(blob);
+  link.download=`${BACKUP_APP_ID}-backup-${new Date().toISOString().slice(0,10)}.json`;
+  document.body.appendChild(link);link.click();link.remove();
+  setTimeout(()=>URL.revokeObjectURL(link.href),1000);
+  toast("Backup downloaded");
+}
+function readBackupFile(file){
+  if(!file)return;
+  const reader=new FileReader();
+  reader.onload=async()=>{
+    let payload=null;
+    try{payload=JSON.parse(reader.result);}catch(e){}
+    const data=payload&&payload.app===BACKUP_APP_ID&&payload.data&&typeof payload.data==="object"?payload.data:null;
+    // Only this game's keys, only string values
+    const entries=data?Object.entries(data).filter(([key,value])=>key.indexOf(BACKUP_KEY_PREFIX)===0&&typeof value==="string"):[];
+    if(!entries.length){toast("That file is not a valid backup");return;}
+    const when=payload.exportedAt?new Date(payload.exportedAt).toLocaleString():"an unknown date";
+    const ok=await askConfirm("Restore backup?",`This replaces the saved game and settings on this device with the backup from <strong>${escapeHtmlText(when)}</strong>.`,"Restore","Cancel");
+    if(!ok)return;
+    try{
+      Object.keys(localStorage).filter(key=>key.indexOf(BACKUP_KEY_PREFIX)===0).forEach(key=>localStorage.removeItem(key));
+      entries.forEach(([key,value])=>localStorage.setItem(key,value));
+    }catch(e){toast("Could not write to browser storage");return;}
+    location.reload();
+  };
+  reader.readAsText(file);
+}
+function escapeHtmlText(text){return String(text).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
 function bootGame(){
   console.log("[BOOT] bootGame called. _commanderMain:", !!window._commanderMain);
   applyGameTitle();

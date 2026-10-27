@@ -124,7 +124,7 @@ function bumpAiStat(key,amount){const stats=aiStats();stats[key]=(stats[key]||0)
 /* ---------- opponent creation ---------- */
 /**
  * Creates CPU seat `index` playing deck `deckId` (an id in DECK_REGISTRY;
- * missing / unknown → Wildheart Armory). The seat's name, icon and colour come
+ * missing / unknown → Gruul Voltron). The seat's name, icon and colour come
  * from that deck's cpuNames[index]. The legacy call shape
  * createOpponent(index, settings) is still accepted.
  */
@@ -452,7 +452,7 @@ function applyHomeGuard(opp,attackers,allPlayers,settings,target){
 /**
  * Decides whether a CPU should redirect its attack to one of the player's
  * planeswalkers instead of the player's life total (attackers may target
- * PWs). CPUs do this when:
+ * planeswalkers). CPUs do this when:
  * - The player has a planeswalker with meaningful loyalty
  * - The planeswalker hasn't already been reduced to low loyalty
  * - Random chance (not every turn — sometimes face is still better)
@@ -1171,7 +1171,7 @@ function removalInstructionText(card,what){
 }
 /**
  * Spot removal (card.removal) aimed at the archenemy's best
- * threat. Player archenemy → a playerRemoval instruction (PW first,
+ * threat. Player archenemy → a playerRemoval instruction (planeswalker first,
  * else the most threatening creature). CPU archenemy → its commander when it
  * is a real threat (8+ power, or 12+ commander damage dealt to this CPU);
  * that CPU may answer with a held protection spell (cpuRespondToRemoval).
@@ -1191,7 +1191,7 @@ function tryCpuRemoval(opp,mana,allPlayers,turnSpellState){
     addOpponentGraveyardCard(opp,typedGraveyardCard(card.card));
     const pw=[...(archenemy.planeswalkers||[])].sort((a,b)=>(b.loyalty||0)-(a.loyalty||0))[0];
     const best=playerCreatureProfile(archenemy).filter(t=>t.name!=="Creature").sort((a,b)=>(b.p||0)-(a.p||0))[0];
-    const what=pw?`${pw.name||"your highest-loyalty PW"} (your highest-loyalty PW)`:best?`${best.name} (your most threatening creature)`:"your most threatening creature";
+    const what=pw?`${pw.name||"your highest-loyalty planeswalker"} (your highest-loyalty planeswalker)`:best?`${best.name} (your most threatening creature)`:"your most threatening creature";
     const instruction=removalInstructionText(card.card,what);
     bumpAiStat("playerRemovals");
     return {action:{label:`Cast ${card.card.name} targeting you`,detail:`${card.card.effect} You are leading the table.`,cardName:card.card.name,type:"removal",counterable:true,
@@ -1290,7 +1290,7 @@ function untapOpponent(opp){
   clearTemporaryPumps(opp);
   opp.tokens.forEach(token=>{
     token.attacking=false;token.tapped=false;token.summoningSick=false;
-    // Upkeep triggers modelled: "+1/+1 counter at the beginning of your upkeep" (Mossback Hydra).
+    // Upkeep triggers modelled: "+1/+1 counter at the beginning of your upkeep" (Primal Hydra).
     if(token.effect&&/upkeep, put a \+1\/\+1 counter/i.test(token.effect)){token.baseP=(token.baseP||0)+1;token.baseT=(token.baseT||0)+1;}
   });
   opp.heldMana=0;
@@ -1326,7 +1326,7 @@ function protectionReserve(opp,mana,settings){
  * createMainPhaseContext for ctx). The shared wipe / haymaker / removal
  * policies are ctx steps the hook calls in its own order; the discard to
  * hand size is shared in executeOpponentEndStep.
- * Wildheart Armory's hook: ONE primary action (commander / fast mana / ramp, or
+ * Gruul Voltron's hook: ONE primary action (commander / fast mana / ramp, or
  * gear when the commander is out), loose equipment re-equips, then AT MOST
  * ONE secondary cast (board wipe, haymaker, removal, creature, draw/utility
  * spell). With the commander out and 6+ mana it keeps 1-2 mana open for a
@@ -1497,7 +1497,7 @@ function castBestTokenMaker(opp,mana,actions,turnSpellState){
   return mana;
 }
 
-/** Wildheart Armory's secondary priority (castOneSecondarySpell's default order). */
+/** Gruul Voltron's secondary priority (castOneSecondarySpell's default order). */
 var VOLTRON_SECONDARY_STEPS=["wipe","haymaker","removalVsCpu","extraGear","creature","fallbackRamp","spell","removalVsPlayer"];
 /** Every step name castSecondary understands. */
 var SECONDARY_STEP_NAMES=VOLTRON_SECONDARY_STEPS.concat(["tokenMaker"]);
@@ -1627,7 +1627,7 @@ function executeOpponentCombat(opp, allPlayers){
   const state=liveGameState();
   if(state)state.aiActiveOppId=opp.id;
   const settings=cpuSettings(state);
-  // Beginning of combat: commander token triggers (e.g. Dawnmarch Legion).
+  // Beginning of combat: commander token triggers (e.g. Boros Tokens).
   const trigger=applyBeginCombatTriggers(opp);
   if(trigger)actions.push(trigger);
 
@@ -1671,7 +1671,7 @@ function executeOpponentCombat(opp, allPlayers){
     let attackDetail=`${attackerCount} attacker${attackerCount===1?"":"s"}${heldText} · Target choice: ${deckStrategyLabels(opp)[opp.currentStrategy]}.`;
     if(planeswalkerTarget){
       attackLabel=`Attack ${planeswalkerTarget.name} (⬡ ${planeswalkerTarget.loyalty}) for ${attackPower}`;
-      attackDetail=`Targeting your PW · ${attackerCount} attacker${attackerCount===1?"":"s"}${heldText} · Target choice: ${deckStrategyLabels(opp)[opp.currentStrategy]}.`;
+      attackDetail=`Targeting your planeswalker · ${attackerCount} attacker${attackerCount===1?"":"s"}${heldText} · Target choice: ${deckStrategyLabels(opp)[opp.currentStrategy]}.`;
     }
     actions.push({label:attackLabel,detail:attackDetail,type:"attack",attackerUids:attackers.map(t=>t.uid),target,lethal:!!(plan&&plan.lethal)});
   }
@@ -1728,7 +1728,7 @@ function executeOpponentTurn(opp, allPlayers) {
  */
 /**
  * Deck id per CPU seat from settings.decks:
- *   undefined / null   every seat plays the default deck (Wildheart Armory)
+ *   undefined / null   every seat plays the default deck (Gruul Voltron)
  *   "mixed"            random registry decks, distinct while there are enough
  *                      (shuffled registry, then cycled)
  *   "<deck id>"        every seat plays that deck

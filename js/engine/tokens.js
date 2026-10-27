@@ -5,7 +5,7 @@
  * computation for enemy battlefield tokens (wolves, horde units,
  * conclave synergy units, voltron commander/support). Also contains
  * the Voltron mana-model and deck-draw simulation, support-card
- * casting AI, and the Ulvar slay-target picker.
+ * casting AI, and the Garruk slay-target picker.
  *
  * Globals expected (loaded before this file):
  *   S, MODES, CONCLAVE_UNITS, VOLTRON_COMMANDER, VOLTRON_CARDS,
@@ -18,7 +18,7 @@ var SLAY_TARGETS = [
   "your commander, if it can be targeted","your highest-toughness creature","your biggest threat on the battlefield",
   "your most valuable creature (best abilities)","the creature that is hardest for you to replace"
 ];
-function ulvarSlayTarget(){ return SLAY_TARGETS[Math.floor(Math.random()*SLAY_TARGETS.length)]; }
+function garrukSlayTarget(){ return SLAY_TARGETS[Math.floor(Math.random()*SLAY_TARGETS.length)]; }
 
 /* ---------- mode helpers ---------- */
 function modeConfig(){ return MODES[S?.mode] || MODES.vanilla; }

@@ -1,5 +1,5 @@
 /* =====================================================================
-   boros-tokens.js — "Dawnmarch Legion" deck definition (go-wide CPU archetype;
+   boros-tokens.js — "Boros Tokens" deck definition (go-wide CPU archetype;
    file name / id / BOROS_TOKENS identifier kept for save compatibility)
 
    Contains:
@@ -83,7 +83,7 @@ var BOROS_TOKENS = (function() {
       {name: "Aegis of Dawn", cost: 1, effect: "Target creature gains hexproof and indestructible until end of turn.", protect: true},
       {name: "Brightward Blessing", cost: 1, effect: "Target creature gets +2/+2 and hexproof until end of turn.", protect: true},
       {name: "Sentinel's Oath", cost: 2, effect: "Target creature you control gains protection from the color of your choice until end of turn.", protect: true},
-      {name: "Dawnspear Verdict", cost: 2, effect: "Exile target creature or PW.", removal: true, removalInstruction: "Exile {target}."},
+      {name: "Dawnspear Verdict", cost: 2, effect: "Exile target creature or planeswalker.", removal: true, removalInstruction: "Exile {target}."},
       {name: "Cinderbrand Judgment", cost: 3, effect: "Exile target nonland permanent.", removal: true, ruleRemoval: "any", removalInstruction: "Exile {target}."},
       {name: "Shatter the Edict", cost: 2, effect: "Destroy target artifact or enchantment.", ruleRemoval: "artifactEnchantment"},
       {name: "Valor's Riposte", cost: 2, effect: "Target creature you control deals damage equal to its power to target creature you don't control."},
@@ -177,7 +177,7 @@ var BOROS_TOKENS = (function() {
 
   return {
     id: "boros-tokens",
-    name: "Dawnmarch Legion",
+    name: "Boros Tokens",
     archetype: "tokens",
     commander: commander,
     color: "#e67e22",

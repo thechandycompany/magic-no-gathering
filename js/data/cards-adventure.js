@@ -2,10 +2,10 @@
    cards-adventure.js — Adventure mode card/unit data
 
    Contains:
-   - ABILITIES: Ulvar's ability definitions (vanilla/hard modes)
+   - ABILITIES: Garruk's ability definitions (vanilla/hard modes)
    - HORDE_UNITS: Horde mode creature pool
-   - CONCLAVE_UNITS: Arcane Conclave named roster
-   - SLAY_TARGETS: Ulvar's slay targeting priority list
+   - CONCLAVE_UNITS: Aether Conclave named roster
+   - SLAY_TARGETS: Garruk's slay targeting priority list
    ===================================================================== */
 
 var ABILITIES = {
@@ -13,8 +13,8 @@ var ABILITIES = {
     cost: 0,
     label: "[0] Summon Wolf",
     flavor: [
-      "A wolf answers the Pack Warden's call.",
-      "Ulvar whistles; a lean grey wolf pads onto the field.",
+      "A wolf answers the Slayer's call.",
+      "Garruk whistles; a lean grey wolf pads onto the field.",
       "The pack grows. A new wolf bares its teeth."
     ],
     mech: "Put a Wolf token onto the battlefield."
@@ -23,31 +23,31 @@ var ABILITIES = {
     cost: +4,
     label: "[+4] Rip and Tear",
     flavor: [
-      "Ulvar snarls — a wolf's fangs blacken with venom.",
-      "The Pack Warden channels raw savagery into his pack.",
+      "Garruk snarls — a wolf's fangs blacken with venom.",
+      "The Slayer channels raw savagery into his pack.",
       "One beast swells with lethal fury."
     ],
-    mech: "Target creature gets +1/+0 and gains deathtouch. Ulvar gains 4 loyalty."
+    mech: "Target creature gets +1/+0 and gains deathtouch. Garruk gains 4 loyalty."
   },
   slay: {
     cost: -10,
     label: "[-10] Slay",
     flavor: [
-      "Ulvar hurls his axe. \"Nothing survives the hunt.\"",
-      "The Pack Warden marks his prey.",
-      "Steel flashes — and Ulvar drinks the fallen's strength."
+      "Garruk hurls his axe. \"Nothing survives the hunt.\"",
+      "The Slayer marks his prey.",
+      "Steel flashes — and Garruk drinks the fallen's strength."
     ],
-    mech: "Destroy target creature. Ulvar gains loyalty equal to its toughness."
+    mech: "Destroy target creature. Garruk gains loyalty equal to its toughness."
   },
   wipe: {
     cost: -25,
-    label: "[-25] Reckoning of the Wild",
+    label: "[-25] Overrun the Weak",
     flavor: [
-      "Ulvar roars. The wilds themselves turn on everything he does not command.",
+      "Garruk roars. The wilds themselves turn on everything he does not command.",
       "\"KNEEL.\" A wave of primal death sweeps the board.",
-      "Only the Pack Warden's beasts remain standing."
+      "Only the Slayer's beasts remain standing."
     ],
-    mech: "Destroy all creatures Ulvar doesn't control."
+    mech: "Destroy all creatures Garruk doesn't control."
   }
 };
 

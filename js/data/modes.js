@@ -9,24 +9,31 @@
    Defined once here; every display reads GAME_TITLE. */
 var GAME_TITLE = "Rivals at the Table";
 
+/* Free, unofficial fan project (see README.md "Fan content & donations").
+   FAN_CONTENT_NOTICE is the wording Wizards of the Coast's Fan Content Policy asks for.
+   Leave a URL empty to hide its button. */
+var FAN_CONTENT_NOTICE = GAME_TITLE + " is unofficial Fan Content permitted under the Fan Content Policy. Not approved/endorsed by Wizards. Portions of the materials used are property of Wizards of the Coast. ©Wizards of the Coast LLC.";
+var DONATION_URL = "";   // e.g. "https://ko-fi.com/yourname" — optional tips; the game stays free
+var SOURCE_URL = "";     // e.g. "https://github.com/you/rivals-at-the-table"
+
 var MODES = {
   vanilla: {
     id: "vanilla",
-    name: "Easy Ulvar",
-    enemy: "Ulvar, the Pack Warden",
+    name: "Easy Garruk",
+    enemy: "Garruk, the Slayer",
     icon: "🐺",
     boardIcon: "🌲",
-    boardTitle: "Ulvar's Battlefield",
+    boardTitle: "Garruk's Battlefield",
     resource: "Loyalty",
     startResource: 20,
     life: 40,
     category: "adventure",
-    summary: "The baseline hunt: 2/2 Wolves, steady +2 loyalty, and cautious removal after Ulvar builds a pack."
+    summary: "The baseline hunt: 2/2 Wolves, steady +2 loyalty, and cautious removal after Garruk builds a pack."
   },
   hard: {
     id: "hard",
-    name: "Hard Ulvar",
-    enemy: "Ulvar, Apex Warden",
+    name: "Hard Garruk",
+    enemy: "Garruk, Apex Slayer",
     icon: "😤",
     boardIcon: "🔥",
     boardTitle: "The Apex Hunting Ground",
@@ -51,11 +58,11 @@ var MODES = {
   },
   conclave: {
     id: "conclave",
-    name: "Arcane Conclave",
+    name: "Aether Conclave",
     enemy: "Vaelora, Conclave Ascendant",
     icon: "🔮",
     boardIcon: "✦",
-    boardTitle: "The Arcane Conclave",
+    boardTitle: "The Aether Conclave",
     resource: "Resolve",
     startResource: 32,
     life: 40,
@@ -78,15 +85,16 @@ var MODES = {
   }
 };
 
-/* Pre-rename adventure enemy titles → current titles (most specific first).
-   Applied to saved logs by migrateLegacyNames() in js/engine/state.js. */
+/* Invented enemy/mode names from the "names v2" build → current names (most
+   specific first). Applied to saved logs by migrateLegacyNames() in js/engine/state.js. */
 var LEGACY_TITLE_NAMES = [
-  ["Garruk, the Slayer", "Ulvar, the Pack Warden"],
-  ["Garruk, Apex Slayer", "Ulvar, Apex Warden"],
-  ["Ulvar, the Huntmaster", "Ulvar, the Pack Warden"],
-  ["Ulvar, Apex Huntmaster", "Ulvar, Apex Warden"],
-  ["Apex Huntmaster", "Apex Warden"],
-  ["Huntmaster", "Pack Warden"],
-  ["Garruk", "Ulvar"],
-  ["Overrun the Weak", "Reckoning of the Wild"]
+  ["Ulvar, the Pack Warden", "Garruk, the Slayer"],
+  ["Ulvar, Apex Warden", "Garruk, Apex Slayer"],
+  ["Ulvar, the Huntmaster", "Garruk, the Slayer"],
+  ["Ulvar, Apex Huntmaster", "Garruk, Apex Slayer"],
+  ["Apex Warden", "Apex Slayer"],
+  ["Pack Warden", "Slayer"],
+  ["Ulvar", "Garruk"],
+  ["Reckoning of the Wild", "Overrun the Weak"],
+  ["Arcane Conclave", "Aether Conclave"]
 ];

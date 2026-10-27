@@ -90,10 +90,10 @@ top level outside the commander-ui IIFE, no modules, load order).
   `commander`, `cpuNames[seat]`, `cards`, `deckComposition`, `libraryCounts`, `maxCpuHandSize`,
   `strategyLabels`, `ai`, and optionally `commanderTrigger`. A settings UI lists entries by these fields.
 - **Backward-compat globals** (`VOLTRON_CARDS`, `STRATEGY_LABELS`, `MAX_CPU_HAND_SIZE`, `CPU_NAMES`,
-  `COMMANDER_BASE`, `DECK_COMPOSITION`, ...) still point at Wildheart Armory (`gruul-voltron`). Engine code no longer reads
+  `COMMANDER_BASE`, `DECK_COMPOSITION`, ...) still point at Gruul Voltron (`gruul-voltron`). Engine code no longer reads
   them for per-opponent logic; use the per-opponent forms below.
 - **Per opponent**: `opp.deckId` (registry id) and `opp.archetype` (from the deck). `deckOf(opp)` →
-  deck object (deck-base.js; legacy saves without `deckId` → Wildheart Armory). `deckCommanderBase(opp)`,
+  deck object (deck-base.js; legacy saves without `deckId` → Gruul Voltron). `deckCommanderBase(opp)`,
   `deckStrategyLabels(opp)`, `deckAi(opp)`, `deckAttackPolicy(opp)`. `opp.tokensCreated` counts the
   creature tokens that CPU has created this game.
 - **Card lookup for display**: `cardDefinitionByName(name, opp?)` → card object (the opponent's deck
@@ -118,13 +118,13 @@ top level outside the commander-ui IIFE, no modules, load order).
   `"wipe"`, `"haymaker"`, `"removalVsCpu"`, `"extraGear"`, `"creature"`, `"fallbackRamp"`, `"spell"`,
   `"removalVsPlayer"`, `"tokenMaker"`. The wipe / haymaker / removal policies are shared; the hook only
   orders them. Hooks decide only (no `gameState` / DOM access in deck files); ctx steps change state.
-  Wildheart Armory's hook reproduces the wave-2 priority exactly (sims are byte-identical).
+  Gruul Voltron's hook reproduces the wave-2 priority exactly (sims are byte-identical).
 - **Attack policy** `deck.ai.attackPolicy` = `{commanderAlwaysAttacks, minPower, goWide, goWideMargin,
   commanderRaces}` (defaults = equipment commander: `true, 2, false, 2, true`). Read by `profitableAttackers` and
   `applyHomeGuard`; `evaluateAttackProfitability(attacker, defenders, {commanderAlwaysAttacks})` and
   `smartDeclareAttackers(opp, defenders, options)` (combat.js) take the same option. Lethal planning
   (`planTarget` / `lethalPlan`) and the home guard / archenemy logic are shared for every deck.
-- **Dawnmarch Legion** (`js/data/decks/boros-tokens.js`, `id:"boros-tokens"`): Ysolde, Dawnmarch Captain
+- **Boros Tokens** (`js/data/decks/boros-tokens.js`, `id:"boros-tokens"`): Ysolde, Dawnmarch Captain
   (3/3, cost 5). `deck.commanderTrigger = {when:"beginCombat", tokens}` — at the start of
   `executeOpponentCombat` (before targeting) the commander creates a 1/1 Soldier; the combat result's
   `actions` gets `{type:"trigger", counterable:false, tokenUid, tokenUids}`.
@@ -141,16 +141,12 @@ top level outside the commander-ui IIFE, no modules, load order).
   (`counterOpponentAction`, types `creature` / `spell`) removes the tokens it created; countering an
   anthem restores P/T and summoning sickness.
 
-## Wave 4 — naming pass (Steam prep)
-- Display names: deck `gruul-voltron` is shown as **Wildheart Armory**, `boros-tokens` as **Dawnmarch Legion**.
-  Ids, file names and JS identifiers (`GRUUL_VOLTRON`, `BOROS_TOKENS`, `VOLTRON_CARDS`, `archetype:"voltron"`,
-  CSS classes) are internal and unchanged for save compatibility. User-facing text never says the old names.
-- Every card name is original. Engine code matches cards by **flags**, never by name: `protect`, `wipeProtect`,
-  `removal` (+ `removalInstruction`, `removalLeavesToken {name, ico, p, t}`), `ruleRemoval`, `permanent {effect,
-  types}` (effect `"none"` = stays on the battlefield without a modeled trigger; `types` containing
-  `"Equipment"` makes it cast as an artifact). `playerRemoval.leavesToken` tells the UI the player gets a token.
-- Old saves: `migrateLegacyNames(state)` (js/engine/state.js) rewrites every string in a saved state using
-  `LEGACY_CARD_NAMES` (decks/index.js) and `LEGACY_TITLE_NAMES` (modes.js); `state.namesVersion` = `NAMES_VERSION`
-  marks it done. Adventure saves migrate in `normalizeState`, Commander saves in `ensureCommanderEffectState`,
-  which also re-reads typed hand cards from the deck (`refreshLegacyCardData`) so they get the new flags.
-- User-facing text says "PW", never the long card-type word. The entry file is `index.html`.
+## Wave 4 — naming (superseded)
+The Steam plan briefly renamed cards, decks and characters to invented names ("names v2"). The project
+is now a free, unofficial fan project (see README.md), so the original MTG names are back:
+- Decks: `gruul-voltron` → **Gruul Voltron**, `boros-tokens` → **Boros Tokens**; real card names in the decks.
+- Adventure: **Garruk, the Slayer** / **Garruk, Apex Slayer**, **Aether Conclave**, **Overrun the Weak**; "planeswalker" in text.
+- Saves from the names-v2 build are rewritten on load (`LEGACY_CARD_NAMES` / `LEGACY_TITLE_NAMES` map invented → current;
+  `NAMES_VERSION` 3 in js/engine/state.js).
+- Kept from that pass: card behaviour driven by card flags (no name checks), `index.html` entry, `ratt_*` storage keys,
+  `GAME_TITLE` "Rivals at the Table".

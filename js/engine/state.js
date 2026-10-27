@@ -48,12 +48,14 @@ function freshState(mode){
 }
 
 /* ---------- legacy name migration ----------
-   Renamed cards, decks and enemy titles (LEGACY_CARD_NAMES in
-   js/data/decks/index.js, LEGACY_TITLE_NAMES in js/data/modes.js) are
-   rewritten in every string of a saved state — token / hand / graveyard
-   names, stored CPU results and the log. Runs once per save
+   A short-lived build (names version 2) used invented card, deck and enemy
+   names. Saves from it are rewritten back to the current names
+   (LEGACY_CARD_NAMES in js/data/decks/index.js, LEGACY_TITLE_NAMES in
+   js/data/modes.js) in every string — token / hand / graveyard names,
+   stored CPU results and the log. Saves from before that build already use
+   the current names, so the rewrite is a no-op for them. Runs once per save
    (state.namesVersion). */
-var NAMES_VERSION = 2;
+var NAMES_VERSION = 3;
 var legacyNamePattern = null, legacyNameLookup = null;
 function legacyNamePairs(){
   return [].concat(typeof LEGACY_TITLE_NAMES!=="undefined"?LEGACY_TITLE_NAMES:[], typeof LEGACY_CARD_NAMES!=="undefined"?LEGACY_CARD_NAMES:[]);
@@ -63,7 +65,7 @@ function replaceLegacyNames(text){
     var pairs=legacyNamePairs();
     legacyNameLookup={};
     pairs.forEach(function(pair){ if(!(pair[0] in legacyNameLookup)) legacyNameLookup[pair[0]]=pair[1]; });
-    // Longest first so "Ulvar, the Huntmaster" wins over "Huntmaster".
+    // Longest first so "Ulvar, the Pack Warden" wins over "Pack Warden".
     var keys=Object.keys(legacyNameLookup).sort(function(a,b){ return b.length-a.length; });
     legacyNamePattern=keys.length?new RegExp("(^|[^A-Za-z])("+keys.map(function(k){ return k.replace(/[.*+?^${}()|[\]\\]/g,"\\$&"); }).join("|")+")(?![A-Za-z])","g"):null;
   }
