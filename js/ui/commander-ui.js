@@ -123,7 +123,8 @@ function renderSetupScreen(onStartAdventure, onStartCommander) {
         ${themePickerButtonsHtml()}
       </div>
     </div>
-    <p class="setup-fan-note">Free, unofficial fan project — not approved or endorsed by Wizards of the Coast.${externalUrl(DONATION_URL)?` <a href="${externalUrl(DONATION_URL)}" target="_blank" rel="noopener noreferrer">Support development</a>`:""}</p>`;
+    ${externalUrl(DONATION_URL)?`<div class="setup-kofi"><a class="kofi-btn" href="${externalUrl(DONATION_URL)}" target="_blank" rel="noopener noreferrer"><span aria-hidden="true">☕</span> Support me on Ko-fi</a></div>`:""}
+    <p class="setup-fan-note">Free, unofficial fan project — not approved or endorsed by Wizards of the Coast.</p>`;
   overlay.classList.add("show");
 
   const persist=()=>saveCommanderSetup(setup);

@@ -1267,3 +1267,11 @@ header.app-bar{
 .settings-links a[hidden]{display:none;}
 .setup-fan-note{margin-top:14px; font-size:10.5px; color:var(--muted); text-align:center;}
 .setup-fan-note a{color:var(--gold);}
+
+/* ===== Ko-fi button (static link styled like Ko-fi's widget — no third-party script) ===== */
+.kofi-btn{display:inline-flex; align-items:center; gap:7px; padding:8px 16px; border-radius:999px; background:#72a4f2; color:#fff; font:700 13px var(--font); text-decoration:none; box-shadow:0 2px 6px rgba(0,0,0,.25); transition:filter .15s, transform .15s;}
+.kofi-btn:hover{filter:brightness(1.08); transform:translateY(-1px);}
+.kofi-btn:focus-visible{outline:2px solid var(--gold); outline-offset:2px;}
+.kofi-btn[hidden]{display:none;}
+.setup-kofi{margin-top:16px; text-align:center;}
+[data-theme="purple"] .kofi-btn{background:var(--green); color:var(--ink);} /* Dark Purple stays purple-only */
