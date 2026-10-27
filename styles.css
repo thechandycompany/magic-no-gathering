@@ -1209,3 +1209,11 @@ header.app-bar{
 .commander-player-actions .instant-target-row{display:flex; flex-wrap:wrap; align-items:center; gap:8px; width:100%;}
 .instant-dmg-targets{display:flex; flex-wrap:wrap; gap:6px;}
 .instant-dmg-targets .tiny-target{min-width:0!important; padding:4px 9px!important; white-space:nowrap;}
+.response-step.is-lethal{border-color:var(--blood-lt); box-shadow:0 0 0 1px var(--blood-lt) inset;}
+.response-step.is-lethal .resolution-step-h strong::after{content:" · Lethal"; color:var(--danger-ink);}
+.lt-response-note,.lt-lethal-note{display:inline-block; margin-left:8px; padding:0 7px; border-radius:999px; font-size:10px;}
+.lt-response-note{border:1px solid var(--arcane-lt); color:var(--arcane-ink);}
+.lt-lethal-note{border:1px solid var(--blood-lt); color:var(--danger-ink);}
+.cbs-util{display:inline-flex; align-items:center; gap:4px; margin-left:6px;}
+.cbs-util-remove{border:0; background:transparent; color:var(--muted); cursor:pointer; font-size:11px;}
+.cbs-util-remove:hover{color:var(--danger-ink);}

@@ -186,7 +186,7 @@ function handBreakdownText(opp){
 }
 function intentText(state,opp){
   const intent=cpuIntentPreview(opp,state);
-  return intent?`${intent.targetName} · ${intent.reason}`:"";
+  return intent?`${intent.targetName} · ${intent.reason}${intent.lethal?" · lethal":""}`:"";
 }
 
 /* ---------- Life HUD (seat order) + lethal warnings ---------- */
@@ -280,8 +280,9 @@ function renderSingleView(state,board){
       <div class="cbs-item cbs-wide"><span class="cbs-label">Hand contents</span><span class="cbs-val cbs-small">${handBreakdownText(opp)}</span></div>
       <div class="cbs-item"><span class="cbs-label">Deck</span><span class="cbs-val">📚 ${opponentDeckSize(opp)}</span></div>
       ${(opp.poison||0)>0?`<div class="cbs-item"><span class="cbs-label">Poison</span><span class="cbs-val ${opp.poison>=7?'warn':''}">☣ ${opp.poison}/10</span></div>`:""}
-      <div class="cbs-item"><span class="cbs-label">Commander ${helpTip("Commander tax: each recast from the command zone costs 2 more mana.")}</span><span class="cbs-val">${opp.commanderZone?'Command zone (+'+opp.commanderTax+')':'Battlefield'}</span></div>
+      <div class="cbs-item"><span class="cbs-label">Commander ${helpTip("Commander tax: each recast from the command zone costs 2 more mana.")}</span><span class="cbs-val">${commanderOnField(opp)?'Battlefield':opp.commanderInHand?'In hand (no tax)':'Command zone (+'+opp.commanderTax+')'}</span></div>
       <div class="cbs-item cbs-wide"><span class="cbs-label">Equipment</span><span class="cbs-val cbs-small">${gearNames.length?escapeHtml(gearNames.join(", ")):"None"}</span></div>
+      ${(opp.utilityPermanents||[]).length?`<div class="cbs-item cbs-wide"><span class="cbs-label">Other permanents</span><span class="cbs-val cbs-small">${opp.utilityPermanents.map((u,i)=>`<span class="cbs-util">${escapeHtml(u.ico||"✦")} ${escapeHtml(u.name)}${dead?"":`<button type="button" class="cbs-util-remove" data-util-opp="${opp.id}" data-util-index="${i}" aria-label="Remove ${escapeHtml(u.name)}">✕</button>`}</span>`).join("")}</span></div>`:""}
       ${intent?`<div class="cbs-item cbs-wide"><span class="cbs-label">Likely next attack ${helpTip("A prediction from this CPU's current targeting priorities. It can change before its turn.")}</span><span class="cbs-val cbs-small">${escapeHtml(intent)}</span></div>`:""}
       <div class="cbs-item"><span class="cbs-label">Graveyard</span><button type="button" class="cbs-zone-btn" data-graveyard-owner="${opp.id}">⚰ ${opp.graveyardCount}</button></div>
       <div class="cbs-item"><span class="cbs-label">Exile</span><button type="button" class="cbs-zone-btn" data-exile-owner="${opp.id}">✦ ${opp.exileCount}</button></div>
@@ -303,6 +304,19 @@ function renderSingleView(state,board){
     };
   });
   wireCommanderDamageControls(board,state);
+  board.querySelectorAll('[data-util-opp]').forEach(btn=>{
+    btn.onclick=async event=>{
+      event.stopPropagation();
+      const owner=oppById(btn.dataset.utilOpp);const entry=owner&&(owner.utilityPermanents||[])[parseInt(btn.dataset.utilIndex)];
+      if(!entry)return;
+      const destination=await askCommanderRemovalDestination({name:entry.name,ico:entry.ico,type:"Permanent"});
+      if(!destination)return;
+      cmdSnapshot();
+      const moved=removeOpponentPermanent(owner,`util:${btn.dataset.utilIndex}`,destination);
+      if(moved)logCommander(`You ${destination==="exile"?"exile":"destroy"} ${movementCardText({...moved,destination:moved.destination||destination})} (${nm(owner)}).`);
+      saveState();renderBoardView(gameState);renderLifeHud(gameState);refreshActivePanel();
+    };
+  });
   board.querySelectorAll('.c-remove[data-rm-uid]').forEach(btn=>{
     btn.onclick=event=>{event.stopPropagation();removeCpuTokenFromBoard(oppById(btn.dataset.opp),btn.dataset.rmUid);};
   });
@@ -464,7 +478,7 @@ function renderAllView(state,board){
   </div>`;
   state.opponents.forEach((opp,i)=>{
     const dead=isOpponentDead(opp);const commander=commanderOnField(opp);
-    const commanderSummary=commander?cardReferenceHtml(commander,{className:"all-opp-card-reference"}):'<span title="Commander is in the command zone">⚜ In zone</span>';
+    const commanderSummary=commander?cardReferenceHtml(commander,{className:"all-opp-card-reference"}):(opp.commanderInHand?'<span title="Returned to its owner\'s hand. Its next cast has no tax.">⚜ In hand</span>':'<span title="Commander is in the command zone">⚜ In zone</span>');
     const active=state.phase==="cpu"&&state.activeOppId===opp.id;
     const attacking=active&&state.responseStage==="combat"&&state.activeResult&&state.activeResult.target;
     const intent=dead?"":intentText(state,opp);
@@ -999,7 +1013,7 @@ function renderLastTurnSection(opp,result){
     const canCounter=isMain&&a.counterable&&!a.countered;
     const selected=canCounter&&draft&&draft.counters.has(key);
     const cards=commanderActionCards(opp,a);
-    return `<button type="button" class="lt-step${canCounter?' lt-counterable':''}${selected||a.countered?' lt-countered':''}" data-counter-key="${canCounter?escapeHtml(key):""}"${canCounter?` aria-pressed="${!!selected}"`:" disabled"}><strong>${escapeHtml(a.label)}</strong><span>${escapeHtml(a.detail||"")}</span>${cardReferenceListHtml(cards,"action-card-list")}${a.countered?'<span class="lt-countered-note">Countered</span>':canCounter?'<span class="lt-counter-hint">Counter</span>':''}</button>`;
+    return `<button type="button" class="lt-step${canCounter?' lt-counterable':''}${selected||a.countered?' lt-countered':''}" data-counter-key="${canCounter?escapeHtml(key):""}"${canCounter?` aria-pressed="${!!selected}"`:" disabled"}><strong>${escapeHtml(a.label)}</strong><span>${escapeHtml(a.detail||"")}</span>${cardReferenceListHtml(cards,"action-card-list")}${a.response?`<span class="lt-response-note">${escapeHtml(a.response.cardName||"Protected")}</span>`:""}${a.lethal?'<span class="lt-lethal-note">Lethal</span>':""}${a.countered?'<span class="lt-countered-note">Countered</span>':canCounter?'<span class="lt-counter-hint">Counter</span>':''}</button>`;
   }).join('');
   el.innerHTML=`<div class="lt-header"><span class="lt-ico">${opp.ico}</span><span class="lt-title">${nm(opp)}'s Actions</span><span class="lt-turn">Round ${gameState.turn} · ${isMain?"Main phase":"Combat"}</span></div><div class="lt-steps">${stepsHtml}</div>`;
   el.querySelectorAll('.lt-counterable').forEach(btn=>{btn.onclick=()=>toggleCounter(btn.dataset.counterKey);});
@@ -1081,7 +1095,7 @@ function renderCpuWindowForm(){
         ${stepperHtml("damageToPlayer","Damage to you",val("damageToPlayer",raw.playerDamage))}
         ${commanderAttacking&&!pw?stepperHtml("commanderDamageToPlayer","Commander damage to you",val("commanderDamageToPlayer",raw.commanderDamage)):""}
         ${gameState.player.creatures>0?stepperHtml("playerDeaths","Your creatures that died",draft.playerDeaths,gameState.player.creatures):""}
-      </div>`,"enemy-combat");
+      </div>`,attackIsLethal(result)?"enemy-combat is-lethal":"enemy-combat");
   }
   if(stepNo===1)html+=`<div class="context-summary"><span class="context-summary-icon">✓</span><div><strong>No response needed</strong><span>${oppName} made no plays you can respond to.</span></div></div>`;
 
@@ -1134,6 +1148,7 @@ function renderCpuWindowForm(){
   };
   refreshConfirmPreview();
 }
+function attackIsLethal(result){return !!(result&&(result.actions||[]).some(a=>a.type==="attack"&&a.lethal));}
 function cpuWindowPreviewText(opp,result){
   const r=buildCpuResponse(opp,result);
   const p=previewCpuResponse(opp,result,r);
