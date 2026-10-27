@@ -16,10 +16,68 @@ var gameState = null;
 const SAVE_KEY="magic_no_gathering_save_v2";
 const nm=owner=>owner?(owner.id==="player"?"You":String(owner.name||"?").split(",")[0]):"?";
 
+/* ---------- Commander setup choices (opponent count, decks, difficulty) ---------- */
+const SETUP_KEY="mng_commander_setup";
+const DIFFICULTY_LEVELS=[
+  {level:1,name:"Casual",desc:"Develops slowly and makes loose choices. Good for learning the table."},
+  {level:2,name:"Relaxed",desc:"Plays steadily but rarely punishes a weak board."},
+  {level:3,name:"Standard",desc:"Balanced, fair play. The recommended experience."},
+  {level:4,name:"Focused",desc:"Sequences carefully and pressures the most vulnerable seat."},
+  {level:5,name:"Optimized",desc:"Plays to win quickly and takes every opening it sees."}
+];
+function availableDecks(){return (typeof DECK_REGISTRY!=="undefined"&&Array.isArray(DECK_REGISTRY))?DECK_REGISTRY.filter(d=>d&&d.id):[];}
+function deckById(id){return availableDecks().find(d=>d.id===id)||null;}
+function difficultyInfo(level){return DIFFICULTY_LEVELS.find(d=>d.level===level)||DIFFICULTY_LEVELS[2];}
+function clampSetupUnit(v,fallback){const n=Number(v);return v==null||v===""||!isFinite(n)?fallback:Math.max(0,Math.min(1,n));}
+function loadCommanderSetup(){
+  let raw={};
+  try{raw=JSON.parse(safeGet(SETUP_KEY)||"{}")||{};}catch(e){raw={};}
+  const decks=availableDecks();
+  const count=Math.max(1,Math.min(4,parseInt(raw.count,10)||3));
+  const deck=raw.deck==="mixed"&&decks.length>1?"mixed":(deckById(raw.deck)?raw.deck:(decks[0]?decks[0].id:null));
+  const powerLevel=Math.max(1,Math.min(5,parseInt(raw.powerLevel,10)||3));
+  return {count,deck,powerLevel,aggression:clampSetupUnit(raw.aggression,0.5),interaction:clampSetupUnit(raw.interaction,0.5),advancedOpen:!!raw.advancedOpen};
+}
+function saveCommanderSetup(setup){safeSet(SETUP_KEY,JSON.stringify(setup));}
+/* What createCommanderBattle receives. decks: one deck id per seat, or "mixed". */
+function commanderSettingsFromSetup(setup){
+  const settings={cpu:{powerLevel:setup.powerLevel,aggression:setup.aggression,interaction:setup.interaction}};
+  if(setup.deck==="mixed")settings.decks="mixed";
+  else if(setup.deck)settings.decks=Array.from({length:setup.count},()=>setup.deck);
+  return settings;
+}
+function deckPickerHtml(setup){
+  const decks=availableDecks();
+  if(!decks.length)return "";
+  if(decks.length===1){
+    const d=decks[0];
+    return `<div class="setup-field-block"><span class="setup-field-label">Opponent deck</span>
+      <div class="deck-static"><strong>${escapeHtml(d.name)}</strong><span>${escapeHtml(d.summary||"")}</span></div></div>`;
+  }
+  const options=decks.map(d=>`<option value="${escapeHtml(d.id)}"${setup.deck===d.id?" selected":""}>All opponents: ${escapeHtml(d.name)}</option>`).join("")
+    +`<option value="mixed"${setup.deck==="mixed"?" selected":""}>Mixed: a different deck at each seat</option>`;
+  return `<div class="setup-field-block"><label class="setup-field-label" for="setupDeckSelect">Opponent decks</label>
+    <select class="setup-select" id="setupDeckSelect">${options}</select>
+    <p class="setup-field-note" id="setupDeckNote"></p></div>`;
+}
+function deckNoteText(setup){
+  if(setup.deck==="mixed")return `Seats are dealt from: ${availableDecks().map(d=>d.name).join(", ")}.`;
+  const d=deckById(setup.deck);return d?(d.summary||""):"";
+}
+function sliderHtml(id,label,tip,lowLabel,highLabel,value){
+  const pct=Math.round(value*100);
+  return `<div class="ai-slider">
+    <div class="ai-slider-h"><label for="${id}">${label}</label>${helpTip(tip)}<output id="${id}Out" for="${id}">${pct}%</output></div>
+    <input type="range" id="${id}" min="0" max="100" step="5" value="${pct}" aria-valuetext="${pct}%">
+    <div class="ai-slider-ends" aria-hidden="true"><span>${lowLabel}</span><span>${highLabel}</span></div>
+  </div>`;
+}
+
 function renderSetupScreen(onStartAdventure, onStartCommander) {
   const modal=document.getElementById('modal'), overlay=document.getElementById('overlay');
   modal.className="modal setup-modal";
   const adventureModes=Object.values(MODES).filter(m=>m.category==="adventure");
+  const setup=loadCommanderSetup();
 
   modal.innerHTML=`
     <div class="big-ico">🎴</div>
@@ -30,14 +88,27 @@ function renderSetupScreen(onStartAdventure, onStartCommander) {
         <h3 class="setup-col-h">⚔️ Commander Battle</h3>
         <p class="setup-col-desc">Play your deck against one to four CPU commanders. Opponents also attack each other.</p>
         <div class="opponent-count">
-          <label>Opponents</label>
-          <div class="count-row">
-            <button type="button" class="count-btn" data-count="1">1</button>
-            <button type="button" class="count-btn" data-count="2">2</button>
-            <button type="button" class="count-btn active" data-count="3">3</button>
-            <button type="button" class="count-btn" data-count="4">4</button>
+          <label id="setupCountLabel">Opponents</label>
+          <div class="count-row" role="group" aria-labelledby="setupCountLabel">
+            ${[1,2,3,4].map(n=>`<button type="button" class="count-btn${n===setup.count?" active":""}" data-count="${n}" aria-pressed="${n===setup.count}">${n}</button>`).join("")}
           </div>
         </div>
+        ${deckPickerHtml(setup)}
+        <div class="setup-field-block">
+          <span class="setup-field-label" id="setupDifficultyLabel">Difficulty</span>
+          <div class="difficulty-seg" role="radiogroup" aria-labelledby="setupDifficultyLabel">
+            ${DIFFICULTY_LEVELS.map(d=>`<button type="button" class="difficulty-btn" role="radio" data-level="${d.level}" aria-checked="${d.level===setup.powerLevel}" tabindex="${d.level===setup.powerLevel?0:-1}"><span class="difficulty-num">${d.level}</span><span class="difficulty-name">${d.name}</span></button>`).join("")}
+          </div>
+          <p class="setup-field-note" id="setupDifficultyNote" aria-live="polite"></p>
+        </div>
+        <details class="setup-advanced" id="setupAdvanced"${setup.advancedOpen?" open":""}>
+          <summary>Advanced</summary>
+          <div class="setup-advanced-body">
+            ${sliderHtml("setupAggression","Aggression","How readily CPUs attack instead of keeping creatures back to block.","Holds back blockers","Attacks often",setup.aggression)}
+            ${sliderHtml("setupInteraction","Interaction","How often CPUs use instants to respond to your spells, removal, and attacks.","Rarely responds","Often responds",setup.interaction)}
+            <button type="button" class="setup-link-btn" id="setupAdvancedReset">Reset to defaults</button>
+          </div>
+        </details>
         <button class="setup-col-cta commander-cta" id="startCommanderBtn">Begin Commander Battle</button>
       </div>
       <div class="setup-col setup-col-adventure">
@@ -54,11 +125,48 @@ function renderSetupScreen(onStartAdventure, onStartCommander) {
     </div>`;
   overlay.classList.add("show");
 
-  let selectedCount=3;
+  const persist=()=>saveCommanderSetup(setup);
   modal.querySelectorAll('.count-btn').forEach(btn=>{
-    btn.onclick=()=>{modal.querySelectorAll('.count-btn').forEach(b=>b.classList.remove('active'));btn.classList.add('active');selectedCount=parseInt(btn.dataset.count,10);};
+    btn.onclick=()=>{
+      modal.querySelectorAll('.count-btn').forEach(b=>{b.classList.remove('active');b.setAttribute('aria-pressed',"false");});
+      btn.classList.add('active');btn.setAttribute('aria-pressed',"true");
+      setup.count=parseInt(btn.dataset.count,10);persist();
+    };
   });
-  document.getElementById('startCommanderBtn').onclick=()=>{try{onStartCommander(selectedCount);}catch(e){console.error("[MNG] startCommanderBattle failed:",e);}};
+  const deckSelect=document.getElementById('setupDeckSelect'),deckNote=document.getElementById('setupDeckNote');
+  const syncDeckNote=()=>{if(deckNote)deckNote.textContent=deckNoteText(setup);};
+  if(deckSelect)deckSelect.onchange=()=>{setup.deck=deckSelect.value;persist();syncDeckNote();};
+  syncDeckNote();
+  const diffButtons=[...modal.querySelectorAll('.difficulty-btn')];
+  const syncDifficulty=()=>{
+    diffButtons.forEach(b=>{const on=parseInt(b.dataset.level,10)===setup.powerLevel;b.setAttribute('aria-checked',String(on));b.tabIndex=on?0:-1;});
+    const info=difficultyInfo(setup.powerLevel);
+    document.getElementById('setupDifficultyNote').textContent=info.desc;
+  };
+  const pickDifficulty=(level,focus)=>{
+    setup.powerLevel=Math.max(1,Math.min(5,level));persist();syncDifficulty();
+    if(focus){const b=diffButtons.find(x=>parseInt(x.dataset.level,10)===setup.powerLevel);if(b)b.focus();}
+  };
+  diffButtons.forEach(btn=>{
+    btn.onclick=()=>pickDifficulty(parseInt(btn.dataset.level,10));
+    btn.onkeydown=e=>{
+      const step={ArrowRight:1,ArrowDown:1,ArrowLeft:-1,ArrowUp:-1}[e.key];
+      if(step){e.preventDefault();pickDifficulty(setup.powerLevel+step,true);}
+      else if(e.key==="Home"||e.key==="End"){e.preventDefault();pickDifficulty(e.key==="Home"?1:5,true);}
+    };
+  });
+  syncDifficulty();
+  const wireSlider=(id,key)=>{
+    const input=document.getElementById(id),out=document.getElementById(id+'Out');
+    const sync=()=>{const pct=Math.round(setup[key]*100);input.value=pct;out.textContent=`${pct}%`;input.setAttribute('aria-valuetext',`${pct}%`);};
+    input.oninput=()=>{setup[key]=parseInt(input.value,10)/100;sync();persist();};
+    return sync;
+  };
+  const syncAggression=wireSlider('setupAggression','aggression'),syncInteraction=wireSlider('setupInteraction','interaction');
+  document.getElementById('setupAdvancedReset').onclick=()=>{setup.aggression=0.5;setup.interaction=0.5;syncAggression();syncInteraction();persist();};
+  const adv=document.getElementById('setupAdvanced');
+  adv.ontoggle=()=>{setup.advancedOpen=adv.open;persist();};
+  document.getElementById('startCommanderBtn').onclick=()=>{persist();try{onStartCommander(setup.count,commanderSettingsFromSetup(setup));}catch(e){console.error("[MNG] startCommanderBattle failed:",e);}};
   document.getElementById('showAdventuresBtn').onclick=()=>renderAdventureSelectScreen(adventureModes,onStartAdventure);
   wireThemePicker();
 }
@@ -704,6 +812,7 @@ function setConfirmButton(text,className,onclick,showEndTurn,previewFn){
   refreshConfirmPreview();
 }
 function refreshConfirmPreview(){
+  if(!gameState)return; // a deferred refresh can land after restart() cleared the game
   if(stepStatusFn)stepStatusFn();
   const el=document.querySelector('#cmdConfirmBtn .cmd-preview');
   if(!el)return;
@@ -1726,8 +1835,11 @@ function endCommanderGame(won,reason){
   document.getElementById('cmdRestartBtn').onclick=restart;
 }
 
-function startCommanderBattle(numOpponents){
-  gameState=createCommanderBattle(numOpponents);
+function startCommanderBattle(numOpponents,settings){
+  const chosen=settings||commanderSettingsFromSetup(loadCommanderSetup());
+  gameState=createCommanderBattle(numOpponents,chosen);
+  // Engines without deck selection ignore settings.decks; keep the choice on record.
+  if(gameState.settings&&gameState.settings.decks==null&&chosen.decks!=null)gameState.settings.decks=chosen.decks;
   ensureCommanderEffectState(gameState);
   cmdUndoStack=[];
   document.getElementById('overlay').classList.remove("show");
@@ -1771,6 +1883,31 @@ function restart(){
 }
 
 function showSetup(){renderSetupScreen(startAdventure,startCommanderBattle);}
+
+/* Settings dialog: read-only summary of the current game's opponents and difficulty. */
+function opponentDeckName(opp,index){
+  const decks=gameState&&gameState.settings&&gameState.settings.decks;
+  const id=opp.deckId||(opp.deck&&opp.deck.id)||(Array.isArray(decks)?decks[index]:null);
+  const deck=id?deckById(id):null;
+  if(deck)return deck.name;
+  const all=availableDecks();
+  return all.length===1?all[0].name:"Unknown deck";
+}
+function renderOpponentSettingsSummary(){
+  const host=document.getElementById('settingsOpponentsSummary');
+  if(!host)return;
+  if(!gameState){host.innerHTML="";return;}
+  const cpu=typeof cpuSettings==="function"?cpuSettings(gameState):((gameState.settings&&gameState.settings.cpu)||{powerLevel:3,aggression:0.5,interaction:0.5});
+  const info=difficultyInfo(cpu.powerLevel);
+  const pct=v=>`${Math.round((v==null?0.5:v)*100)}%`;
+  host.innerHTML=`<dl class="opp-summary">
+      <div><dt>Difficulty</dt><dd>${info.level} · ${info.name}</dd></div>
+      <div><dt>Aggression</dt><dd>${pct(cpu.aggression)}</dd></div>
+      <div><dt>Interaction</dt><dd>${pct(cpu.interaction)}</dd></div>
+    </dl>
+    <ul class="opp-summary-decks">${gameState.opponents.map((opp,i)=>`<li><span>${opp.ico||""} ${escapeHtml(nm(opp))}</span><span>${escapeHtml(opponentDeckName(opp,i))}</span></li>`).join("")}</ul>`;
+}
+window.renderOpponentSettingsSummary=renderOpponentSettingsSummary;
 
 function boot(){
   const raw=safeGet(SAVE_KEY);
@@ -1821,6 +1958,14 @@ const resetBtn=document.getElementById('resetBtn');
 if(resetBtn)resetBtn.onclick=async()=>{
   closeSettings();
   const ok=await askConfirm("Restart encounter?","This ends the current game and returns to mode selection. This cannot be undone.","Restart","Cancel");
+  if(ok)restart();
+};
+
+// "New game with different settings…" — back to the setup screen (choices are kept).
+const newGameSettingsBtn=document.getElementById('newGameSettingsBtn');
+if(newGameSettingsBtn)newGameSettingsBtn.onclick=async()=>{
+  closeSettings();
+  const ok=await askConfirm("Start a new game?","This ends the current game and opens Commander setup, where you can change opponents and difficulty.","New game","Keep playing");
   if(ok)restart();
 };
 

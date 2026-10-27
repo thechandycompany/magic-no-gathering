@@ -55,6 +55,8 @@ var settingsReturnFocus=null;
 function openSettings(){
   document.getElementById('settingsThemeBtns').innerHTML=themePickerButtonsHtml();
   wireThemePicker();
+  // Commander mode fills in the read-only opponents/difficulty summary
+  if(typeof window.renderOpponentSettingsSummary==="function")window.renderOpponentSettingsSummary();
   settingsReturnFocus=document.getElementById('menuBtn');
   document.getElementById('settingsOverlay').classList.add('show');
   setTimeout(()=>document.getElementById('settingsClose').focus(),40);
