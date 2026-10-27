@@ -8,7 +8,7 @@
 
    Contains:
    - fisherYatesShuffle: proper random shuffle
-   - defaultCommanderDeck / deckCommanderBase: resolve the active deck def
+   - defaultCommanderDeck / deckOf / deckCommanderBase: resolve deck defs
    - newDeck: the 99-card virtual library composition (commander excluded)
    - generateOtherDeck / resolveCard: typed "other" card pile
    - drawCard: weighted random draw from a virtual deck (count level)
@@ -55,9 +55,26 @@ function defaultCommanderDeck() {
   return typeof GRUUL_VOLTRON !== "undefined" ? GRUUL_VOLTRON : null;
 }
 
+/**
+ * The deck definition an opponent plays (opp.deckId looked up in
+ * DECK_REGISTRY, index.js). Falls back to the default deck (Gruul Voltron)
+ * for legacy saves without a deckId or an unknown id.
+ */
+function deckOf(opp) {
+  var id = opp && opp.deckId;
+  if (id && typeof DECK_REGISTRY !== "undefined") {
+    for (var i = 0; i < DECK_REGISTRY.length; i++) if (DECK_REGISTRY[i].id === id) return DECK_REGISTRY[i];
+  }
+  return defaultCommanderDeck();
+}
+
 /** Commander baseline stats {p,t,kws,cost} for an opponent (or the default deck). */
 function deckCommanderBase(opp) {
   if (opp && opp.commanderBase) return opp.commanderBase;
+  if (opp && opp.deckId) {
+    var own = deckOf(opp);
+    if (own && own.commanderBase) return own.commanderBase;
+  }
   if (typeof COMMANDER_BASE !== "undefined") return COMMANDER_BASE;
   var deck = defaultCommanderDeck();
   return deck ? deck.commanderBase : { p: 4, t: 4, kws: [], cost: 5 };
@@ -149,7 +166,7 @@ function drawOpponentCard(opp) {
   var drawn = drawCard(opp.deck, opp.hand);
   if (drawn === "other") {
     if (opp.otherDeck && opp.otherDeck.length > 0) {
-      opp.typedHand.push(typedHandCard(opp.otherDeck.pop()));
+      opp.typedHand.push(typedHandCard(opp.otherDeck.pop(), deckOf(opp)));
     } else {
       // Library/typed pile out of sync (legacy save) — keep the counts honest.
       opp.hand.other = Math.max(0, opp.hand.other - 1);

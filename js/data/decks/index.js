@@ -5,7 +5,7 @@
    Load this file AFTER all individual deck files (e.g., gruul-voltron.js).
    ===================================================================== */
 
-var DECK_REGISTRY = [GRUUL_VOLTRON];
+var DECK_REGISTRY = [GRUUL_VOLTRON, BOROS_TOKENS];
 
 function getDeck(id) {
   return DECK_REGISTRY.find(function(d) { return d.id === id; }) || DECK_REGISTRY[0];

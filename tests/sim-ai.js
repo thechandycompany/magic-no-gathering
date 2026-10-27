@@ -16,9 +16,12 @@
    Reported: median kill turn, % commander-damage wins, player-targeted
    share, wipes per game, CPU interaction (protection response) rate.
 
+   Also: Boros Tokens goldfish + pod and a mixed-deck pod at PL3 (settings.decks).
+
    Env: SIM_AI_GOLDFISH (games per level, default 80), SIM_AI_POD (default 40).
    Seeds: goldfish 70000 + level*1000 + game, pod 80000 + level*1000 + game,
-   knobs 90000 + variant*1000 + game.
+   knobs 90000 + variant*1000 + game, Boros goldfish 95000 + game,
+   Boros pod 96000 + game, mixed pod 97000 + game.
    ===================================================================== */
 "use strict";
 var harnessLib = require("./harness");
@@ -56,7 +59,7 @@ function playGame(h, res, bucket, seed, scenario) {
   var rng = playerRng(seed);
   var where = { game: bucket.games, seed: seed, seats: scenario.seats, turn: 0, step: "setup", opp: null, mode: bucket.label };
   var fail = function (type, detail) { report.knownFailure(res, type, where, detail); };
-  var gs = h.call("createCommanderBattle", scenario.seats, { cpu: scenario.settings });
+  var gs = h.call("createCommanderBattle", scenario.seats, { cpu: scenario.settings, decks: scenario.decks || "gruul-voltron" });
   ctx.gameState = gs;
   if (h.has("ensureCommanderEffectState")) h.call("ensureCommanderEffectState", gs);
   if (!gs.settings) gs.settings = { cpu: scenario.settings };
@@ -268,6 +271,11 @@ function run(options) {
   knobs.forEach(function (k, i) {
     buckets.push(runScenario(h, res, "4-CPU pod PL3 " + k[0], { seats: 4, goldfish: false, settings: k[1] }, podGames, 90000 + i * 1000));
   });
+  // Second deck archetype (settings.decks): the same behaviour assertions apply.
+  var pl3 = { powerLevel: 3, aggression: 0.5, interaction: 0.5 };
+  buckets.push(runScenario(h, res, "boros-tokens goldfish PL3", { seats: 1, goldfish: true, settings: pl3, decks: ["boros-tokens"] }, goldfishGames, 95000));
+  buckets.push(runScenario(h, res, "boros-tokens 4-CPU pod PL3", { seats: 4, goldfish: false, settings: pl3, decks: "boros-tokens" }, podGames, 96000));
+  buckets.push(runScenario(h, res, "mixed 4-CPU pod PL3", { seats: 4, goldfish: false, settings: pl3, decks: "mixed" }, podGames, 97000));
   buckets.forEach(function (b) {
     res.notes.push(bucketLine(b));
     res.stats.games += b.games;
