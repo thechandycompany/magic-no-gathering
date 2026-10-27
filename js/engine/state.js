@@ -47,15 +47,52 @@ function freshState(mode){
   };
 }
 
+/* ---------- legacy name migration ----------
+   Renamed cards, decks and enemy titles (LEGACY_CARD_NAMES in
+   js/data/decks/index.js, LEGACY_TITLE_NAMES in js/data/modes.js) are
+   rewritten in every string of a saved state — token / hand / graveyard
+   names, stored CPU results and the log. Runs once per save
+   (state.namesVersion). */
+var NAMES_VERSION = 2;
+var legacyNamePattern = null, legacyNameLookup = null;
+function legacyNamePairs(){
+  return [].concat(typeof LEGACY_TITLE_NAMES!=="undefined"?LEGACY_TITLE_NAMES:[], typeof LEGACY_CARD_NAMES!=="undefined"?LEGACY_CARD_NAMES:[]);
+}
+function replaceLegacyNames(text){
+  if(!legacyNamePattern){
+    var pairs=legacyNamePairs();
+    legacyNameLookup={};
+    pairs.forEach(function(pair){ if(!(pair[0] in legacyNameLookup)) legacyNameLookup[pair[0]]=pair[1]; });
+    // Longest first so "Ulvar, the Huntmaster" wins over "Huntmaster".
+    var keys=Object.keys(legacyNameLookup).sort(function(a,b){ return b.length-a.length; });
+    legacyNamePattern=keys.length?new RegExp("(^|[^A-Za-z])("+keys.map(function(k){ return k.replace(/[.*+?^${}()|[\]\\]/g,"\\$&"); }).join("|")+")(?![A-Za-z])","g"):null;
+  }
+  if(!legacyNamePattern||typeof text!=="string") return text;
+  return text.replace(legacyNamePattern,function(_m,lead,name){ return lead+legacyNameLookup[name]; });
+}
+/** Rewrites pre-rename names in every string of a saved state (in place). Returns the state. */
+function migrateLegacyNames(state){
+  if(!state||typeof state!=="object"||state.namesVersion===NAMES_VERSION) return state;
+  var seen=[];
+  (function walk(node){
+    if(!node||typeof node!=="object"||seen.indexOf(node)>=0) return;
+    seen.push(node);
+    Object.keys(node).forEach(function(key){
+      var value=node[key];
+      if(typeof value==="string") node[key]=replaceLegacyNames(value);
+      else if(value&&typeof value==="object") walk(value);
+    });
+  })(state);
+  state.namesVersion=NAMES_VERSION;
+  return state;
+}
+
 /* ---------- state normalization ---------- */
 function normalizeState(state){
   if(!state) return null;
   if(!state.mode) state.mode="vanilla";
   if(state.phase==="garruk") state.phase="enemy"; // pre-rename saves
-  (state.log||[]).forEach(function(e){ // pre-rename log text
-    if(e&&typeof e.who==="string") e.who=e.who.replace(/Garruk, the Slayer/g,"Ulvar, the Huntmaster").replace(/Garruk, Apex Slayer/g,"Ulvar, Apex Huntmaster").replace(/Garruk/g,"Ulvar");
-    if(e&&typeof e.msg==="string") e.msg=e.msg.replace(/Garruk/g,"Ulvar").replace(/Overrun the Weak/g,"Reckoning of the Wild");
-  });
+  migrateLegacyNames(state); // pre-rename titles / card names in tokens, hands and the log
   state.version=1;
   state.actionSteps=state.actionSteps||[]; state.tokens=state.tokens||[]; state.log=state.log||[];
   state.turnPowerBonus=state.turnPowerBonus||0; state.spellLock=state.spellLock||""; state.lastPlayerDamage=state.lastPlayerDamage||0;

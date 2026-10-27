@@ -124,7 +124,7 @@ function bumpAiStat(key,amount){const stats=aiStats();stats[key]=(stats[key]||0)
 /* ---------- opponent creation ---------- */
 /**
  * Creates CPU seat `index` playing deck `deckId` (an id in DECK_REGISTRY;
- * missing / unknown → Gruul Voltron). The seat's name, icon and colour come
+ * missing / unknown → Wildheart Armory). The seat's name, icon and colour come
  * from that deck's cpuNames[index]. The legacy call shape
  * createOpponent(index, settings) is still accepted.
  */
@@ -451,8 +451,8 @@ function applyHomeGuard(opp,attackers,allPlayers,settings,target){
 
 /**
  * Decides whether a CPU should redirect its attack to one of the player's
- * planeswalkers instead of the player's life total. In real MTG, attackers
- * can target planeswalkers. CPUs do this when:
+ * planeswalkers instead of the player's life total (attackers may target
+ * PWs). CPUs do this when:
  * - The player has a planeswalker with meaningful loyalty
  * - The planeswalker hasn't already been reduced to low loyalty
  * - Random chance (not every turn — sometimes face is still better)
@@ -640,7 +640,7 @@ function undoRecord(undo){
 }
 
 /* ---------- board wipe strategy ---------- */
-/** The CPU's commander survives a symmetric wipe: in the command zone / hand, indestructible, or Heroic Intervention ready. */
+/** The CPU's commander survives a symmetric wipe: in the command zone / hand, indestructible, or a wipeProtect spell ready. */
 function commanderSafeFromWipe(opp,manaAfterWipe){
   const commander=commanderOnField(opp);
   if(!commander)return true;
@@ -650,11 +650,11 @@ function commanderSafeFromWipe(opp,manaAfterWipe){
 /**
  * Evaluates whether the CPU should cast a board wipe this turn.
  * Never while this CPU leads the table (archenemyScore).
- * - Symmetric (Wrath of the Wilds; commanders are spared by this model):
+ * - Symmetric (wipeType "symmetric"; commanders are spared by this model):
  *   total enemy creature power ≥ own power + 6, OR an opponent threatens
  *   lethal on this CPU before its next turn — AND this CPU's commander is in
  *   the command zone / hand or protected.
- * - Targeted (Savage Decree): only at the archenemy's board, and only when
+ * - Targeted (wipeType "targeted"): only at the archenemy's board, and only when
  *   that board is the biggest threat at the table (3+ creatures).
  * Returns { cast: boolean, manaRemaining: number }
  */
@@ -946,22 +946,19 @@ function undoRegrowth(opp,undo){
   return entry.name;
 }
 
-/* ---------- utility permanents (Outpost Siege, Lifecrafter's Bestiary, ...) ---------- */
+/* ---------- utility permanents (card.permanent) ---------- */
 /**
- * Noncreature utility cards that stay on the battlefield, and what the engine
- * models for them. Deck files can also declare a card as a permanent with
- * card.permanent = {effect, types, ...}. Modeled effects:
+ * Noncreature utility cards that stay on the battlefield. Deck files flag
+ * them with card.permanent = {effect, types, ...}. Modeled effects:
  *   upkeepCard   extra card each upkeep          creatureDraw  draw on creature cast
  *   upkeepToken  create card.permanent.tokens at upkeep
  *   anthem       your creatures get +permanent.p/+permanent.t
+ *   none         stays on the battlefield, no modeled trigger
+ * Saves made before the flag existed get entry.permanent from
+ * migrateLegacyCardNames (js/engine/state.js).
  */
-var CPU_UTILITY_PERMANENTS={
-  "Outpost Siege":{effect:"upkeepCard",types:["Enchantment"]},
-  "Lifecrafter's Bestiary":{effect:"creatureDraw",types:["Artifact"]},
-  "Skullclamp":{effect:"none",types:["Artifact","Equipment"]}
-};
 /** Modeled definition of a utility permanent (card or battlefield entry), or null. */
-function utilityPermanentDef(entry){return entry?(CPU_UTILITY_PERMANENTS[entry.name]||entry.permanent||null):null;}
+function utilityPermanentDef(entry){return entry&&entry.permanent||null;}
 function utilityPermanentTypes(entry){return (utilityPermanentDef(entry)||{}).types||["Permanent"];}
 function isUtilityPermanentCard(card){return !!card&&!!utilityPermanentDef(card)&&!isCreatureCard(card);}
 function utilityPermanentCount(opp,effect){
@@ -1036,22 +1033,24 @@ function applyBeginCombatTriggers(opp){
   return {label:`${commander.name.split(",")[0]}: create ${tokenSpecText(spec,made.length)}`,detail:trigger.text||"Beginning of combat trigger.",type:"trigger",counterable:false,
     tokenUid:made[0].uid,tokenUids:made.map(t=>t.uid)};
 }
-/** Lifecrafter's Bestiary: whenever this CPU casts a creature spell, draw a card. Appends to the action. */
+/** creatureDraw permanents: whenever this CPU casts a creature spell, draw a card. Appends to the action. */
 function applyCreatureCastTriggers(opp,action){
   const count=utilityPermanentCount(opp,"creatureDraw");
   if(!count||!action)return action;
+  const source=(opp.utilityPermanents||[]).find(entry=>(utilityPermanentDef(entry)||{}).effect==="creatureDraw");
   let drawn=0;
   for(let i=0;i<count;i++)if(opponentDeckSize(opp)>0&&drawOpponentCard(opp)!=="none")drawn++;
-  if(drawn)action.detail=`${action.detail||""} Lifecrafter's Bestiary draws ${drawn} card${drawn===1?"":"s"}.`.trim();
+  if(drawn)action.detail=`${action.detail||""} ${source.name} draws ${drawn} card${drawn===1?"":"s"}.`.trim();
   return action;
 }
-/** Outpost Siege: an extra card at the beginning of each upkeep. Returns the action or null. */
+/** upkeepCard permanents: an extra card at the beginning of each upkeep. Returns the action or null. */
 function applyUpkeepCardTriggers(opp){
   const count=utilityPermanentCount(opp,"upkeepCard");
   if(!count)return null;
   let drawn=0;
   for(let i=0;i<count;i++)if(opponentDeckSize(opp)>0&&drawOpponentCard(opp)!=="none")drawn++;
-  return drawn?{label:"Outpost Siege",detail:`Exiles the top card of the library and may play it this turn (+${drawn} card${drawn===1?"":"s"}).`,type:"upkeep"}:null;
+  const source=(opp.utilityPermanents||[]).find(entry=>(utilityPermanentDef(entry)||{}).effect==="upkeepCard");
+  return drawn?{label:source.name,detail:`Exiles the top card of the library and may play it this turn (+${drawn} card${drawn===1?"":"s"}).`,type:"upkeep"}:null;
 }
 
 /* ---------- CPU spell casting helpers (main phase) ---------- */
@@ -1151,25 +1150,28 @@ function castNoncreatureSpell(opp,card,casting,actions){
   }
   return {label:`Cast ${card.name}`,detail:(card.effect||"Resolves a spell.")+tax,cardName:card.name,type:"spell",counterable:true};
 }
-var CPU_PLAYER_REMOVAL_SPELLS=["Beast Within","Chaos Warp"];
-var CPU_PROTECTION_SPELLS=["Blossoming Defense","Vines of Vastwood","Heroic Intervention","Tamiyo's Safekeeping"];
-var CPU_WIPE_PROTECTION_SPELLS=["Heroic Intervention"];
 /*
- * Card roles. Gruul Voltron's cards are recognised by name (lists above);
- * other decks flag their cards in the deck file:
+ * Card roles — every deck flags its cards in the deck file:
  *   card.protect: true      instant that protects a creature (held-mana response)
  *   card.wipeProtect: true  also protects the whole board from a wipe
  *   card.removal: true      spot removal aimed at the archenemy's best threat;
  *                           card.removalInstruction ("{target}" placeholder) is
  *                           shown to the player when they are the target
  *   card.ruleRemoval: "any" | "artifactEnchantment"  can remove battlefield rules
+ *   card.removalLeavesToken: {name, ico, p, t}  the removed permanent's
+ *                           controller creates this token
  */
-function isProtectionCard(card){return !!card&&(CPU_PROTECTION_SPELLS.includes(card.name)||!!card.protect);}
-function isWipeProtectionCard(card){return !!card&&(CPU_WIPE_PROTECTION_SPELLS.includes(card.name)||!!card.wipeProtect);}
-function isRemovalCard(card){return !!card&&(CPU_PLAYER_REMOVAL_SPELLS.includes(card.name)||!!card.removal);}
+function isProtectionCard(card){return !!card&&!!card.protect;}
+function isWipeProtectionCard(card){return !!card&&!!card.wipeProtect;}
+function isRemovalCard(card){return !!card&&!!card.removal;}
+/** Instruction shown to the player when a removal card targets them. */
+function removalInstructionText(card,what){
+  if(card.removalInstruction)return card.removalInstruction.replace("{target}",what);
+  return `Remove ${what} from the battlefield.`;
+}
 /**
- * Spot removal (Beast Within / Chaos Warp) aimed at the archenemy's best
- * threat. Player archenemy → a playerRemoval instruction (planeswalker first,
+ * Spot removal (card.removal) aimed at the archenemy's best
+ * threat. Player archenemy → a playerRemoval instruction (PW first,
  * else the most threatening creature). CPU archenemy → its commander when it
  * is a real threat (8+ power, or 12+ commander damage dealt to this CPU);
  * that CPU may answer with a held protection spell (cpuRespondToRemoval).
@@ -1189,14 +1191,11 @@ function tryCpuRemoval(opp,mana,allPlayers,turnSpellState){
     addOpponentGraveyardCard(opp,typedGraveyardCard(card.card));
     const pw=[...(archenemy.planeswalkers||[])].sort((a,b)=>(b.loyalty||0)-(a.loyalty||0))[0];
     const best=playerCreatureProfile(archenemy).filter(t=>t.name!=="Creature").sort((a,b)=>(b.p||0)-(a.p||0))[0];
-    const what=pw?`${pw.name||"your highest-loyalty planeswalker"} (your highest-loyalty planeswalker)`:best?`${best.name} (your most threatening creature)`:"your most threatening creature";
-    const instruction=card.card.removalInstruction?card.card.removalInstruction.replace("{target}",what)
-      :card.card.name==="Beast Within"
-      ?`Destroy ${what}. You create a 3/3 green Beast creature token.`
-      :`Shuffle ${what} into your library, then reveal the top card; if it's a permanent card, put it onto the battlefield.`;
+    const what=pw?`${pw.name||"your highest-loyalty PW"} (your highest-loyalty PW)`:best?`${best.name} (your most threatening creature)`:"your most threatening creature";
+    const instruction=removalInstructionText(card.card,what);
     bumpAiStat("playerRemovals");
     return {action:{label:`Cast ${card.card.name} targeting you`,detail:`${card.card.effect} You are leading the table.`,cardName:card.card.name,type:"removal",counterable:true,
-      playerRemoval:{cardName:card.card.name,instruction}},cost:card.casting.cost};
+      playerRemoval:{cardName:card.card.name,instruction,leavesToken:card.card.removalLeavesToken?1:0}},cost:card.casting.cost};
   }
   const target=liveOpponentObject(archenemy.id,allPlayers);
   const commander=target&&commanderOnField(target);
@@ -1216,13 +1215,15 @@ function tryCpuRemoval(opp,mana,allPlayers,turnSpellState){
   }
   const undo=newUndoRecord();
   withRemovalSource(opp.id,()=>removeTokenWithUndo(target,commander,"graveyard",undo));
-  if(card.card.name==="Beast Within"){
-    const beast=addOpponentToken(target,{name:"Beast",ico:"🐗",kind:"voltron-creature",type:"Creature — Beast",p:3,t:3,baseP:3,baseT:3,kws:[],baseKws:[],
-      effect:"Token created by Beast Within.",summoningSick:true,owner:target.id,isToken:true});
+  const leaves=card.card.removalLeavesToken;
+  if(leaves){
+    const p=leaves.p!=null?leaves.p:3,t=leaves.t!=null?leaves.t:3,tokenName=leaves.name||"Beast";
+    const beast=addOpponentToken(target,{name:tokenName,ico:leaves.ico||"🐗",kind:"voltron-creature",type:`Creature — ${tokenName}`,p,t,baseP:p,baseT:t,kws:[],baseKws:[],
+      effect:`Token created by ${card.card.name}.`,summoningSick:true,owner:target.id,isToken:true});
     undo.created=[{ownerId:target.id,uid:beast.uid}];
   }
   action.undo=undo;
-  action.detail+=` ${commander.name.split(",")[0]} goes to the command zone${card.card.name==="Beast Within"?`; ${shortName(target)} creates a 3/3 Beast`:""}.`;
+  action.detail+=` ${commander.name.split(",")[0]} goes to the command zone${leaves?`; ${shortName(target)} creates a ${leaves.p!=null?leaves.p:3}/${leaves.t!=null?leaves.t:3} ${leaves.name||"Beast"}`:""}.`;
   return {action,cost:card.casting.cost};
 }
 /** Back-compat name. */
@@ -1289,7 +1290,7 @@ function untapOpponent(opp){
   clearTemporaryPumps(opp);
   opp.tokens.forEach(token=>{
     token.attacking=false;token.tapped=false;token.summoningSick=false;
-    // Upkeep triggers modelled: "+1/+1 counter at the beginning of your upkeep" (Primal Hydra).
+    // Upkeep triggers modelled: "+1/+1 counter at the beginning of your upkeep" (Mossback Hydra).
     if(token.effect&&/upkeep, put a \+1\/\+1 counter/i.test(token.effect)){token.baseP=(token.baseP||0)+1;token.baseT=(token.baseT||0)+1;}
   });
   opp.heldMana=0;
@@ -1325,7 +1326,7 @@ function protectionReserve(opp,mana,settings){
  * createMainPhaseContext for ctx). The shared wipe / haymaker / removal
  * policies are ctx steps the hook calls in its own order; the discard to
  * hand size is shared in executeOpponentEndStep.
- * Gruul Voltron's hook: ONE primary action (commander / fast mana / ramp, or
+ * Wildheart Armory's hook: ONE primary action (commander / fast mana / ramp, or
  * gear when the commander is out), loose equipment re-equips, then AT MOST
  * ONE secondary cast (board wipe, haymaker, removal, creature, draw/utility
  * spell). With the commander out and 6+ mana it keeps 1-2 mana open for a
@@ -1496,7 +1497,7 @@ function castBestTokenMaker(opp,mana,actions,turnSpellState){
   return mana;
 }
 
-/** Gruul Voltron's secondary priority (castOneSecondarySpell's default order). */
+/** Wildheart Armory's secondary priority (castOneSecondarySpell's default order). */
 var VOLTRON_SECONDARY_STEPS=["wipe","haymaker","removalVsCpu","extraGear","creature","fallbackRamp","spell","removalVsPlayer"];
 /** Every step name castSecondary understands. */
 var SECONDARY_STEP_NAMES=VOLTRON_SECONDARY_STEPS.concat(["tokenMaker"]);
@@ -1626,7 +1627,7 @@ function executeOpponentCombat(opp, allPlayers){
   const state=liveGameState();
   if(state)state.aiActiveOppId=opp.id;
   const settings=cpuSettings(state);
-  // Beginning of combat: commander token triggers (e.g. Boros Tokens).
+  // Beginning of combat: commander token triggers (e.g. Dawnmarch Legion).
   const trigger=applyBeginCombatTriggers(opp);
   if(trigger)actions.push(trigger);
 
@@ -1670,7 +1671,7 @@ function executeOpponentCombat(opp, allPlayers){
     let attackDetail=`${attackerCount} attacker${attackerCount===1?"":"s"}${heldText} · Target choice: ${deckStrategyLabels(opp)[opp.currentStrategy]}.`;
     if(planeswalkerTarget){
       attackLabel=`Attack ${planeswalkerTarget.name} (⬡ ${planeswalkerTarget.loyalty}) for ${attackPower}`;
-      attackDetail=`Targeting your planeswalker · ${attackerCount} attacker${attackerCount===1?"":"s"}${heldText} · Target choice: ${deckStrategyLabels(opp)[opp.currentStrategy]}.`;
+      attackDetail=`Targeting your PW · ${attackerCount} attacker${attackerCount===1?"":"s"}${heldText} · Target choice: ${deckStrategyLabels(opp)[opp.currentStrategy]}.`;
     }
     actions.push({label:attackLabel,detail:attackDetail,type:"attack",attackerUids:attackers.map(t=>t.uid),target,lethal:!!(plan&&plan.lethal)});
   }
@@ -1727,7 +1728,7 @@ function executeOpponentTurn(opp, allPlayers) {
  */
 /**
  * Deck id per CPU seat from settings.decks:
- *   undefined / null   every seat plays the default deck (Gruul Voltron)
+ *   undefined / null   every seat plays the default deck (Wildheart Armory)
  *   "mixed"            random registry decks, distinct while there are enough
  *                      (shuffled registry, then cycled)
  *   "<deck id>"        every seat plays that deck
@@ -2034,7 +2035,7 @@ function cpuRespondToRemoval(opp, token){
   return response;
 }
 /**
- * The CPU may answer a board wipe with Heroic Intervention when it has its
+ * The CPU may answer a board wipe with a wipeProtect spell when it has its
  * commander or 2+ creatures on the battlefield (probability scaled by the
  * interaction setting). Returns {cardName,label} or null.
  */
@@ -2138,6 +2139,10 @@ var commanderEffectDraft=null;
 
 function ensureCommanderEffectState(state){
   if(!state||!state.player)return;
+  if(state.namesVersion!==NAMES_VERSION){
+    migrateLegacyNames(state);
+    refreshLegacyCardData(state);
+  }
   const player=state.player;
   if(player.handSize==null)player.handSize=7;
   if(player.librarySize==null)player.librarySize=92;
@@ -2183,6 +2188,38 @@ function ensureCommanderEffectState(state){
     opp.tokens.forEach(token=>registerToken(opp,token));
     normalizeOpponentLibrary(opp);
   });
+}
+/**
+ * Saves made before the card rename / card flags: typed hand cards are
+ * re-read from the deck definition (new names + role flags such as protect /
+ * removal / permanent), utility permanents get their permanent definition,
+ * and stored player-removal prompts learn whether they leave a token.
+ */
+function refreshLegacyCardData(state){
+  (state.opponents||[]).forEach(opp=>{
+    const deck=deckOf(opp);
+    opp.typedHand=(opp.typedHand||[]).map(card=>{
+      const ref=card&&card.ref;
+      return ref&&deck&&deck.cards[ref.category]&&deck.cards[ref.category][ref.index]?typedHandCard(ref,deck):card;
+    });
+    (opp.utilityPermanents||[]).forEach(entry=>{
+      if(entry.permanent)return;
+      const def=cardDefinitionByName(entry.name,opp);
+      if(def&&def.permanent)entry.permanent=JSON.parse(JSON.stringify(def.permanent));
+    });
+  });
+  const seen=new Set();
+  const walk=node=>{
+    if(!node||typeof node!=="object"||seen.has(node))return;
+    seen.add(node);
+    if(node.playerRemoval&&node.playerRemoval.cardName&&node.playerRemoval.leavesToken==null){
+      const def=cardDefinitionByName(node.playerRemoval.cardName);
+      node.playerRemoval.leavesToken=def&&def.removalLeavesToken?1:0;
+    }
+    Object.values(node).forEach(walk);
+  };
+  walk(state.activeResult);
+  (state.opponents||[]).forEach(opp=>walk(opp.actionSteps));
 }
 /**
  * Repairs saves made before typed opening hands: every hand.other card needs
@@ -2285,7 +2322,7 @@ function applyBattlefieldRuleModifiers(){
 function cpuSpellDescriptor(card,category){
   const resolvedCategory=category||card?.ref?.category;
   if(resolvedCategory==="commander"||resolvedCategory==="creatures"||card?.isCreature||card?.rampValue)return {types:["Creature"],nonCreature:false};
-  if(resolvedCategory==="gear"||resolvedCategory==="explosive"||card?.name==="Skullclamp")return {types:["Artifact"],nonCreature:true};
+  if(resolvedCategory==="gear"||resolvedCategory==="explosive"||(card?.permanent?.types||[]).includes("Equipment"))return {types:["Artifact"],nonCreature:true};
   if(resolvedCategory==="ramp"||resolvedCategory==="draw"||resolvedCategory==="haymakers"||resolvedCategory==="boardwipes")return {types:["Sorcery"],nonCreature:true};
   if(resolvedCategory==="protection")return {types:["Instant"],nonCreature:true};
   if(resolvedCategory==="utility")return {types:["Enchantment"],nonCreature:true};
@@ -2314,16 +2351,15 @@ function battlefieldRuleRemovalPriority(rule){
   return {cpuSpellLimit:60,artifactCastBan:55,noncreatureCastBan:50,creatureTax:45,noncreatureTax:40,cpuCreatureAttackBan:35,cpuCreatureBlockBan:35,cpuGraveyardExile:30,cpuDamageReduction:25,cpuCreatureKeywordLoss:20,cpuCreaturePowerCap:20,cpuCreaturePT:20,cpuCreatureMinusPT:20}[rule.kind]||0;
 }
 function canCpuRemovalAffectRule(card,rule){
-  if(card.name==="Beast Within"||card.name==="Chaos Warp"||card.ruleRemoval==="any")return true;
-  if(card.ruleRemoval==="artifactEnchantment")return ["Artifact","Enchantment"].includes(rule.sourceType);
-  return card.name==="Return to Nature"&&["Artifact","Enchantment"].includes(rule.sourceType);
+  if(card.ruleRemoval==="any")return true;
+  return card.ruleRemoval==="artifactEnchantment"&&["Artifact","Enchantment"].includes(rule.sourceType);
 }
 function findCpuRuleRemoval(opp,mana,turnSpellState){
   const rules=activeBattlefieldRules().filter(isPersistentBattlefieldRule).sort((left,right)=>battlefieldRuleRemovalPriority(right)-battlefieldRuleRemovalPriority(left));
   if(!rules.length)return null;
   const answers=opp.typedHand
     .map((card,index)=>({card,index}))
-    .filter(({card})=>["Beast Within","Chaos Warp","Return to Nature"].includes(card.name)||!!card.ruleRemoval);
+    .filter(({card})=>!!card.ruleRemoval);
   for(const rule of rules){
     for(const answer of answers){
       const casting=cpuCanCast(answer.card,answer.card.cost,mana,undefined,turnSpellState);

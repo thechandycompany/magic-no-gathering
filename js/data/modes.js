@@ -13,7 +13,7 @@ var MODES = {
   vanilla: {
     id: "vanilla",
     name: "Easy Ulvar",
-    enemy: "Ulvar, the Huntmaster",
+    enemy: "Ulvar, the Pack Warden",
     icon: "🐺",
     boardIcon: "🌲",
     boardTitle: "Ulvar's Battlefield",
@@ -26,7 +26,7 @@ var MODES = {
   hard: {
     id: "hard",
     name: "Hard Ulvar",
-    enemy: "Ulvar, Apex Huntmaster",
+    enemy: "Ulvar, Apex Warden",
     icon: "😤",
     boardIcon: "🔥",
     boardTitle: "The Apex Hunting Ground",
@@ -77,3 +77,16 @@ var MODES = {
     summary: "A Commander-style rival ramps, casts Rukha from the command zone, equips her with gear, and threatens a 21 commander-damage defeat."
   }
 };
+
+/* Pre-rename adventure enemy titles → current titles (most specific first).
+   Applied to saved logs by migrateLegacyNames() in js/engine/state.js. */
+var LEGACY_TITLE_NAMES = [
+  ["Garruk, the Slayer", "Ulvar, the Pack Warden"],
+  ["Garruk, Apex Slayer", "Ulvar, Apex Warden"],
+  ["Ulvar, the Huntmaster", "Ulvar, the Pack Warden"],
+  ["Ulvar, Apex Huntmaster", "Ulvar, Apex Warden"],
+  ["Apex Huntmaster", "Apex Warden"],
+  ["Huntmaster", "Pack Warden"],
+  ["Garruk", "Ulvar"],
+  ["Overrun the Weak", "Reckoning of the Wild"]
+];

@@ -4,7 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Solo Encounter Engine</title><!-- full title set from GAME_TITLE by applyGameTitle() -->
-<link rel="stylesheet" href="styles.css?v=22">
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="styles.css?v=23">
 <style>.wrap{opacity:0;transition:opacity .15s;}</style>
 </head>
 <body>
@@ -56,7 +57,7 @@
         <div class="garruk-top">
           <div class="portrait" id="portrait" role="button" tabindex="0" aria-label="Open encounter rules">
             <div class="glyph" id="portraitGlyph">🐺</div>
-            <div class="name" id="enemyName">Ulvar, the Huntmaster</div>
+            <div class="name" id="enemyName">Ulvar, the Pack Warden</div>
             <div class="portrait-tooltip sr-only" id="portraitTooltip"></div>
           </div>
           <div class="garruk-stats">
@@ -90,7 +91,7 @@
           <div class="phase-bar" id="phaseBar"></div>
           <div class="phase-bar-label" id="phaseBarLabel"></div>
         </div>
-        <div class="turn-banner garruk sr-only" id="turnBanner"><span class="tb-ico" id="tbIco">🐺</span><span id="tbText">Ulvar's Turn</span><span class="tb-sub" id="tbSub">— respond defensively</span></div>
+        <div class="turn-banner garruk sr-only" id="turnBanner"><span class="tb-ico" id="tbIco">🗡️</span><span id="tbText">Your Turn</span><span class="tb-sub" id="tbSub"></span></div>
         <div class="declare garruk" id="declare">
           <div class="declare-h" id="declareTitle">Enemy actions</div>
           <div class="declare-body">
@@ -177,28 +178,28 @@
 </div>
 
 <!-- Data layer -->
-<script src="js/data/modes.js?v=22"></script>
-<script src="js/data/cards-adventure.js?v=22"></script>
-<script src="js/data/decks/deck-base.js?v=22"></script>
-<script src="js/data/decks/gruul-voltron.js?v=22"></script>
-<script src="js/data/decks/boros-tokens.js?v=22"></script>
-<script src="js/data/decks/index.js?v=22"></script>
+<script src="js/data/modes.js?v=23"></script>
+<script src="js/data/cards-adventure.js?v=23"></script>
+<script src="js/data/decks/deck-base.js?v=23"></script>
+<script src="js/data/decks/gruul-voltron.js?v=23"></script>
+<script src="js/data/decks/boros-tokens.js?v=23"></script>
+<script src="js/data/decks/index.js?v=23"></script>
 
 <!-- Engine layer -->
-<script src="js/engine/state.js?v=22"></script>
-<script src="js/engine/phases.js?v=22"></script>
-<script src="js/engine/tokens.js?v=22"></script>
-<script src="js/engine/combat.js?v=22"></script>
-<script src="js/engine/ai-adventure.js?v=22"></script>
-<script src="js/engine/ai-commander.js?v=22"></script>
-<script src="js/engine/commander-turn.js?v=22"></script>
+<script src="js/engine/state.js?v=23"></script>
+<script src="js/engine/phases.js?v=23"></script>
+<script src="js/engine/tokens.js?v=23"></script>
+<script src="js/engine/combat.js?v=23"></script>
+<script src="js/engine/ai-adventure.js?v=23"></script>
+<script src="js/engine/ai-commander.js?v=23"></script>
+<script src="js/engine/commander-turn.js?v=23"></script>
 
 <!-- UI layer -->
-<script src="js/ui/modals.js?v=22"></script>
-<script src="js/ui/render.js?v=22"></script>
-<script src="js/ui/inputs.js?v=22"></script>
-<script src="js/ui/setup.js?v=22"></script>
-<script src="js/ui/commander-ui.js?v=22"></script>
+<script src="js/ui/modals.js?v=23"></script>
+<script src="js/ui/render.js?v=23"></script>
+<script src="js/ui/inputs.js?v=23"></script>
+<script src="js/ui/setup.js?v=23"></script>
+<script src="js/ui/commander-ui.js?v=23"></script>
 <script>document.querySelector('.wrap').style.opacity='1';bootGame();</script>
 </body>
 </html>

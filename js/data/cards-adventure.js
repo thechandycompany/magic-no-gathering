@@ -13,7 +13,7 @@ var ABILITIES = {
     cost: 0,
     label: "[0] Summon Wolf",
     flavor: [
-      "A wolf answers the Huntmaster's call.",
+      "A wolf answers the Pack Warden's call.",
       "Ulvar whistles; a lean grey wolf pads onto the field.",
       "The pack grows. A new wolf bares its teeth."
     ],
@@ -24,7 +24,7 @@ var ABILITIES = {
     label: "[+4] Rip and Tear",
     flavor: [
       "Ulvar snarls — a wolf's fangs blacken with venom.",
-      "The Huntmaster channels raw savagery into his pack.",
+      "The Pack Warden channels raw savagery into his pack.",
       "One beast swells with lethal fury."
     ],
     mech: "Target creature gets +1/+0 and gains deathtouch. Ulvar gains 4 loyalty."
@@ -34,7 +34,7 @@ var ABILITIES = {
     label: "[-10] Slay",
     flavor: [
       "Ulvar hurls his axe. \"Nothing survives the hunt.\"",
-      "The Huntmaster marks his prey.",
+      "The Pack Warden marks his prey.",
       "Steel flashes — and Ulvar drinks the fallen's strength."
     ],
     mech: "Destroy target creature. Ulvar gains loyalty equal to its toughness."
@@ -45,7 +45,7 @@ var ABILITIES = {
     flavor: [
       "Ulvar roars. The wilds themselves turn on everything he does not command.",
       "\"KNEEL.\" A wave of primal death sweeps the board.",
-      "Only the Huntmaster's beasts remain standing."
+      "Only the Pack Warden's beasts remain standing."
     ],
     mech: "Destroy all creatures Ulvar doesn't control."
   }

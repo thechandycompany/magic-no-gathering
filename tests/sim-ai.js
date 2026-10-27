@@ -16,12 +16,12 @@
    Reported: median kill turn, % commander-damage wins, player-targeted
    share, wipes per game, CPU interaction (protection response) rate.
 
-   Also: Boros Tokens goldfish + pod and a mixed-deck pod at PL3 (settings.decks).
+   Also: Dawnmarch Legion goldfish + pod and a mixed-deck pod at PL3 (settings.decks).
 
    Env: SIM_AI_GOLDFISH (games per level, default 80), SIM_AI_POD (default 40).
    Seeds: goldfish 70000 + level*1000 + game, pod 80000 + level*1000 + game,
-   knobs 90000 + variant*1000 + game, Boros goldfish 95000 + game,
-   Boros pod 96000 + game, mixed pod 97000 + game.
+   knobs 90000 + variant*1000 + game, Legion goldfish 95000 + game,
+   Legion pod 96000 + game, mixed pod 97000 + game.
    ===================================================================== */
 "use strict";
 var harnessLib = require("./harness");
