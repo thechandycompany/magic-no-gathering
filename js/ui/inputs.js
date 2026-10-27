@@ -3,7 +3,7 @@
    One inline form tracks only the state changes relevant to the current
    checkpoint. Values are applied together when the checkpoint resolves.
    ===================================================================== */
-let turnInput=null;
+var turnInput=null;
 
 function currentTurnInputKey(){
   return `${S.phase}:${S.turn}:${S.phase==="player"?S.playerStep:(S.pendingDecl||"enemy")}`;
@@ -161,11 +161,12 @@ function reindexSelectedCasualties(removedIndex){
 }
 
 /* ---------- contextual form rendering ---------- */
-function numberFieldHtml(key,label,help,max){
+/* `tip` (optional) adds a helpTip() after the label; `label` stays plain text for aria-labels. */
+function numberFieldHtml(key,label,help,max,tip){
   const value=ensureTurnInput()[key]||0;
   const maxAttr=max==null?"":` data-max="${max}"`;
   return `<div class="context-field context-field-${key}">
-    <div class="context-field-copy"><strong>${label}</strong>${help?`<span>${help}</span>`:""}</div>
+    <div class="context-field-copy"><strong>${label}${tip?helpTip(tip):""}</strong>${help?`<span>${help}</span>`:""}</div>
     <div class="inline-stepper">
       <button type="button" data-delta-key="${key}" data-delta="-1"${maxAttr} aria-label="Decrease ${label}">−</button>
       <input type="number" min="0" value="${value}" data-number-key="${key}"${max==null?"":` max="${max}"`} aria-label="${label}">
@@ -197,9 +198,6 @@ function disclosureHtml(label,content){
   const open=ensureTurnInput().moreOpen?" open":"";
   return `<details class="context-disclosure" data-disclosure-key="moreOpen"${open}><summary><span>${label}</span><small>Optional</small></summary><div class="context-disclosure-body">${content}</div></details>`;
 }
-function orderedEnemyStep(number,title,body,modifier=""){
-  return `<section class="resolution-step ${modifier}"><div class="resolution-step-h"><span>${number}</span><strong>${title}</strong></div><div class="resolution-step-b">${body}</div></section>`;
-}
 function renderEnemyTurnInputs(){
   const input=ensureTurnInput();
   const hasActionEffect=S.pendingDecl==="slay"||S.pendingDecl==="wipe"||S.pendingDecl==="conclaveWipe";
@@ -214,14 +212,14 @@ function renderEnemyTurnInputs(){
     if(S.pendingDecl==="slay"){
       actionHtml=`<div class="context-section"><div class="context-section-title">Slay targets ${S.slayTarget}</div>${outcomeChoiceHtml("slayOutcome",[
         {value:"dies",label:"Target dies"},{value:"protected",label:"I protected it"}
-      ])}${input.slayOutcome==="dies"?numberFieldHtml("slayToughness","Destroyed creature's toughness","Added to Garruk's loyalty."):""}</div>`;
+      ])}${input.slayOutcome==="dies"?numberFieldHtml("slayToughness","Destroyed creature's toughness","",null,"Added to the enemy's loyalty."):""}</div>`;
     }else{
       const label=S.pendingDecl==="conclaveWipe"?"Prismatic Ruin":"Overrun the Weak";
       actionHtml=`<div class="context-section"><div class="context-section-title">${label}</div>${outcomeChoiceHtml("wipeOutcome",[
         {value:"wiped",label:"Resolve the board clear"},{value:"protected",label:"I protected my board"}
       ])}${input.wipeOutcome==="wiped"?numberFieldHtml("wipeSurvivors","Your creatures that survive","Defaults to zero.",S.player.creatures):""}</div>`;
     }
-    html+=orderedEnemyStep(step++,"Resolve enemy effect",actionHtml,"enemy-effect");
+    html+=responseStepHtml(step++,"effect","Resolve enemy effect","",actionHtml,"enemy-effect");
   }
 
   if(input.allowEnemyDeaths){
@@ -233,9 +231,9 @@ function renderEnemyTurnInputs(){
       if(selectedCount)parts.push(`${selectedCount} dying`);
       if(blockedCount)parts.push(`${blockedCount} blocked`);
       noteText=`${parts.join(" · ")} · remaining attack ${remainingPower}`;
-    }else{noteText="Select creatures above to block or destroy them.";}
-    const removalHtml=casualtyFieldHtml("Combat interactions","Select attacking creatures above.")+`<div class="resolution-note">${noteText}</div>`;
-    html+=orderedEnemyStep(step++,"Block / remove creatures",removalHtml,"precombat-removal");
+    }else{noteText="Select creatures above to block or remove them.";}
+    const removalHtml=casualtyFieldHtml("Combat interactions","Select creatures above.")+`<div class="resolution-note">${noteText}</div>`;
+    html+=responseStepHtml(step++,"remove","Block or remove creatures","",removalHtml,"precombat-removal");
   }
 
   if(initialAttackers>0){
@@ -247,14 +245,14 @@ function renderEnemyTurnInputs(){
       combatHtml+=`<div class="attacker-list">${attackerNames}</div>`;
       combatHtml+=numberFieldHtml("incomingDamage","Damage reaching you","Adjust for blocks or prevention.",remainingPower);
       const commanderPower=projectedCommanderDamagePower(input);
-      if(commanderPower>0)combatHtml+=numberFieldHtml("commanderDamage","Commander damage reaching you","Only unblocked damage from Rukha counts toward 21.",Math.min(commanderPower,input.incomingDamage));
+      if(commanderPower>0)combatHtml+=numberFieldHtml("commanderDamage","Commander damage reaching you",`Only unblocked damage from ${enemyName()} counts.`,Math.min(commanderPower,input.incomingDamage),"21 combat damage from a single commander defeats you, whatever your life total.");
       combatHtml+=numberFieldHtml("playerDeaths","Your creatures that died","Reduces your creature total.",S.player.creatures);
     }else{
       combatHtml=`<div class="context-summary"><span class="context-summary-icon">✓</span><div><strong>No attackers remain</strong><span>Combat deals no damage.</span></div></div>`;
     }
-    html+=orderedEnemyStep(step++,"Resolve combat",combatHtml,"enemy-combat");
+    html+=responseStepHtml(step++,"combat","Resolve combat","",combatHtml,"enemy-combat");
   }else if(!hasActionEffect){
-    html+=orderedEnemyStep(step++,"Combat","<div class=\"context-summary\"><span class=\"context-summary-icon\">✓</span><div><strong>No attack this turn</strong><span>Continue when ready.</span></div></div>","enemy-combat");
+    html+=responseStepHtml(step++,"combat","Combat","","<div class=\"context-summary\"><span class=\"context-summary-icon\">✓</span><div><strong>No attack this turn</strong><span>Continue when ready.</span></div></div>","enemy-combat");
   }
 
   html+=disclosureHtml("More board changes",numberFieldHtml("creaturesPlayed","Creatures you added","Flash, tokens, or returned creatures."));
@@ -270,17 +268,17 @@ function renderPlayerTurnInputs(){
   let html='<div class="context-form player-form">';
   if(S.playerStep===TURN_STEPS.UPKEEP||S.playerStep===TURN_STEPS.DRAW){
     html+=`<div class="context-summary draw-summary"><span class="context-summary-icon">🃏</span><div><strong>Resolve upkeep, then draw</strong><span>Continue once you have drawn.</span></div></div>`;
-    const changes=numberFieldHtml("creaturesPlayed","Creatures added","Flash, tokens, or returned creatures.")+(input.allowEnemyDeaths?casualtyFieldHtml("Enemy creatures removed","Select cards above."):"");
+    const changes=numberFieldHtml("creaturesPlayed","Creatures added","Flash, tokens, or returned creatures.")+(input.allowEnemyDeaths?casualtyFieldHtml("Enemy creatures removed","Select creatures above."):"");
     html+=disclosureHtml("Record board changes",changes);
   }else if(timing.isMainPhase){
     html+=numberFieldHtml("creaturesPlayed","Creatures added","Cast, created, or returned.");
-    if(input.allowEnemyDeaths)html+=casualtyFieldHtml("Enemy creatures removed","Select cards above.");
+    if(input.allowEnemyDeaths)html+=casualtyFieldHtml("Enemy creatures removed","Select creatures above.");
   }else if(timing.isCombat){
     html+=`<div class="context-summary combat-summary"><span class="context-summary-icon">⚔️</span><div><strong>Final combat result</strong><span>Enter the outcome.</span></div></div>`;
-    html+=numberFieldHtml("damageToEnemy",`Damage dealt to ${resource}`,"Damage that reached the enemy resource.");
+    html+=numberFieldHtml("damageToEnemy",`Damage dealt to ${resource}`,"Damage that reached the enemy resource.",null,modeConfig().resource==="Loyalty"?"Loyalty is the enemy's life total. Reduce it to 0 to win.":"");
     if(S.mode==="voltron")html+=numberFieldHtml("commanderDamageToEnemy","Commander damage to Rukha","Unblocked damage from your commander (toward 21).",input.damageToEnemy||undefined);
     html+=numberFieldHtml("playerDeaths","Your creatures that died","Reduces your creature total.",S.player.creatures);
-    if(input.allowEnemyDeaths)html+=casualtyFieldHtml("Enemy creatures that died","Select cards above.");
+    if(input.allowEnemyDeaths)html+=casualtyFieldHtml("Enemy creatures that died","Select creatures above.");
     html+=disclosureHtml("More combat changes",numberFieldHtml("creaturesPlayed","Creatures added","Flash, tokens, or returned creatures."));
   }else{
     html+=`<div class="context-summary"><span class="context-summary-icon">✓</span><div><strong>No input needed</strong><span>Continue when ready.</span></div></div>`;
@@ -288,7 +286,7 @@ function renderPlayerTurnInputs(){
   html+='</div>';
   document.getElementById('respTitle').textContent=timing.isCombat?"Combat result":timing.isMainPhase?"Board changes":(S.playerStep===TURN_STEPS.UPKEEP||S.playerStep===TURN_STEPS.DRAW)?"Upkeep + Draw":"Current step";
   document.getElementById('respGrid').innerHTML=html;
-  document.getElementById('respHint').textContent=input.allowEnemyDeaths?"Select enemy casualties on the battlefield.":"";
+  document.getElementById('respHint').textContent=input.allowEnemyDeaths?"Select creatures above to remove them.":"";
 }
 function wireContextualInputs(){
   const grid=document.getElementById('respGrid');
@@ -301,10 +299,17 @@ function wireContextualInputs(){
     };
   });
   grid.querySelectorAll('[data-number-key]').forEach(field=>{
+    const max=field.max===""?null:parseInt(field.max,10);
     field.onchange=()=>{
-      const max=field.max===""?null:parseInt(field.max,10);
       clampTurnInput(field.dataset.numberKey,field.value,max);
       field.value=ensureTurnInput()[field.dataset.numberKey];
+      refreshTurnPreview();
+    };
+    // Keep the outcome pill and step chips live while typing (value is normalised on change)
+    field.oninput=()=>{
+      if(field.value==="")return;
+      clampTurnInput(field.dataset.numberKey,field.value,max);
+      refreshTurnPreview();
     };
   });
   grid.querySelectorAll('[data-toggle-key]').forEach(toggle=>{
@@ -330,6 +335,61 @@ function renderContextualInputs(){
   wireContextualInputs();
   renderTokens();
   document.getElementById('endTurnBtn').disabled=false;
+  refreshTurnPreview();
+}
+
+/* ---------- outcome preview + step status ---------- */
+function previewParts(parts){return parts.filter(Boolean).join(" · ");}
+/* Damage the enemy turn will actually deal with the current entries (mirrors resolveEnemyTurnInputs). */
+function projectedEnemyTurnDamage(input){
+  const remaining=projectedEnemyAttackPower(input);
+  const damage=Math.min(input.incomingDamage||0,remaining);
+  const commander=S.mode==="voltron"?Math.min(input.commanderDamage||0,damage,projectedCommanderDamagePower(input)):0;
+  return {remaining,damage,commander};
+}
+/* Short outcome text for the main button: "Take 7 (6 cmdr)", "Deal 5 · Remove 1", "+1 creature". */
+function turnPreviewText(){
+  if(!S||!turnInput)return "";
+  const input=turnInput;
+  const removed=selectedEnemyDeathIndices().length;
+  const added=input.creaturesPlayed>0?`+${plural(input.creaturesPlayed,"creature")}`:"";
+  if(S.phase==="garruk"){
+    const {damage,commander}=projectedEnemyTurnDamage(input);
+    return previewParts([removed&&`Remove ${removed}`,`Take ${damage}${commander>0?` (${commander} cmdr)`:""}`,added]);
+  }
+  const timing=currentTimingInfo();
+  const remove=input.allowEnemyDeaths&&removed?`Remove ${removed}`:"";
+  if(timing.isCombat)return previewParts([input.damageToEnemy>0&&`Deal ${input.damageToEnemy}`,remove,input.playerDeaths>0&&`Lose ${plural(input.playerDeaths,"creature")}`,added]);
+  return previewParts([added,remove]);
+}
+function refreshEnemyStepStatus(){
+  const panel=document.getElementById('respGrid');
+  if(!panel||!turnInput)return;
+  const input=turnInput;
+  if(S.pendingDecl==="slay"){
+    const protectedIt=input.slayOutcome==="protected";
+    setStepStatus(panel,"effect",protectedIt?"Protected":`Dies · +${input.slayToughness} loyalty`,protectedIt||input.slayToughness!==1);
+  }else if(S.pendingDecl==="wipe"||S.pendingDecl==="conclaveWipe"){
+    const protectedIt=input.wipeOutcome==="protected";
+    setStepStatus(panel,"effect",protectedIt?"Protected":`${input.wipeSurvivors} survive`,protectedIt||input.wipeSurvivors>0);
+  }
+  const dying=selectedEnemyDeathIndices().length,blocked=input.blockedCreatures?input.blockedCreatures.size:0;
+  setStepStatus(panel,"remove",previewParts([dying&&`${dying} dying`,blocked&&`${blocked} blocked`]),dying+blocked>0);
+  if(S.tokens.some(token=>token.attacking)){
+    const {damage}=projectedEnemyTurnDamage(input);
+    setStepStatus(panel,"combat",`Take ${damage}`,!input.incomingDamageAuto||!input.commanderDamageAuto&&S.mode==="voltron"||input.playerDeaths>0);
+  }else{
+    setStepStatus(panel,"combat","No attack",false);
+  }
+}
+function refreshTurnPreview(){
+  if(!S)return;
+  if(S.phase==="garruk")refreshEnemyStepStatus();
+  const el=document.querySelector('#endTurnBtn .cmd-preview');
+  if(!el)return;
+  const text=turnPreviewText();
+  el.textContent=text;
+  el.hidden=!text;
 }
 
 /* ---------- resolve ---------- */
