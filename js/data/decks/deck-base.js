@@ -30,6 +30,11 @@
 /** Library composition by category, commander excluded. 37+10+1+51 = 99. */
 var DEFAULT_LIBRARY_COUNTS = { lands: 37, ramp: 10, explosive: 1 };
 var DECK_CATEGORIES = ["lands", "ramp", "explosive", "other"];
+/**
+ * Fast-mana pieces in the library by CPU power level (1-5). Level 3 keeps the
+ * deck's own count; extra pieces replace lands so the library stays 99 cards.
+ */
+var FAST_MANA_BY_POWER_LEVEL = [null, 0, 1, 1, 3, 5];
 
 /**
  * Fisher-Yates shuffle — returns a new shuffled copy, does not mutate input.
@@ -71,10 +76,13 @@ function deckOtherCount(deckDef) {
  * 37 lands + 10 ramp + 1 explosive + N other, where N is the deck
  * definition's deckComposition total (51 for Gruul Voltron) = 99 cards.
  */
-function newDeck(deckDef) {
+function newDeck(deckDef, powerLevel) {
   var def = deckDef || defaultCommanderDeck();
   var counts = (def && def.libraryCounts) || DEFAULT_LIBRARY_COUNTS;
-  return { lands: counts.lands, ramp: counts.ramp, explosive: counts.explosive, other: def ? deckOtherCount(def) : 51 };
+  var explosive = counts.explosive;
+  if (powerLevel != null && powerLevel !== 3 && FAST_MANA_BY_POWER_LEVEL[powerLevel] != null) explosive = FAST_MANA_BY_POWER_LEVEL[powerLevel];
+  var lands = Math.max(0, counts.lands - (explosive - counts.explosive));
+  return { lands: lands, ramp: counts.ramp, explosive: explosive, other: def ? deckOtherCount(def) : 51 };
 }
 
 /**
@@ -167,9 +175,19 @@ function returnHandCardToLibrary(opp, category, typedIndex) {
   return true;
 }
 
-/** How good an opening hand looks (used to decide mulligans). */
-function openingHandKeepable(hand) {
-  return hand.lands >= 2 && hand.lands <= 5;
+/**
+ * How good an opening hand looks (used to decide mulligans). powerLevel 1-5
+ * (default 3) scales keep quality: low levels keep loose hands, high levels
+ * insist on enough mana sources to curve out.
+ */
+function openingHandKeepable(hand, powerLevel) {
+  var level = powerLevel == null ? 3 : powerLevel;
+  var sources = hand.lands + hand.ramp + hand.explosive;
+  if (level <= 1) return hand.lands >= 1 && hand.lands <= 6;
+  if (level === 2) return hand.lands >= 2 && hand.lands <= 6;
+  if (level === 3) return hand.lands >= 2 && hand.lands <= 5;
+  if (level === 4) return hand.lands >= 2 && hand.lands <= 5 && sources >= 3;
+  return hand.lands <= 5 && (hand.lands >= 3 || (hand.lands === 2 && sources >= 3));
 }
 
 /**
@@ -203,12 +221,12 @@ function chooseMulliganBottom(opp) {
  * mulligan is free, so afterwards (mulligans - 1) cards go to the bottom.
  * Returns the number of mulligans taken.
  */
-function londonMulligan(opp, maxMulligans) {
+function londonMulligan(opp, maxMulligans, powerLevel) {
   var limit = maxMulligans == null ? 2 : maxMulligans;
   var i;
   for (i = 0; i < 7; i++) drawOpponentCard(opp);
   var mulligans = 0;
-  while (!openingHandKeepable(opp.hand) && mulligans < limit) {
+  while (!openingHandKeepable(opp.hand, powerLevel) && mulligans < limit) {
     mulligans++;
     for (var c = 0; c < 3; c++) {
       var cat = DECK_CATEGORIES[c];
@@ -272,6 +290,7 @@ function deployCommanderGeneric(opp, commanderDef) {
     if (opp.tokens[i].kind === "commander") return null;
   }
   opp.commanderZone = false;
+  opp.commanderInHand = false;
   var token = {
     name: opp.name,
     ico: opp.ico,
@@ -308,15 +327,20 @@ function detachCommanderGear(opp) {
  */
 function returnCommanderToZone(opp) {
   detachCommanderGear(opp);
+  opp.commanderInHand = false;
   opp.commanderTax = (opp.commanderTax || 0) + 2;
 }
 
 /**
- * Bounce ("return to hand"): the commander goes back to the command zone
- * as a hand-equivalent WITHOUT increasing commander tax.
+ * Bounce ("return to hand"): the commander goes to its owner's hand
+ * (opp.commanderInHand) WITHOUT increasing commander tax. Casting it from
+ * hand costs its base cost (commanderCost). commanderZone stays true so
+ * "not on the battlefield" checks keep working; commanderInHand tells the
+ * two apart.
  */
 function returnCommanderToHand(opp) {
   detachCommanderGear(opp);
+  opp.commanderInHand = true;
 }
 
 /**
@@ -328,11 +352,16 @@ function manaAvailable(opp) {
 }
 
 /**
- * Current cost to cast a commander (base + accumulated tax).
+ * Current cost to cast a commander: base + accumulated tax for a cast from
+ * the command zone, base cost only when cast from hand (after a bounce).
+ * Tax model: +2 is recorded each time the commander goes back to the command
+ * zone (each such return follows exactly one command-zone cast). A bounce
+ * adds no tax; the next return to the zone charges the earlier zone cast.
  * baseCost defaults to the opponent's deck commander cost.
  */
 function commanderCost(opp, baseCost) {
   var base = baseCost == null ? deckCommanderBase(opp).cost : baseCost;
+  if (opp.commanderInHand) return base;
   return base + (opp.commanderTax || 0);
 }
 

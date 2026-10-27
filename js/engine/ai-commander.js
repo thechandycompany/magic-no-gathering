@@ -69,28 +69,66 @@ function findCardRefByName(name){
 }
 function isManaToken(token){return token.kind==="voltron-support"&&!!token.effect&&token.effect.includes("mana");}
 
+/* =====================================================================
+   AI SETTINGS — gameState.settings.cpu = {powerLevel 1-5, aggression 0-1,
+   interaction 0-1}. Defaults 3 / 0.5 / 0.5 keep the tuned pacing.
+   - powerLevel: mulligan keep quality, fast-mana count, gear efficiency
+   - aggression: share of the board kept home (0 keeps twice the estimated
+     need back, 0.5 keeps exactly the need, 1 keeps nothing back)
+   - interaction: probability of instant-speed responses and of holding
+     mana open for them (0 = never)
+   ===================================================================== */
+var CPU_AI_DEFAULTS={powerLevel:3,aggression:0.5,interaction:0.5};
+function clampUnit(value){return Math.max(0,Math.min(1,value));}
+function normalizeCpuSettings(raw){
+  const source=raw||{};
+  const num=(value,fallback)=>{const n=Number(value);return value==null||value===""||!isFinite(n)?fallback:n;};
+  return {
+    powerLevel:Math.max(1,Math.min(5,Math.round(num(source.powerLevel,CPU_AI_DEFAULTS.powerLevel)))),
+    aggression:clampUnit(num(source.aggression,CPU_AI_DEFAULTS.aggression)),
+    interaction:clampUnit(num(source.interaction,CPU_AI_DEFAULTS.interaction))
+  };
+}
+/** Current CPU AI settings (normalized). */
+function cpuSettings(state){
+  const s=state||liveGameState();
+  return normalizeCpuSettings(s&&s.settings&&s.settings.cpu);
+}
+/** Probability that a CPU uses a held instant when it can (interaction 0.5 → 0.8). */
+function cpuResponseChance(settings){return clampUnit(1.6*(settings||cpuSettings()).interaction);}
+/** Per-game AI counters (plain JSON; read by tests and optional UI stats). */
+function aiStats(state){
+  const s=state||liveGameState();
+  if(!s)return {};
+  s.aiStats=s.aiStats||{};
+  return s.aiStats;
+}
+function bumpAiStat(key,amount){const stats=aiStats();stats[key]=(stats[key]||0)+(amount==null?1:amount);}
+
 /* ---------- opponent creation ---------- */
-function createOpponent(index) {
+function createOpponent(index, settings) {
   const id=CPU_NAMES[index]||CPU_NAMES[0];
   const deckDef=defaultCommanderDeck();
+  const config=normalizeCpuSettings(settings);
   const opp={
     id:`cpu_${index}`, index, name:id.name, ico:id.ico, color:id.color, archetype:"voltron",
     life:40, poison:0, commanderDamageReceived:{}, commanderDamageDealt:{},
-    commanderZone:true, commanderTax:0,
-    deck:newDeck(deckDef), otherDeck:generateOtherDeck(deckDef), hand:{lands:0,ramp:0,explosive:0,other:0}, typedHand:[],
-    landsInPlay:0, rampInPlay:0, explosiveInPlay:0, gear:0, attachedGear:[], looseGear:[],
+    commanderZone:true, commanderInHand:false, commanderTax:0,
+    deck:newDeck(deckDef,config.powerLevel), otherDeck:generateOtherDeck(deckDef), hand:{lands:0,ramp:0,explosive:0,other:0}, typedHand:[],
+    landsInPlay:0, rampInPlay:0, explosiveInPlay:0, gear:0, attachedGear:[], looseGear:[], utilityPermanents:[],
     graveyardCount:0, graveyard:[], nextGraveyardCardId:0, discardHistory:[], exileCount:0, exile:[], nextExileCardId:0,
-    tokens:[], nextTokenUid:0, damageLog:{}, lastAttacker:null, grudge:null, heldMana:0, turnsTaken:0, mulligans:0,
+    tokens:[], nextTokenUid:0, damageLog:{}, lastAttacker:null, grudge:null, grudgeRound:null, grudgeReason:null,
+    heldMana:0, turnsTaken:0, mulligans:0,
     currentStrategy:STRATEGIES.THREAT, actionSteps:[], attackTarget:null, attackPower:0,
   };
   // Opening hand: 7 typed cards, London mulligan (first one free, max 2).
-  londonMulligan(opp,2);
+  londonMulligan(opp,2,config.powerLevel);
   return opp;
 }
 
 function commanderOnField(opp) { return opp.tokens.find(t=>t.kind==="commander")||null; }
 
-/** Casts the commander from the command zone. Returns the token or false. */
+/** Casts the commander from the command zone (or from hand after a bounce). Returns the token or false. */
 function deployCommander(opp) {
   const token=deployCommanderGeneric(opp,deckCommanderBase(opp));
   if(!token)return false;
@@ -98,17 +136,137 @@ function deployCommander(opp) {
   return token;
 }
 
-/* ---------- targeting ---------- */
-function threatScore(p){
-  const c=p.creatures!=null?p.creatures:(p.tokens?p.tokens.length:0);
-  const cmd=p.tokens?p.tokens.some(t=>t.kind==="commander"):false;
-  const pwCount=(p.planeswalkers||[]).length;
-  // Player always has high baseline threat — in real Commander, the human is
-  // the most dangerous because they're unpredictable and may be sandbagging.
-  // This ensures CPUs attack the player regularly, not just each other.
-  // Planeswalkers significantly increase threat since they generate value every turn.
-  const humanBonus=p.id==="player"?20:0;
-  return c*3+(cmd?15:0)+(40-p.life)+humanBonus+(pwCount*12);
+/* =====================================================================
+   ROUND BOOKKEEPING — beginCommanderRound (contract, wave 2)
+   ===================================================================== */
+/** Shared per-round reset: target counts, grudge decay, last-round damage. */
+function startAiRound(state){
+  if(!state)return;
+  const turn=state.turn||0;
+  state.roundTargets={};
+  state.aiRound=turn;
+  (state.opponents||[]).forEach(opp=>{
+    opp.damageLog=opp.damageLog||{};
+    // Damage taken last round, by source.
+    const before=opp._damageLogAtRoundStart||{};
+    const lastRound={};
+    Object.keys(opp.damageLog).forEach(id=>{const dealt=(opp.damageLog[id]||0)-(before[id]||0);if(dealt>0)lastRound[id]=dealt;});
+    opp.damageLastRound=lastRound;
+    opp._damageLogAtRoundStart={...opp.damageLog};
+    // Grudges decay after 2 rounds.
+    if(opp.grudge&&opp.grudgeRound!=null&&turn-opp.grudgeRound>2){opp.grudge=null;opp.grudgeRound=null;opp.grudgeReason=null;}
+    // Whoever dealt this CPU the most damage last round earns a grudge,
+    // unless a fresher commander-removal grudge is in place.
+    const top=Object.entries(lastRound).filter(([id])=>id!==opp.id).sort((a,b)=>b[1]-a[1])[0];
+    const removalGrudgeFresh=opp.grudgeReason==="commander"&&opp.grudgeRound!=null&&turn-opp.grudgeRound<=1;
+    if(top&&top[1]>=4&&!removalGrudgeFresh){opp.grudge=top[0];opp.grudgeRound=turn;opp.grudgeReason="damage";}
+  });
+}
+/**
+ * Contract: the UI calls this once at the start of every round, before the
+ * first seat acts. Resets state.roundTargets (how many CPUs have chosen each
+ * player as their attack target this round), decays grudges and records who
+ * dealt each CPU the most damage last round.
+ */
+function beginCommanderRound(state){
+  const s=state||liveGameState();
+  if(!s)return;
+  startAiRound(s);
+  s.aiRoundManaged=true;
+}
+/** Fallback when the caller never calls beginCommanderRound: reset once per turn number. */
+function ensureAiRound(state){
+  if(!state||state.aiRoundManaged)return;
+  if(state.aiRound!==(state.turn||0)||!state.roundTargets)startAiRound(state);
+}
+function recordRoundTarget(state,targetId){
+  if(!state||!targetId)return;
+  state.roundTargets=state.roundTargets||{};
+  state.roundTargets[targetId]=(state.roundTargets[targetId]||0)+1;
+}
+
+/* ---------- grudges from commander removal ---------- */
+/** Explicit culprit for the next CPU-commander removal (set by engine paths that know it). */
+var cpuRemovalSource=null;
+function withRemovalSource(sourceId,fn){
+  const previous=cpuRemovalSource;
+  cpuRemovalSource=sourceId;
+  try{return fn();}finally{cpuRemovalSource=previous;}
+}
+/** Who removed this CPU's commander: explicit source, else the acting CPU during a CPU turn, else the player. */
+function inferRemovalCulprit(owner){
+  if(cpuRemovalSource)return cpuRemovalSource;
+  const state=liveGameState();
+  if(state&&state.phase!=="player"&&state.aiActiveOppId){
+    if(state.aiActiveOppId!==owner.id)return state.aiActiveOppId;
+    const active=state.opponents.find(o=>o.id===state.aiActiveOppId);
+    return active&&active.attackTarget&&active.attackTarget!==owner.id?active.attackTarget:"player";
+  }
+  return "player";
+}
+function noteCommanderRemoved(owner){
+  if(!owner||owner.id==="player")return;
+  const culprit=inferRemovalCulprit(owner);
+  if(!culprit||culprit===owner.id)return;
+  owner.grudge=culprit;owner.grudgeRound=currentCommanderTurn();owner.grudgeReason="commander";
+}
+
+/* =====================================================================
+   TABLE EVALUATION — board power, archenemy score, lethal and defense math
+   ===================================================================== */
+function isPlayerEntry(p){return !!p&&p.id==="player";}
+/** The player's creatures as combat profiles: tracked tokens with P/T, else 2/2 per creature. */
+function playerCreatureProfile(p){
+  const count=Math.max(0,p.creatures||0);
+  const tracked=(p.tokens||[]).filter(t=>typeof t.p==="number").map(t=>({name:t.name,p:t.p||0,t:t.t||1,kws:t.kws||[]}));
+  const list=tracked.slice(0,count);
+  while(list.length<count)list.push({name:"Creature",p:2,t:2,kws:[]});
+  return list;
+}
+/** Creatures that can deal combat damage (mana dorks never attack). */
+function combatTokens(p,assumeUntapped){
+  if(isPlayerEntry(p))return playerCreatureProfile(p);
+  return (p.tokens||[]).filter(t=>!isManaToken(t)&&(t.p||0)>=1&&(assumeUntapped||!t.summoningSick));
+}
+function attackPowerOf(token){return (token.p||0)*combatStrikeCount(token);}
+function boardPower(p){return combatTokens(p,true).reduce((sum,t)=>sum+attackPowerOf(t),0);}
+/** Commander pressure: power on the battlefield, half its base when castable next turn. */
+function commanderPressure(p){
+  if(isPlayerEntry(p))return Math.max(0,p.commanderPower||0);
+  const commander=commanderOnField(p);
+  if(commander)return attackPowerOf(commander);
+  return manaAvailable(p)+1>=commanderCost(p)?(deckCommanderBase(p).p||0)*0.5:0;
+}
+function entryHandSize(p){return isPlayerEntry(p)?Math.max(0,p.handSize!=null?p.handSize:7):opponentHandSize(p);}
+function maxCommanderDamageDealt(p){return Object.values(p.commanderDamageDealt||{}).reduce((best,d)=>Math.max(best,d||0),0);}
+/**
+ * Table-wide archenemy score: who is AHEAD scores high. Board power,
+ * commander power/gear, hand size, life, planeswalkers and commander-damage
+ * progress all count. The same number for every CPU (no human bonus).
+ */
+function archenemyScore(p){
+  if(!p)return 0;
+  return boardPower(p)+1.5*commanderPressure(p)+entryHandSize(p)+0.5*Math.max(0,p.life||0)
+    +6*(p.planeswalkers||[]).length+0.5*maxCommanderDamageDealt(p);
+}
+/** Back-compat name used by older callers. */
+function threatScore(p){return archenemyScore(p);}
+/** Alive table entries (player projection + CPUs) for a state. */
+function tableEntries(state){return state?allPlayersForTargeting(state).filter(p=>!isEliminatedTarget(p)):[];}
+/** Sorted standings [{id, score}] for the alive table. */
+function tableStandings(state){
+  return tableEntries(state||liveGameState()).map(p=>({id:p.id,score:archenemyScore(p)})).sort((a,b)=>b.score-a.score);
+}
+/** True when this CPU leads the table (it never casts a board wipe then). */
+function cpuIsAhead(opp,allPlayers){
+  const alive=(allPlayers||[]).filter(p=>!isEliminatedTarget(p)||p.id===opp.id);
+  const mine=archenemyScore(opp);
+  return alive.filter(p=>p.id!==opp.id).every(p=>archenemyScore(p)<mine);
+}
+/** The leading opponent from this CPU's point of view. */
+function archenemyFor(opp,allPlayers){
+  return (allPlayers||[]).filter(p=>p.id!==opp.id&&!isEliminatedTarget(p))
+    .sort((a,b)=>archenemyScore(b)-archenemyScore(a))[0]||null;
 }
 
 /** True when a player/opponent (or a targeting projection) is out of the game. */
@@ -116,6 +274,128 @@ function isEliminatedTarget(p){
   if(!p||p.life<=0)return true;
   if((p.poison||0)>=10)return true;
   return !!(p.commanderDamageReceived&&Object.values(p.commanderDamageReceived).some(d=>d>=21));
+}
+function liveOpponentObject(id,allPlayers){
+  const state=liveGameState();
+  const fromState=state?state.opponents.find(o=>o.id===id):null;
+  return fromState||(allPlayers||[]).find(p=>p.id===id)||null;
+}
+
+/**
+ * Damage a set of attackers would deal to a target right now.
+ * CPU defender: exact blocks via cpuAssignBlockers/resolveSingleBlock (no
+ * state change). Player: the player blocks the biggest attackers (commander
+ * first) with one creature each; blocked tramplers deal their excess over 2.
+ * Returns {damage, commanderDamage, poison}.
+ */
+function estimateAttackDamage(opp,target,attackers){
+  if(!attackers.length||!target)return {damage:0,commanderDamage:0,poison:0};
+  const poisonOf=list=>list.filter(t=>hasKeyword(t,"Infect")||hasKeyword(t,"Toxic")).reduce((s,t)=>s+attackPowerOf(t),0);
+  if(!isPlayerEntry(target)&&target.tokens){
+    const combat=resolveCpuCombat(opp,target,attackers);
+    const prevented=previewCpuDamagePrevention(combat.damageToDefender,combat.commanderDamage);
+    return {damage:prevented.damage,commanderDamage:prevented.commanderDamage,poison:poisonOf(combat.unblocked)};
+  }
+  const blockers=playerCreatureProfile(target).length;
+  const ordered=[...attackers].sort((a,b)=>(b.kind==="commander")-(a.kind==="commander")||attackPowerOf(b)-attackPowerOf(a));
+  let damage=0,commanderDamage=0;const unblocked=[];
+  ordered.forEach((attacker,index)=>{
+    const dealt=index<blockers?trampleExcess(attacker,2)*combatStrikeCount(attacker):attackPowerOf(attacker);
+    if(index>=blockers)unblocked.push(attacker);
+    damage+=dealt;
+    if(attacker.kind==="commander")commanderDamage+=dealt;
+  });
+  const prevented=previewCpuDamagePrevention(damage,commanderDamage);
+  return {damage:prevented.damage,commanderDamage:prevented.commanderDamage,poison:poisonOf(unblocked)};
+}
+/**
+ * Can this CPU eliminate the target this turn? Life ≤ likely unblocked
+ * damage, commander damage + commander power ≥ 21, or poison.
+ * Returns {lethal, kind, attackers}.
+ */
+function lethalPlan(opp,target,options){
+  const assumeUntapped=!!(options&&options.assumeUntapped);
+  const none={lethal:false,kind:null,attackers:[]};
+  if(!target||isEliminatedTarget(target)||cpuCreaturesCannotAttack())return none;
+  const attackers=combatTokens(opp,assumeUntapped);
+  if(!attackers.length)return none;
+  const commander=attackers.find(t=>t.kind==="commander");
+  const estimate=estimateAttackDamage(opp,target,attackers);
+  if(estimate.damage>=target.life)return {lethal:true,kind:"life",attackers};
+  const received=(target.commanderDamageReceived||{})[opp.id]||0;
+  if(commander){
+    const reach=isPlayerEntry(target)?Math.min(attackPowerOf(commander),previewCpuDamagePrevention(attackPowerOf(commander),attackPowerOf(commander)).commanderDamage):estimate.commanderDamage;
+    if(received+reach>=21)return {lethal:true,kind:"commander",attackers};
+  }
+  if(estimate.poison>0&&(target.poison||0)+estimate.poison>=10)return {lethal:true,kind:"poison",attackers};
+  return none;
+}
+
+/** Attackers worth sending at a target (no lethal): bad trades stay home. */
+function profitableAttackers(opp,target){
+  const ready=opp.tokens.filter(t=>!t.summoningSick&&!isManaToken(t));
+  const defenders=isPlayerEntry(target)?playerCreatureProfile(target):(target&&target.tokens||[]);
+  return ready.filter(t=>{
+    if(t.kind==="commander")return (t.p||0)>=1;
+    if((t.p||0)<2)return false;
+    return evaluateAttackProfitability(t,defenders)>0;
+  });
+}
+/** Potential attack powers (desc) each other player could aim at this CPU before its next turn. */
+function incomingThreats(opp,allPlayers){
+  return (allPlayers||[]).filter(p=>p.id!==opp.id&&!isEliminatedTarget(p)).map(p=>{
+    const attackers=combatTokens(p,true).map(t=>({power:attackPowerOf(t),commander:t.kind==="commander",trample:hasKeyword(t,"Trample")}))
+      .sort((a,b)=>b.power-a.power);
+    const commanderDamageSoFar=(opp.commanderDamageReceived||{})[p.id]||0;
+    const commander=attackers.find(a=>a.commander);
+    return {id:p.id,attackers,total:attackers.reduce((s,a)=>s+a.power,0),
+      commanderLethal:!!commander&&commanderDamageSoFar+commander.power>=21};
+  }).sort((a,b)=>b.total-a.total);
+}
+/** Does this home guard survive the threat? Each blocker stops one attacker (the biggest first). */
+function guardSurvives(threat,blockers,life,factor){
+  if(!threat)return true;
+  const stopped=threat.attackers.slice(0,blockers);
+  let through=threat.attackers.slice(blockers).reduce((s,a)=>s+a.power,0);
+  stopped.forEach(a=>{if(a.trample)through+=Math.max(0,a.power-2);});
+  if(threat.commanderLethal&&blockers===0)return factor<=0;
+  return through*factor<life;
+}
+/** True when some opponent threatens to eliminate this CPU before its next turn. */
+function threatensLethalOn(opp,allPlayers){
+  const blockers=opp.tokens.length;
+  return incomingThreats(opp,allPlayers).some(threat=>!guardSurvives(threat,blockers,opp.life,1));
+}
+/**
+ * Keeps back enough untapped blockers to survive the strongest opponent who
+ * acts before this CPU's next turn (scaled by aggression). Smallest
+ * non-commander attackers stay home first; the commander last. When even an
+ * all-home guard would not survive, the CPU races instead.
+ */
+function applyHomeGuard(opp,attackers,allPlayers,settings,target){
+  const factor=2*(1-settings.aggression);
+  if(factor<=0||!attackers.length)return attackers;
+  const threat=incomingThreats(opp,allPlayers)[0];
+  if(!threat)return attackers;
+  const sending=[...attackers];
+  const homeCount=()=>opp.tokens.length-sending.length;
+  if(guardSurvives(threat,homeCount(),opp.life,factor))return sending;
+  if(!guardSurvives(threat,opp.tokens.length,opp.life,factor))return sending; // can't hold: race
+  // A Voltron commander keeps swinging while it is racing (target within two
+  // hits by life or commander damage) unless the threat is commander-lethal.
+  const commander=sending.find(t=>t.kind==="commander");
+  const racing=!!commander&&!!target&&(()=>{
+    const hit=attackPowerOf(commander);
+    const commanderLeft=21-((target.commanderDamageReceived||{})[opp.id]||0);
+    return Math.min(target.life,commanderLeft)<=2*hit;
+  })();
+  const order=[...sending].sort((a,b)=>(a.kind==="commander")-(b.kind==="commander")||(a.p||0)-(b.p||0))
+    .filter(t=>t.kind!=="commander"||!racing||threat.commanderLethal);
+  for(const token of order){
+    sending.splice(sending.indexOf(token),1);
+    if(guardSurvives(threat,homeCount(),opp.life,factor))break;
+  }
+  return sending;
 }
 
 /**
@@ -125,6 +405,7 @@ function isEliminatedTarget(p){
  * - The player has a planeswalker with meaningful loyalty
  * - The planeswalker hasn't already been reduced to low loyalty
  * - Random chance (not every turn — sometimes face is still better)
+ * Never when the attack is lethal on the player.
  * Returns the planeswalker object to target, or null (attack life).
  */
 function choosePlaneswalkerTarget(opp, playerState){
@@ -137,40 +418,72 @@ function choosePlaneswalkerTarget(opp, playerState){
   return null;
 }
 
-function evaluateStrategy(opp, alive) {
-  const nearDeath=alive.find(p=>p.life<=10);
-  if(nearDeath)return STRATEGIES.GANG_UP;
-  if(opp.lastAttacker&&(opp.damageLog[opp.lastAttacker]||0)>=10)return STRATEGIES.LAST_HITTER;
-  if(opp.grudge&&alive.find(p=>p.id===opp.grudge))return Math.random()<0.3?STRATEGIES.GRUDGE:STRATEGIES.THREAT;
-  if(opp.life<=20)return STRATEGIES.VULNERABLE;
-  return STRATEGIES.THREAT;
-}
+/**
+ * Target selection (deterministic — cpuIntentPreview uses the same plan):
+ * 1. Lethal: any opponent this CPU can eliminate this turn (the 2-per-round
+ *    cap does not apply).
+ * 2. Otherwise the archenemy (table leader by archenemyScore), adjusted for
+ *    this CPU's grudge, the player who dealt it the most damage, and the last
+ *    big hitter this round. At most 2 CPUs choose the same player per round
+ *    (state.roundTargets); a target the attack can't damage loses to one it can.
+ * options.assumeUntapped: plan as if this CPU's turn started now (preview).
+ * Returns {targetId, strategy, lethal, lethalKind, attackers} or null.
+ */
+function planTarget(opp,allPlayers,options){
+  const opts=options||{};
+  const alive=(allPlayers||[]).filter(p=>p.id!==opp.id&&!isEliminatedTarget(p));
+  if(!alive.length)return null;
+  const state=liveGameState();
+  const lethal=alive.map(p=>({p,plan:lethalPlan(opp,p,opts)})).filter(entry=>entry.plan.lethal)
+    .sort((a,b)=>archenemyScore(b.p)-archenemyScore(a.p))[0];
+  if(lethal)return {targetId:lethal.p.id,strategy:STRATEGIES.LETHAL,lethal:true,lethalKind:lethal.plan.kind,attackers:lethal.plan.attackers};
+  if(alive.length===1)return {targetId:alive[0].id,strategy:STRATEGIES.THREAT,lethal:false,attackers:null};
 
-function chooseTarget(opp, allPlayers) {
-  const alive=allPlayers.filter(p=>p.id!==opp.id&&!isEliminatedTarget(p));
-  if(alive.length===0)return null;
-  if(alive.length===1)return alive[0].id;
-  const strategy=evaluateStrategy(opp,alive);
-  opp.currentStrategy=strategy;
-
-  let chosen=null;
-  switch(strategy){
-    case STRATEGIES.LAST_HITTER:if(opp.lastAttacker&&alive.find(p=>p.id===opp.lastAttacker))chosen=opp.lastAttacker;break;
-    case STRATEGIES.MOST_DAMAGE:{const s=[...alive].sort((a,b)=>(opp.damageLog[b.id]||0)-(opp.damageLog[a.id]||0));if((opp.damageLog[s[0].id]||0)>0)chosen=s[0].id;break;}
-    case STRATEGIES.GRUDGE:if(opp.grudge&&alive.find(p=>p.id===opp.grudge))chosen=opp.grudge;break;
-    case STRATEGIES.VULNERABLE:{chosen=[...alive].sort((a,b)=>a.life-b.life)[0].id;break;}
-    case STRATEGIES.GANG_UP:{const bl=[...alive].sort((a,b)=>a.life-b.life);if(bl[0].life<=15)chosen=bl[0].id;break;}
+  const counts=(state&&state.roundTargets)||{};
+  const damageLog=opp.damageLog||{};
+  const topDamage=Object.entries(damageLog).filter(([id])=>alive.some(p=>p.id===id)).sort((a,b)=>b[1]-a[1])[0];
+  const roundStart=opp._damageLogAtRoundStart||{};
+  const thisRound={};
+  Object.keys(damageLog).forEach(id=>{thisRound[id]=(damageLog[id]||0)-(roundStart[id]||0);});
+  const scored=alive.map(p=>{
+    const base=archenemyScore(p);
+    const bonuses={};
+    // GRUDGE: removed this CPU's commander. MOST_DAMAGE: dealt it the most
+    // damage last round (grudge reason "damage") or the most damage overall.
+    if(opp.grudge===p.id&&opp.grudgeReason==="commander")bonuses[STRATEGIES.GRUDGE]=25;
+    let damageBonus=opp.grudge===p.id&&opp.grudgeReason!=="commander"?12:0;
+    if(topDamage&&topDamage[0]===p.id&&topDamage[1]>=8)damageBonus=Math.max(damageBonus,Math.min(15,0.3*topDamage[1]));
+    if(damageBonus)bonuses[STRATEGIES.MOST_DAMAGE]=damageBonus;
+    if(opp.lastAttacker===p.id&&(thisRound[p.id]||0)>=10)bonuses[STRATEGIES.LAST_HITTER]=10;
+    const bonus=Object.values(bonuses).reduce((s,v)=>s+v,0);
+    const attackers=opts.assumeUntapped?combatTokens(opp,true):profitableAttackers(opp,p);
+    const expected=estimateAttackDamage(opp,p,attackers).damage;
+    return {p,base,bonuses,total:base+bonus,expected,capped:(counts[p.id]||0)>=2};
+  });
+  const leader=[...scored].sort((a,b)=>b.base-a.base)[0];
+  let pool=scored.filter(entry=>!entry.capped);
+  if(!pool.length)pool=scored;
+  if(pool.some(entry=>entry.expected>0))pool=pool.filter(entry=>entry.expected>0);
+  const chosen=pool.sort((a,b)=>b.total-a.total||b.base-a.base)[0];
+  let strategy=STRATEGIES.THREAT;
+  if(chosen!==leader){
+    const best=Object.entries(chosen.bonuses).sort((a,b)=>b[1]-a[1])[0];
+    strategy=best&&chosen.base+best[1]>=leader.base?best[0]:STRATEGIES.OPENING;
   }
-  if(chosen)return chosen;
-
-  // Default: threat-weighted random — higher threat = more likely to be targeted,
-  // but not guaranteed. This spreads damage naturally across the table.
-  const scored=[...alive].map(p=>({id:p.id,score:threatScore(p)}));
-  const totalScore=scored.reduce((s,p)=>s+p.score,0);
-  if(totalScore<=0)return alive[Math.floor(Math.random()*alive.length)].id;
-  let roll=Math.random()*totalScore;
-  for(const p of scored){roll-=p.score;if(roll<=0)return p.id;}
-  return scored[scored.length-1].id;
+  return {targetId:chosen.p.id,strategy,lethal:false,attackers:null};
+}
+/** Legacy name: kept for callers that only want a target. */
+function evaluateStrategy(opp,alive){const plan=planTarget(opp,alive);return plan?plan.strategy:STRATEGIES.THREAT;}
+/** Last plan per CPU (module state, not saved). */
+var lastTargetPlans={};
+function chooseTarget(opp, allPlayers) {
+  const state=liveGameState();
+  ensureAiRound(state);
+  const plan=planTarget(opp,allPlayers);
+  if(!plan)return null;
+  opp.currentStrategy=plan.strategy;
+  lastTargetPlans[opp.id]=plan;
+  return plan.targetId;
 }
 
 /* =====================================================================
@@ -245,6 +558,11 @@ function applyNoncombatCpuDamage(target,amount,undo){
 function undoRecord(undo){
   if(!undo)return [];
   const notes=[];
+  (undo.created||[]).forEach(entry=>{
+    const owner=findOwnerById(entry.ownerId);
+    const token=owner&&findTokenByUid(owner,entry.uid);
+    if(token){owner.tokens.splice(owner.tokens.indexOf(token),1);notes.push(`${token.name} token is removed`);}
+  });
   (undo.removed||[]).slice().reverse().forEach(snapshot=>{if(restoreRemovedToken(snapshot))notes.push(`${snapshot.token.name} returns to the battlefield`);});
   (undo.life||[]).forEach(entry=>{
     const owner=findOwnerById(entry.id);
@@ -264,63 +582,69 @@ function undoRecord(undo){
 }
 
 /* ---------- board wipe strategy ---------- */
+/** The CPU's commander survives a symmetric wipe: in the command zone / hand, indestructible, or Heroic Intervention ready. */
+function commanderSafeFromWipe(opp,manaAfterWipe){
+  const commander=commanderOnField(opp);
+  if(!commander)return true;
+  if(hasKeyword(commander,"Indestructible"))return true;
+  return opp.typedHand.some(card=>CPU_WIPE_PROTECTION_SPELLS.includes(card.name)&&cpuCanCast(card,card.cost,manaAfterWipe,"protection",null).canCast);
+}
 /**
  * Evaluates whether the CPU should cast a board wipe this turn.
- * Strategy:
- * - Symmetric (Wrath of the Wilds): Cast when opponents collectively have 4+ more
- *   creatures than you, OR you're about to die and they have a wide board.
- *   Commanders are spared by this model.
- * - Targeted (Savage Decree): Cast when a single opponent has 3+ creatures and is
- *   the biggest threat. Prefer targeting whoever has the most board presence.
- *
+ * Never while this CPU leads the table (archenemyScore).
+ * - Symmetric (Wrath of the Wilds; commanders are spared by this model):
+ *   total enemy creature power ≥ own power + 6, OR an opponent threatens
+ *   lethal on this CPU before its next turn — AND this CPU's commander is in
+ *   the command zone / hand or protected.
+ * - Targeted (Savage Decree): only at the archenemy's board, and only when
+ *   that board is the biggest threat at the table (3+ creatures).
  * Returns { cast: boolean, manaRemaining: number }
  */
 function evaluateAndCastBoardWipe(opp, mana, allPlayers, actions, turnSpellState){
   const wipesInHand=opp.typedHand.filter(c=>c.ref?.category==="boardwipes");
   if(wipesInHand.length===0)return {cast:false,manaRemaining:mana};
+  if(cpuIsAhead(opp,allPlayers))return {cast:false,manaRemaining:mana};
 
-  const myCreatureCount=opp.tokens.length;
-  const opponents=allPlayers.filter(p=>p.id!==opp.id&&p.life>0);
-  const totalEnemyCreatures=opponents.reduce((sum,p)=>sum+(p.creatures!=null?p.creatures:(p.tokens?p.tokens.length:0)),0);
-
-  let biggestThreat=null, biggestThreatCount=0;
-  opponents.forEach(p=>{
-    const count=p.creatures!=null?p.creatures:(p.tokens?p.tokens.length:0);
-    if(count>biggestThreatCount){biggestThreatCount=count;biggestThreat=p;}
-  });
+  const opponents=allPlayers.filter(p=>p.id!==opp.id&&!isEliminatedTarget(p));
+  const countOf=p=>p.creatures!=null?p.creatures:(p.tokens?p.tokens.length:0);
+  const totalEnemyCreatures=opponents.reduce((sum,p)=>sum+countOf(p),0);
+  const enemyPower=opponents.reduce((sum,p)=>sum+boardPower(p),0);
+  const ownPower=boardPower(opp);
+  const lethalThreat=threatensLethalOn(opp,allPlayers);
+  const stats=aiStats();
 
   const symmetricWipe=wipesInHand.find(c=>c.wipeType==="symmetric");
   if(symmetricWipe){
     const casting=cpuCanCast(symmetricWipe,symmetricWipe.cost,mana,"boardwipes",turnSpellState);
-    if(casting.canCast){
-      const boardDeficit=totalEnemyCreatures-myCreatureCount;
-      const desperate=opp.life<=15&&totalEnemyCreatures>=3;
-      if(boardDeficit>=4||desperate){
-        mana-=casting.cost;
-        removeTypedCardFromHand(opp,symmetricWipe);
-        addOpponentGraveyardCard(opp,typedGraveyardCard(symmetricWipe));
-        recordCpuSpellCast(turnSpellState);
-        const undo=newUndoRecord();
-        cpuOpponentsFrom(allPlayers).forEach(cpu=>{
-          if(cpu!==opp&&isOpponentDead(cpu))return;
-          cpu.tokens.filter(token=>token.kind!=="commander").forEach(token=>removeTokenWithUndo(cpu,token,"graveyard",undo));
-        });
-        actions.push({
-          label:`⚡ Cast ${symmetricWipe.name}`,
-          detail:`${symmetricWipe.effect} All non-commander creatures on every battlefield are destroyed.`,
-          boardWipe:"symmetric",wipeName:symmetricWipe.name,cardName:symmetricWipe.name,
-          type:"wipe",counterable:true,undo,
-          playerRemoval:{cardName:symmetricWipe.name,instruction:"Destroy all non-commander creatures you control."}
-        });
-        return {cast:true,manaRemaining:mana};
-      }
+    if(casting.canCast&&totalEnemyCreatures>=3&&(enemyPower>=ownPower+6||lethalThreat)&&commanderSafeFromWipe(opp,mana-casting.cost)){
+      mana-=casting.cost;
+      removeTypedCardFromHand(opp,symmetricWipe);
+      addOpponentGraveyardCard(opp,typedGraveyardCard(symmetricWipe));
+      recordCpuSpellCast(turnSpellState);
+      const undo=newUndoRecord();
+      withRemovalSource(opp.id,()=>cpuOpponentsFrom(allPlayers).forEach(cpu=>{
+        if(cpu!==opp&&isOpponentDead(cpu))return;
+        cpu.tokens.filter(token=>token.kind!=="commander").forEach(token=>removeTokenWithUndo(cpu,token,"graveyard",undo));
+      }));
+      stats.wipes=(stats.wipes||0)+1;stats.symmetricWipes=(stats.symmetricWipes||0)+1;
+      actions.push({
+        label:`⚡ Cast ${symmetricWipe.name}`,
+        detail:`${symmetricWipe.effect} All non-commander creatures on every battlefield are destroyed.`+(lethalThreat?" (Facing a lethal attack.)":""),
+        boardWipe:"symmetric",wipeName:symmetricWipe.name,cardName:symmetricWipe.name,
+        type:"wipe",counterable:true,undo,
+        playerRemoval:{cardName:symmetricWipe.name,instruction:"Destroy all non-commander creatures you control."}
+      });
+      return {cast:true,manaRemaining:mana};
     }
   }
 
   const targetedWipe=wipesInHand.find(c=>c.wipeType==="targeted");
-  if(targetedWipe&&biggestThreat&&biggestThreatCount>=3){
+  const archenemy=archenemyFor(opp,allPlayers);
+  if(targetedWipe&&archenemy&&countOf(archenemy)>=3){
+    const biggest=opponents.every(p=>p===archenemy||boardPower(p)<=boardPower(archenemy));
     const casting=cpuCanCast(targetedWipe,targetedWipe.cost,mana,"boardwipes",turnSpellState);
-    if(casting.canCast&&(biggestThreatCount>myCreatureCount||(biggestThreatCount>=3&&opp.life<=25))){
+    const worthIt=boardPower(archenemy)>=ownPower||incomingThreats(opp,allPlayers).some(t=>t.id===archenemy.id&&t.total>=opp.life);
+    if(casting.canCast&&biggest&&worthIt){
       mana-=casting.cost;
       removeTypedCardFromHand(opp,targetedWipe);
       addOpponentGraveyardCard(opp,typedGraveyardCard(targetedWipe));
@@ -328,18 +652,19 @@ function evaluateAndCastBoardWipe(opp, mana, allPlayers, actions, turnSpellState
       const undo=newUndoRecord();
       // Another CPU's creatures are destroyed immediately. For the player the
       // UI gives a response window before the player clears their board.
-      if(biggestThreat.id!=="player"){
-        const cpuOpp=cpuOpponentsFrom(allPlayers).find(o=>o.id===biggestThreat.id);
-        if(cpuOpp)cpuOpp.tokens.filter(token=>token.kind!=="commander").forEach(token=>removeTokenWithUndo(cpuOpp,token,"graveyard",undo));
+      if(archenemy.id!=="player"){
+        const cpuOpp=cpuOpponentsFrom(allPlayers).find(o=>o.id===archenemy.id);
+        if(cpuOpp)withRemovalSource(opp.id,()=>cpuOpp.tokens.filter(token=>token.kind!=="commander").forEach(token=>removeTokenWithUndo(cpuOpp,token,"graveyard",undo)));
       }
-      const targetName=biggestThreat.id==="player"?"You":biggestThreat.name.split(',')[0];
+      stats.wipes=(stats.wipes||0)+1;stats.targetedWipes=(stats.targetedWipes||0)+1;
+      const targetName=archenemy.id==="player"?"You":archenemy.name.split(',')[0];
       const action={
         label:`⚡ Cast ${targetedWipe.name} targeting ${targetName}`,
         detail:`${targetedWipe.effect} ${targetName}'s creatures are destroyed.`,
-        boardWipe:"targeted",wipeTarget:biggestThreat.id,wipeTargetName:targetName,wipeName:targetedWipe.name,cardName:targetedWipe.name,
+        boardWipe:"targeted",wipeTarget:archenemy.id,wipeTargetName:targetName,wipeName:targetedWipe.name,cardName:targetedWipe.name,
         type:"wipe",counterable:true,undo
       };
-      if(biggestThreat.id==="player")action.playerRemoval={cardName:targetedWipe.name,instruction:"Destroy all non-commander creatures you control."};
+      if(archenemy.id==="player")action.playerRemoval={cardName:targetedWipe.name,instruction:"Destroy all non-commander creatures you control."};
       actions.push(action);
       return {cast:true,manaRemaining:mana};
     }
@@ -430,11 +755,11 @@ function castHaymaker(opp,card,evaluation,allPlayers){
   const damage=evaluation.damage;
   const source=evaluation.source||null;
   const killed=[];
-  [opp,...others].forEach(cpu=>{
+  withRemovalSource(opp.id,()=>[opp,...others].forEach(cpu=>{
     cpu.tokens.filter(token=>token!==source&&damageWouldDestroy(token,damage)).forEach(token=>{
       if(removeTokenWithUndo(cpu,token,"graveyard",undo))killed.push(`${token.name}${cpu===opp?"":` (${shortName(cpu)})`}`);
     });
-  });
+  }));
   const parts=[`${damage} damage to each ${source?"other ":""}creature.`];
   if(killed.length)parts.push(`Destroyed: ${killed.join(", ")}.`);
   if(card.haymaker==="ignition"){
@@ -523,6 +848,35 @@ function undoRegrowth(opp,undo){
   return entry.name;
 }
 
+/* ---------- utility permanents (Outpost Siege, Lifecrafter's Bestiary, ...) ---------- */
+/** Noncreature utility cards that stay on the battlefield, and what the engine models for them. */
+var CPU_UTILITY_PERMANENTS={
+  "Outpost Siege":{effect:"upkeepCard",types:["Enchantment"]},
+  "Lifecrafter's Bestiary":{effect:"creatureDraw",types:["Artifact"]},
+  "Skullclamp":{effect:"none",types:["Artifact","Equipment"]}
+};
+function isUtilityPermanentCard(card){return !!card&&!!CPU_UTILITY_PERMANENTS[card.name]&&!isCreatureCard(card);}
+function utilityPermanentCount(opp,effect){
+  return (opp.utilityPermanents||[]).filter(entry=>(CPU_UTILITY_PERMANENTS[entry.name]||{}).effect===effect).length;
+}
+/** Lifecrafter's Bestiary: whenever this CPU casts a creature spell, draw a card. Appends to the action. */
+function applyCreatureCastTriggers(opp,action){
+  const count=utilityPermanentCount(opp,"creatureDraw");
+  if(!count||!action)return action;
+  let drawn=0;
+  for(let i=0;i<count;i++)if(opponentDeckSize(opp)>0&&drawOpponentCard(opp)!=="none")drawn++;
+  if(drawn)action.detail=`${action.detail||""} Lifecrafter's Bestiary draws ${drawn} card${drawn===1?"":"s"}.`.trim();
+  return action;
+}
+/** Outpost Siege: an extra card at the beginning of each upkeep. Returns the action or null. */
+function applyUpkeepCardTriggers(opp){
+  const count=utilityPermanentCount(opp,"upkeepCard");
+  if(!count)return null;
+  let drawn=0;
+  for(let i=0;i<count;i++)if(opponentDeckSize(opp)>0&&drawOpponentCard(opp)!=="none")drawn++;
+  return drawn?{label:"Outpost Siege",detail:`Exiles the top card of the library and may play it this turn (+${drawn} card${drawn===1?"":"s"}).`,type:"upkeep"}:null;
+}
+
 /* ---------- CPU spell casting helpers (main phase) ---------- */
 /** Creates a creature token from a typed card. */
 function createCreatureTokenFromCard(opp,card){
@@ -543,15 +897,15 @@ function castCreatureCard(opp,card,casting){
     const regrown=regrowCard(opp,undo);
     if(regrown){action.detail+=` Returns ${regrown.name} from the graveyard to hand.`;action.undo=undo;}
   }
-  return action;
+  return applyCreatureCastTriggers(opp,action);
 }
 function castFallbackRampCreature(opp,casting){
   const def=(typeof FALLBACK_RAMP_CREATURE!=="undefined"&&FALLBACK_RAMP_CREATURE)||{name:"Wilds Guide",ico:"🌿",type:"Creature — Shaman",p:2,t:2,effect:"Taps for mana.",rampValue:1};
   opp.hand.ramp--;opp.rampInPlay+=def.rampValue||1;
   const token=addOpponentToken(opp,{name:def.name,ico:def.ico,kind:"voltron-support",type:def.type,p:def.p,t:def.t,baseP:def.p,baseT:def.t,
     kws:[],baseKws:[],effect:def.effect,summoningSick:true,owner:opp.id,rampValue:def.rampValue||1,fromRampCard:true});
-  return {label:`Cast ${def.name}`,detail:`${def.p}/${def.t} ramp creature enters.`+(casting.additional?" Creature tax paid: "+casting.additional+".":""),
-    tokenUid:token.uid,cardName:def.name,type:"creature",counterable:true};
+  return applyCreatureCastTriggers(opp,{label:`Cast ${def.name}`,detail:`${def.p}/${def.t} ramp creature enters.`+(casting.additional?" Creature tax paid: "+casting.additional+".":""),
+    tokenUid:token.uid,cardName:def.name,type:"creature",counterable:true});
 }
 function drawSpellCount(opp,card){
   const spec=card.draw||{mode:"fixed",count:3};
@@ -574,8 +928,13 @@ function spellIsUseful(opp,card){
 }
 function castNoncreatureSpell(opp,card,casting,actions){
   removeTypedCardFromHand(opp,card);
-  addOpponentGraveyardCard(opp,typedGraveyardCard(card));
   const tax=casting.additional?` Noncreature tax paid: ${casting.additional}.`:"";
+  if(isUtilityPermanentCard(card)){
+    // Stays on the battlefield; its modeled trigger runs from now on.
+    opp.utilityPermanents=(opp.utilityPermanents||[]).concat({name:card.name,ico:card.ico||"✦",ref:card.ref?{...card.ref}:null});
+    return {label:`Cast ${card.name}`,detail:(card.effect||"A permanent enters.")+tax,cardName:card.name,utilityName:card.name,type:"spell",counterable:true};
+  }
+  addOpponentGraveyardCard(opp,typedGraveyardCard(card));
   if(card.draw&&card.draw.mode==="sacrifice"){
     const victim=greaterGoodSacrifice(opp);
     const count=Math.max(1,victim.p||1);
@@ -601,34 +960,108 @@ function castNoncreatureSpell(opp,card,casting,actions){
 var CPU_PLAYER_REMOVAL_SPELLS=["Beast Within","Chaos Warp"];
 var CPU_PROTECTION_SPELLS=["Blossoming Defense","Vines of Vastwood","Heroic Intervention","Tamiyo's Safekeeping"];
 var CPU_WIPE_PROTECTION_SPELLS=["Heroic Intervention"];
-/** Removal at the player's board — only when the CPU still keeps protection back. */
-function tryCpuPlayerRemoval(opp,mana,allPlayers,turnSpellState){
-  const player=(allPlayers||[]).find(p=>p.id==="player");
-  if(!player||isEliminatedTarget(player))return null;
-  const hasTargets=(player.creatures||0)>=2||(player.planeswalkers||[]).length>0;
-  if(!hasTargets)return null;
-  const protectionHeld=opp.typedHand.filter(card=>CPU_PROTECTION_SPELLS.includes(card.name)).length;
-  if(protectionHeld<1)return null;
-  const card=opp.typedHand.find(candidate=>CPU_PLAYER_REMOVAL_SPELLS.includes(candidate.name));
+/**
+ * Spot removal (Beast Within / Chaos Warp) aimed at the archenemy's best
+ * threat. Player archenemy → a playerRemoval instruction (planeswalker first,
+ * else the most threatening creature). CPU archenemy → its commander when it
+ * is a real threat (8+ power, or 12+ commander damage dealt to this CPU);
+ * that CPU may answer with a held protection spell (cpuRespondToRemoval).
+ * Returns {action, cost} or null.
+ */
+function tryCpuRemoval(opp,mana,allPlayers,turnSpellState){
+  const archenemy=archenemyFor(opp,allPlayers);
+  if(!archenemy)return null;
+  const card=opp.typedHand.filter(candidate=>CPU_PLAYER_REMOVAL_SPELLS.includes(candidate.name))
+    .map(candidate=>({card:candidate,casting:cpuCanCast(candidate,candidate.cost,mana,"protection",turnSpellState)}))
+    .filter(entry=>entry.casting.canCast)[0];
   if(!card)return null;
-  const casting=cpuCanCast(card,card.cost,mana,"protection",turnSpellState);
-  if(!casting.canCast)return null;
-  removeTypedCardFromHand(opp,card);
-  addOpponentGraveyardCard(opp,typedGraveyardCard(card));
-  const what=(player.planeswalkers||[]).length?"your highest-loyalty planeswalker":"your most threatening creature";
-  const instruction=card.name==="Beast Within"
-    ?`Destroy ${what}. You create a 3/3 green Beast creature token.`
-    :`Shuffle ${what} into your library, then reveal the top card; if it's a permanent card, put it onto the battlefield.`;
-  return {action:{label:`Cast ${card.name} targeting you`,detail:card.effect,cardName:card.name,type:"removal",counterable:true,
-    playerRemoval:{cardName:card.name,instruction}},cost:casting.cost};
+  if(archenemy.id==="player"){
+    const hasTargets=(archenemy.creatures||0)>=2||(archenemy.planeswalkers||[]).length>0;
+    if(!hasTargets)return null;
+    removeTypedCardFromHand(opp,card.card);
+    addOpponentGraveyardCard(opp,typedGraveyardCard(card.card));
+    const pw=[...(archenemy.planeswalkers||[])].sort((a,b)=>(b.loyalty||0)-(a.loyalty||0))[0];
+    const best=playerCreatureProfile(archenemy).filter(t=>t.name!=="Creature").sort((a,b)=>(b.p||0)-(a.p||0))[0];
+    const what=pw?`${pw.name||"your highest-loyalty planeswalker"} (your highest-loyalty planeswalker)`:best?`${best.name} (your most threatening creature)`:"your most threatening creature";
+    const instruction=card.card.name==="Beast Within"
+      ?`Destroy ${what}. You create a 3/3 green Beast creature token.`
+      :`Shuffle ${what} into your library, then reveal the top card; if it's a permanent card, put it onto the battlefield.`;
+    bumpAiStat("playerRemovals");
+    return {action:{label:`Cast ${card.card.name} targeting you`,detail:`${card.card.effect} You are leading the table.`,cardName:card.card.name,type:"removal",counterable:true,
+      playerRemoval:{cardName:card.card.name,instruction}},cost:card.casting.cost};
+  }
+  const target=liveOpponentObject(archenemy.id,allPlayers);
+  const commander=target&&commanderOnField(target);
+  if(!commander||hasKeyword(commander,"Hexproof"))return null;
+  const dealtToMe=(opp.commanderDamageReceived||{})[target.id]||0;
+  if((commander.p||0)<8&&dealtToMe<12)return null;
+  removeTypedCardFromHand(opp,card.card);
+  addOpponentGraveyardCard(opp,typedGraveyardCard(card.card));
+  bumpAiStat("cpuRemovals");
+  const action={label:`Cast ${card.card.name} targeting ${shortName(target)}'s ${commander.name.split(",")[0]}`,detail:card.card.effect,
+    cardName:card.card.name,type:"removal",counterable:true,removalTarget:{ownerId:target.id,uid:commander.uid}};
+  const response=cpuRespondToRemoval(target,commander);
+  if(response){
+    action.detail+=` ${response.label}.`;
+    action.response=response;
+    return {action,cost:card.casting.cost};
+  }
+  const undo=newUndoRecord();
+  withRemovalSource(opp.id,()=>removeTokenWithUndo(target,commander,"graveyard",undo));
+  if(card.card.name==="Beast Within"){
+    const beast=addOpponentToken(target,{name:"Beast",ico:"🐗",kind:"voltron-creature",type:"Creature — Beast",p:3,t:3,baseP:3,baseT:3,kws:[],baseKws:[],
+      effect:"Token created by Beast Within.",summoningSick:true,owner:target.id,isToken:true});
+    undo.created=[{ownerId:target.id,uid:beast.uid}];
+  }
+  action.undo=undo;
+  action.detail+=` ${commander.name.split(",")[0]} goes to the command zone${card.card.name==="Beast Within"?`; ${shortName(target)} creates a 3/3 Beast`:""}.`;
+  return {action,cost:card.casting.cost};
+}
+/** Back-compat name. */
+function tryCpuPlayerRemoval(opp,mana,allPlayers,turnSpellState){return tryCpuRemoval(opp,mana,allPlayers,turnSpellState);}
+
+/* ---------- gear choice (scaled by power level) ---------- */
+/**
+ * Equip cost after power-level efficiency: level 1 pays 1 more (clunky
+ * sequencing), level 5 equips for 1 less (minimum 1).
+ */
+function gearEquipCost(gear,settings){
+  const base=gear.equip!=null?gear.equip:2;
+  const level=(settings||cpuSettings()).powerLevel;
+  if(level<=1)return base+1;
+  return level>=5?Math.max(1,base-1):base;
+}
+/**
+ * Best gear to cast + equip with this mana. Level 1 picks any affordable
+ * piece at random, level 2 the cheapest, level 3+ the most bonus per mana.
+ */
+function chooseGearToCast(opp,mana,turnSpellState,settings){
+  const options=opp.typedHand.filter(c=>c.ref?.category==="gear")
+    .map(card=>({card,casting:cpuCanCast(card,card.cost,mana,"gear",turnSpellState),equip:gearEquipCost(card,settings)}))
+    .filter(({casting,equip})=>casting.canCast&&casting.cost+equip<=mana);
+  if(!options.length)return null;
+  const level=settings.powerLevel;
+  if(level<=1)return options[Math.floor(Math.random()*options.length)];
+  if(level===2)return options.sort((a,b)=>(a.casting.cost+a.equip)-(b.casting.cost+b.equip))[0];
+  return options.sort((left,right)=>(right.card.bonus/(right.casting.cost+right.equip))-(left.card.bonus/(left.casting.cost+left.equip)))[0];
+}
+/** Casts + equips a chosen gear entry. Returns the action. */
+function castAndEquipGear(opp,commander,best){
+  const gear=best.card;
+  opp.attachedGear=(opp.attachedGear||[]).concat({name:gear.name,bonus:gear.bonus||0,kw:gear.kw||null,equip:gear.equip||0,ref:gear.ref?{...gear.ref}:null});
+  removeTypedCardFromHand(opp,gear);
+  refreshCommanderGear(opp);
+  return {label:`Cast + Equip ${gear.name}`,detail:gear.effect+". Now "+commander.p+"/"+commander.t+"."+(best.casting.additional?" Noncreature tax paid: "+best.casting.additional+".":""),
+    gearName:gear.name,cardName:gear.name,type:"gear",counterable:true};
 }
 
 /** Re-equips loose equipment (activated ability: not a spell, not counterable). */
 function equipLooseGear(opp,mana,actions){
   const commander=commanderOnField(opp);
   if(!commander)return mana;
+  const settings=cpuSettings();
   opp.looseGear=opp.looseGear||[];
-  const ordered=opp.looseGear.map(gear=>({gear,equip:gear.equip!=null?gear.equip:2})).sort((a,b)=>(b.gear.bonus||0)/(b.equip||1)-(a.gear.bonus||0)/(a.equip||1));
+  const ordered=opp.looseGear.map(gear=>({gear,equip:gearEquipCost(gear,settings)})).sort((a,b)=>(b.gear.bonus||0)/(b.equip||1)-(a.gear.bonus||0)/(a.equip||1));
   ordered.forEach(({gear,equip})=>{
     if(equip>mana)return;
     mana-=equip;
@@ -659,17 +1092,39 @@ function skipsFirstDraw(opp){
   const state=liveGameState();
   return !!state&&state.opponents.length===1&&state.firstSeat===opp.id&&!(opp.turnsTaken>0);
 }
+/** Cheapest castable protection instant in hand (for holding mana), or null. */
+function cheapestHeldProtection(opp){
+  return opp.typedHand.filter(card=>CPU_PROTECTION_SPELLS.includes(card.name))
+    .map(card=>({card,cost:cpuCastingRequirement(card,card.cost,"protection").cost}))
+    .filter(entry=>isFinite(entry.cost))
+    .sort((a,b)=>a.cost-b.cost)[0]||null;
+}
+/**
+ * Mana to keep open for instant-speed protection: 1-2 once the commander is
+ * out, the CPU has 6+ mana and a protection card (interaction > 0).
+ */
+function protectionReserve(opp,mana,settings){
+  if(settings.interaction<=0||!commanderOnField(opp)||manaAvailable(opp)<6)return 0;
+  const held=cheapestHeldProtection(opp);
+  if(!held)return 0;
+  return Math.min(mana,Math.max(1,Math.min(2,held.cost)));
+}
 
 /**
- * CPU main phase: untap, draw, land, rule removal, ONE primary action
- * (commander / fast mana / ramp, or gear when the commander is out), loose
- * equipment re-equips, then AT MOST ONE secondary cast (board wipe,
- * haymaker, creature, draw/utility spell, or removal at the player).
+ * CPU main phase: untap, draw (+ upkeep triggers), land, rule removal, ONE
+ * primary action (commander / fast mana / ramp, or gear when the commander
+ * is out), loose equipment re-equips, then AT MOST ONE secondary cast (board
+ * wipe, haymaker, removal, creature, draw/utility spell). With the commander
+ * out and 6+ mana it keeps 1-2 mana open for a protection instant.
  * Returns {actions}. Sets opp.heldMana to the mana left open.
  */
 function executeOpponentMainPhase(opp, allPlayers){
   const actions=[];
   const turnSpellState={spellsCast:0};
+  const state=liveGameState();
+  const settings=cpuSettings(state);
+  ensureAiRound(state);
+  if(state)state.aiActiveOppId=opp.id;
   opp.actionSteps=actions;
   opp.attackTarget=null;opp.attackPower=0;opp._planeswalkerTarget=null;
   untapOpponent(opp);
@@ -684,6 +1139,8 @@ function executeOpponentMainPhase(opp, allPlayers){
     opp.turnsTaken=(opp.turnsTaken||0)+1;
     return {actions};
   }else{
+    const upkeep=applyUpkeepCardTriggers(opp);
+    if(upkeep)actions.push(upkeep);
     const drawn=drawOpponentCard(opp);
     if(drawn!=="none")actions.push({label:"Draw",detail:"Draws a card.",type:"drawStep"});
   }
@@ -698,6 +1155,7 @@ function executeOpponentMainPhase(opp, allPlayers){
 
   // Primary action
   if(!commander){
+    const fromHand=!!opp.commanderInHand;
     const cost=commanderCost(opp);
     const commanderCasting=cpuCanCast(null,cost,mana,"commander",turnSpellState);
     const explosiveCasting=cpuCanCast(null,1,mana,"explosive",turnSpellState);
@@ -706,8 +1164,9 @@ function executeOpponentMainPhase(opp, allPlayers){
       mana-=commanderCasting.cost;
       recordCpuSpellCast(turnSpellState);
       commander=commanderOnField(opp);
-      actions.push({label:`Cast ${opp.name}`,detail:"Commander enters."+(commanderCasting.additional?" Creature tax paid: "+commanderCasting.additional+".":""),
-        tokenUid:commander.uid,cardName:opp.name,type:"commander",counterable:true});
+      const where=fromHand?" from hand (no commander tax)":(opp.commanderTax?` from the command zone (+${opp.commanderTax} tax)`:"");
+      actions.push(applyCreatureCastTriggers(opp,{label:`Cast ${opp.name}`,detail:`Commander enters${where}.`+(commanderCasting.additional?" Creature tax paid: "+commanderCasting.additional+".":""),
+        tokenUid:commander.uid,cardName:opp.name,type:"commander",counterable:true,castFrom:fromHand?"hand":"commandZone"}));
     }else if(opp.hand.explosive>0&&explosiveCasting.canCast){
       opp.hand.explosive--;opp.explosiveInPlay++;mana-=explosiveCasting.cost;
       recordCpuSpellCast(turnSpellState);
@@ -723,26 +1182,20 @@ function executeOpponentMainPhase(opp, allPlayers){
     mana=equipLooseGear(opp,mana,actions);
     const castThisTurn=actions.some(action=>action.type==="commander");
     if(!castThisTurn){
-      const best=opp.typedHand.filter(c=>c.ref?.category==="gear")
-        .map(card=>({card,casting:cpuCanCast(card,card.cost,mana,"gear",turnSpellState)}))
-        .filter(({card,casting})=>casting.canCast&&casting.cost+(card.equip||0)<=mana)
-        .sort((left,right)=>(right.card.bonus/(right.casting.cost+(right.card.equip||0)))-(left.card.bonus/(left.casting.cost+(left.card.equip||0))))[0];
+      const best=chooseGearToCast(opp,mana,turnSpellState,settings);
       if(best){
-        const gear=best.card;
-        mana-=best.casting.cost+(gear.equip||0);
-        opp.attachedGear=(opp.attachedGear||[]).concat({name:gear.name,bonus:gear.bonus||0,kw:gear.kw||null,equip:gear.equip||0,ref:gear.ref?{...gear.ref}:null});
-        removeTypedCardFromHand(opp,gear);
-        refreshCommanderGear(opp);
+        mana-=best.casting.cost+best.equip;
         recordCpuSpellCast(turnSpellState);
-        actions.push({label:`Cast + Equip ${gear.name}`,detail:gear.effect+". Now "+commander.p+"/"+commander.t+"."+(best.casting.additional?" Noncreature tax paid: "+best.casting.additional+".":""),
-          gearName:gear.name,cardName:gear.name,type:"gear",counterable:true});
+        actions.push(castAndEquipGear(opp,commander,best));
       }
     }
   }
 
   // Secondary: at most ONE more cast this turn (restores the e93f455 cap),
-  // so CPUs don't dump their whole hand on curve.
-  mana=castOneSecondarySpell(opp,mana,allPlayers,actions,turnSpellState);
+  // so CPUs don't dump their whole hand on curve. Protection mana stays open.
+  const reserve=protectionReserve(opp,mana,settings);
+  if(reserve>0)bumpAiStat("heldManaTurns");
+  mana=castOneSecondarySpell(opp,mana-reserve,allPlayers,actions,turnSpellState)+reserve;
 
   applyBattlefieldRuleModifiers();
   opp.heldMana=Math.max(0,mana);
@@ -753,6 +1206,7 @@ function executeOpponentMainPhase(opp, allPlayers){
 function castOneSecondarySpell(opp,mana,allPlayers,actions,turnSpellState){
   if(mana<=0&&!opp.typedHand.some(card=>card.scaleCost))return mana;
   const commander=commanderOnField(opp);
+  const settings=cpuSettings();
 
   // 1. Board wipe when the table is out of hand.
   const wipe=evaluateAndCastBoardWipe(opp,mana,allPlayers,actions,turnSpellState);
@@ -776,7 +1230,25 @@ function castOneSecondarySpell(opp,mana,allPlayers,actions,turnSpellState){
     return mana;
   }
 
-  // 3. A creature (most expensive castable first; mana dorks count).
+  // 3. Removal at a CPU archenemy's commander (big threat only).
+  const archenemy=archenemyFor(opp,allPlayers);
+  if(archenemy&&archenemy.id!=="player"){
+    const removal=tryCpuRemoval(opp,mana,allPlayers,turnSpellState);
+    if(removal){mana-=removal.cost;recordCpuSpellCast(turnSpellState);actions.push(removal.action);return mana;}
+  }
+
+  // 4. Power level 4+: a second piece of gear when the commander is out.
+  if(commander&&settings.powerLevel>=4){
+    const gear=chooseGearToCast(opp,mana,turnSpellState,settings);
+    if(gear){
+      mana-=gear.casting.cost+gear.equip;
+      recordCpuSpellCast(turnSpellState);
+      actions.push(castAndEquipGear(opp,commander,gear));
+      return mana;
+    }
+  }
+
+  // 5. A creature (most expensive castable first; mana dorks count).
   const creature=opp.typedHand.filter(isCreatureCard)
     .map(card=>({card,casting:cpuCanCast(card,card.cost,mana,"creatures",turnSpellState)}))
     .filter(({casting})=>casting.canCast)
@@ -788,7 +1260,7 @@ function castOneSecondarySpell(opp,mana,allPlayers,actions,turnSpellState){
     return mana;
   }
 
-  // 4. Modeled ramp creature from a generic ramp card while the commander is still in the zone.
+  // 6. Modeled ramp creature from a generic ramp card while the commander is still in the zone.
   const fallbackRampCasting=cpuCanCast(null,2,mana,"creatures",turnSpellState);
   if(opp.hand.ramp>0&&!commander&&fallbackRampCasting.canCast){
     mana-=fallbackRampCasting.cost;
@@ -797,7 +1269,7 @@ function castOneSecondarySpell(opp,mana,allPlayers,actions,turnSpellState){
     return mana;
   }
 
-  // 5. Draw / utility spells (cheapest useful first). Protection stays in hand.
+  // 7. Draw / utility spells (cheapest useful first). Protection stays in hand.
   const spell=opp.typedHand
     .filter(card=>!isCreatureCard(card)&&!["gear","protection","boardwipes","haymakers"].includes(card.ref?.category)&&spellIsUseful(opp,card))
     .map(card=>({card,casting:cpuCanCast(card,card.cost,mana,card.ref?.category,turnSpellState)}))
@@ -813,18 +1285,23 @@ function castOneSecondarySpell(opp,mana,allPlayers,actions,turnSpellState){
     return mana;
   }
 
-  // 6. Removal aimed at the player's board.
-  const removal=tryCpuPlayerRemoval(opp,mana,allPlayers,turnSpellState);
-  if(removal){
-    mana-=removal.cost;
-    recordCpuSpellCast(turnSpellState);
-    actions.push(removal.action);
+  // 8. Removal aimed at the player's board when the player leads the table.
+  if(archenemy&&archenemy.id==="player"){
+    const removal=tryCpuRemoval(opp,mana,allPlayers,turnSpellState);
+    if(removal){
+      mana-=removal.cost;
+      recordCpuSpellCast(turnSpellState);
+      actions.push(removal.action);
+    }
   }
   return mana;
 }
 
 /**
- * CPU combat: choose a target and declare attackers (sets token.attacking).
+ * CPU combat: choose a target (planTarget: lethal first, then the
+ * archenemy) and declare attackers (sets token.attacking). Without lethal,
+ * attackers that would die to blockers for no value stay home and enough
+ * blockers stay back to survive the strongest opponent (applyHomeGuard).
  * Damage is resolved by the caller (UI response window / simulation).
  * Returns {target, attackPower, commanderAttacking, planeswalkerTarget, actions}.
  */
@@ -835,38 +1312,38 @@ function executeOpponentCombat(opp, allPlayers){
   opp.tokens.forEach(t=>{t.attacking=false;});
   opp.attackPower=0;opp._planeswalkerTarget=null;
   if(isOpponentDead(opp))return none;
+  const state=liveGameState();
+  if(state)state.aiActiveOppId=opp.id;
+  const settings=cpuSettings(state);
 
   const target=chooseTarget(opp,allPlayers);
+  const plan=lastTargetPlans[opp.id]||null;
   opp.attackTarget=target;
   let attackPower=0; let commanderAttacking=false;
-
-  const defenderOpp=target&&target!=="player"?allPlayers.find(p=>p.id===target):null;
-  const defenderTokens=defenderOpp&&defenderOpp.tokens?defenderOpp.tokens:[];
+  const targetEntry=target?allPlayers.find(p=>p.id===target):null;
 
   if(cpuCreaturesCannotAttack()){
     const restriction=activeBattlefieldRules("cpuCreatureAttackBan")[0];
     actions.push({label:"Combat restricted",detail:`${restriction.sourceName||"A battlefield rule"} prevents CPU creatures from attacking.`,type:"combat"});
-  }else if(target==="player"||defenderTokens.filter(canBlockCreature).length===0){
-    // Attacking the player or an opponent with no untapped blockers: be aggressive.
-    opp.tokens.forEach(t=>{
-      if(t.summoningSick)return;
-      if(t.kind==="commander"){t.attacking=true;commanderAttacking=true;attackPower+=t.p*combatStrikeCount(t);return;}
-      if(isManaToken(t))return;
-      if(t.p>=2){t.attacking=true;attackPower+=t.p*combatStrikeCount(t);}
-    });
-  }else{
-    // Attacking another CPU: evaluate each creature's profitability.
-    smartDeclareAttackers(opp, defenderTokens).forEach(t=>{
+  }else if(targetEntry){
+    let attackers=plan&&plan.lethal&&plan.attackers?plan.attackers.filter(t=>opp.tokens.includes(t)&&!t.summoningSick)
+      :profitableAttackers(opp,targetEntry);
+    if(!(plan&&plan.lethal))attackers=applyHomeGuard(opp,attackers,allPlayers,settings,targetEntry);
+    attackers.forEach(t=>{
       t.attacking=true;
-      attackPower+=t.p*combatStrikeCount(t);
+      attackPower+=attackPowerOf(t);
       if(t.kind==="commander")commanderAttacking=true;
     });
   }
   opp.attackPower=attackPower;
+  if(attackPower>0&&target){
+    recordRoundTarget(state,target);
+    if(target==="player")bumpAiStat("attacksOnPlayer");
+    if(plan&&plan.lethal)bumpAiStat("lethalAttacks");
+  }
 
   let planeswalkerTarget=null;
-  const state=liveGameState();
-  if(attackPower>0&&target==="player"&&state)planeswalkerTarget=choosePlaneswalkerTarget(opp,state.player);
+  if(attackPower>0&&target==="player"&&state&&!(plan&&plan.lethal))planeswalkerTarget=choosePlaneswalkerTarget(opp,state.player);
   opp._planeswalkerTarget=planeswalkerTarget;
 
   if(attackPower>0&&target){
@@ -874,12 +1351,14 @@ function executeOpponentCombat(opp, allPlayers){
     let attackLabel=`Attack ${tn?(tn.id==="player"?"you":tn.name.split(',')[0]):"?"} for ${attackPower}`;
     const attackers=opp.tokens.filter(t=>t.attacking);
     const attackerCount=attackers.length;
-    let attackDetail=`${attackerCount} attacker${attackerCount===1?"":"s"} · Target choice: ${STRATEGY_LABELS[opp.currentStrategy]}.`;
+    const held=opp.tokens.filter(t=>!t.attacking&&!t.summoningSick&&!isManaToken(t)&&(t.p||0)>=2).length;
+    const heldText=held?` · ${held} held back to block`:"";
+    let attackDetail=`${attackerCount} attacker${attackerCount===1?"":"s"}${heldText} · Target choice: ${STRATEGY_LABELS[opp.currentStrategy]}.`;
     if(planeswalkerTarget){
       attackLabel=`Attack ${planeswalkerTarget.name} (⬡ ${planeswalkerTarget.loyalty}) for ${attackPower}`;
-      attackDetail=`Targeting your planeswalker · ${attackerCount} attacker${attackerCount===1?"":"s"} · Target choice: ${STRATEGY_LABELS[opp.currentStrategy]}.`;
+      attackDetail=`Targeting your planeswalker · ${attackerCount} attacker${attackerCount===1?"":"s"}${heldText} · Target choice: ${STRATEGY_LABELS[opp.currentStrategy]}.`;
     }
-    actions.push({label:attackLabel,detail:attackDetail,type:"attack",attackerUids:attackers.map(t=>t.uid),target});
+    actions.push({label:attackLabel,detail:attackDetail,type:"attack",attackerUids:attackers.map(t=>t.uid),target,lethal:!!(plan&&plan.lethal)});
   }
   opp.actionSteps=opp.actionSteps.concat(actions);
   return {target,attackPower,commanderAttacking,planeswalkerTarget,actions};
@@ -927,9 +1406,16 @@ function executeOpponentTurn(opp, allPlayers) {
 /* =====================================================================
    COMMANDER BATTLE — Game state & orchestration
    ===================================================================== */
-function createCommanderBattle(numOpponents) {
+/**
+ * New Commander battle. settings (optional) = {cpu:{powerLevel, aggression,
+ * interaction}}; without it the previous game's settings are kept, else the
+ * defaults. Stored as state.settings.cpu.
+ */
+function createCommanderBattle(numOpponents, settings) {
+  const previous=liveGameState();
+  const cpu=normalizeCpuSettings((settings&&(settings.cpu||settings))||(previous&&previous.settings&&previous.settings.cpu));
   const opponents=[];
-  for(let i=0;i<Math.min(4,Math.max(1,numOpponents));i++) opponents.push(createOpponent(i));
+  for(let i=0;i<Math.min(4,Math.max(1,numOpponents));i++) opponents.push(createOpponent(i,cpu));
   // Random starting seat. The UI decides the flow; the engine only stores it
   // (and makes a CPU that goes first in a 1-CPU game skip its first draw).
   const seats=["player",...opponents.map(o=>o.id)];
@@ -939,10 +1425,16 @@ function createCommanderBattle(numOpponents) {
     opponents, player:{id:"player",name:"You",life:40,poison:0,creatures:0,handSize:7,librarySize:92,graveyardCount:0,graveyard:[],nextGraveyardCardId:0,discardHistory:[],exileCount:0,exile:[],nextExileCardId:0,commanderDamageReceived:{},commanderDamageDealt:{},tokens:[],nextTokenUid:0,planeswalkers:[]},
     battlefieldRules:[], nextBattlefieldRuleId:0,
     discardHistory:[], log:[], viewMode:"all", viewTarget:0, gameOver:false, winner:null,
+    settings:{cpu}, roundTargets:{}, aiStats:{},
   };
 }
 
-function playerAsTarget(state){return {id:"player",name:"You",life:state.player.life,poison:state.player.poison||0,creatures:state.player.creatures,tokens:state.player.tokens||[],planeswalkers:state.player.planeswalkers||[],commanderDamageReceived:state.player.commanderDamageReceived||{}};}
+function playerAsTarget(state){
+  const p=state.player;
+  return {id:"player",name:"You",life:p.life,poison:p.poison||0,creatures:p.creatures,tokens:p.tokens||[],planeswalkers:p.planeswalkers||[],
+    commanderDamageReceived:p.commanderDamageReceived||{},commanderDamageDealt:p.commanderDamageDealt||{},
+    handSize:p.handSize!=null?p.handSize:7,commanderPower:p.commanderPower||0};
+}
 function allPlayersForTargeting(state){const all=[playerAsTarget(state)];state.opponents.forEach(o=>{if(!isOpponentDead(o))all.push(o);});return all;}
 function aliveOpponents(state){return state.opponents.filter(o=>!isOpponentDead(o));}
 function isPlayerDead(state){
@@ -1000,14 +1492,14 @@ function resolveCpuVsCpuAttack(opp,tgt){
   const prevention=applyCommanderCombatDamage(opp,tgt,combat.damageToDefender,combat.commanderDamage);
   if(prevention.reduced)cmdLog(`Battlefield damage reduction lowers ${shortName(opp)}'s combat damage by ${prevention.reduced}.`);
   if(prevention.prevented)cmdLog(`Battlefield prevention stops ${prevention.prevented} damage from ${shortName(opp)}.`);
-  for(const dead of combat.defenderCreaturesKilled){
+  withRemovalSource(opp.id,()=>{for(const dead of combat.defenderCreaturesKilled){
     const moved=removeOpponentPermanentByUid(tgt,dead.uid,"graveyard");
     if(moved)cmdLog(`${dead.name} (${shortName(tgt)}) dies blocking → ${moved.destination}.`);
-  }
-  for(const dead of combat.attackerCreaturesKilled){
+  }});
+  withRemovalSource(tgt.id,()=>{for(const dead of combat.attackerCreaturesKilled){
     const moved=removeOpponentPermanentByUid(opp,dead.uid,"graveyard");
     if(moved)cmdLog(`${dead.name} (${shortName(opp)}) dies in combat → ${moved.destination}.`);
-  }
+  }});
   if(combat.blockedDescriptions.length>0){
     const blockSummary=combat.blockedDescriptions.map(b=>{
       if(b.attackerDies&&b.blockerDies)return `${b.attacker} trades with ${b.blocker}`;
@@ -1095,7 +1587,10 @@ function counterOpponentAction(opp, action){
       const token=findTokenByUid(opp,action.tokenUid)||commanderOnField(opp);
       if(!token||token.kind!=="commander")return `You counter ${who}'s commander, but it is no longer on the battlefield.`;
       opp.tokens=opp.tokens.filter(t=>t!==token);
+      // Tax: +2 is charged when the commander returns to the zone (see commanderCost);
+      // a countered cast from hand charges the earlier command-zone cast.
       returnCommanderToZone(opp);
+      withRemovalSource("player",()=>noteCommanderRemoved(opp));
       applyBattlefieldRuleModifiers();
       return `You counter ${opp.name}. It returns to the command zone (tax now +${opp.commanderTax}).`;
     }
@@ -1125,6 +1620,15 @@ function counterOpponentAction(opp, action){
       return `You counter ${name}. ${who} already drew the cards — they stay in hand.`;
     case "wipe":case "haymaker":case "ruleRemoval":case "spell":case "removal":{
       const notes=undoRecord(action.undo);
+      if(action.utilityName){
+        const index=(opp.utilityPermanents||[]).map(entry=>entry.name).lastIndexOf(action.utilityName);
+        if(index>=0){
+          const [entry]=opp.utilityPermanents.splice(index,1);
+          const ref=entry.ref||findCardRefByName(entry.name);
+          addOpponentGraveyardCard(opp,ref?typedGraveyardCard(typedHandCard(ref)):{name:entry.name,ico:entry.ico||"✦",types:(CPU_UTILITY_PERMANENTS[entry.name]||{}).types||["Permanent"],virtual:false});
+          notes.push(`${entry.name} goes to the graveyard`);
+        }
+      }
       const regrown=undoRegrowth(opp,action.undo);
       if(regrown)notes.push(`${regrown} goes back to ${who}'s graveyard`);
       if(action.playerRemoval)notes.push("ignore its instruction for your board");
@@ -1136,16 +1640,13 @@ function counterOpponentAction(opp, action){
 }
 
 /* =====================================================================
-   CPU INTERACTION — held mana, responses, previews (simple, documented)
-   A later pass may make these smarter; keep the shapes stable.
+   CPU INTERACTION — held mana, responses, previews
+   Response probability = cpuResponseChance(settings) (interaction 0.5 → 0.8).
    ===================================================================== */
 /** Casts a protection card from hand using held mana. Returns {cardName,label} or null. */
 function cpuCastHeldProtection(opp,names,reason){
   if(!opp||isOpponentDead(opp))return null;
-  const options=opp.typedHand.filter(card=>names.includes(card.name))
-    .map(card=>({card,casting:cpuCanCast(card,card.cost,opp.heldMana||0,"protection",null)}))
-    .filter(({casting})=>casting.canCast)
-    .sort((a,b)=>a.casting.cost-b.casting.cost);
+  const options=heldProtectionOptions(opp,names);
   if(!options.length)return null;
   const {card,casting}=options[0];
   removeTypedCardFromHand(opp,card);
@@ -1153,45 +1654,74 @@ function cpuCastHeldProtection(opp,names,reason){
   opp.heldMana=Math.max(0,(opp.heldMana||0)-casting.cost);
   return {cardName:card.name,label:`${shortName(opp)} casts ${card.name}${reason?` — ${reason}`:""}`};
 }
+function heldProtectionOptions(opp,names){
+  return opp.typedHand.filter(card=>names.includes(card.name))
+    .map(card=>({card,casting:cpuCanCast(card,card.cost,opp.heldMana||0,"protection",null)}))
+    .filter(({casting})=>casting.canCast)
+    .sort((a,b)=>a.casting.cost-b.casting.cost);
+}
+/** A creature worth a protection spell: the commander, 4+ power, or an early mana creature. */
+function isKeyCreature(opp,token){
+  if(!token)return false;
+  if(token.kind==="commander")return true;
+  if((token.p||0)>=4)return true;
+  return isManaToken(token)&&manaAvailable(opp)<5;
+}
 /**
  * The CPU may answer removal aimed at one of its creatures with a protection
- * instant, paid from opp.heldMana. Simple rule: it protects its commander or
- * any creature with 4+ power. Consumes the card and mana.
+ * instant paid from opp.heldMana: it protects its commander or a key
+ * creature (4+ power, or an early mana creature). Responds with probability
+ * cpuResponseChance(settings). Consumes the card and mana.
  * Returns {cardName, label} or null.
  */
 function cpuRespondToRemoval(opp, token){
-  if(!opp||!token)return null;
-  const valuable=token.kind==="commander"||(token.p||0)>=4;
-  if(!valuable)return null;
-  return cpuCastHeldProtection(opp,CPU_PROTECTION_SPELLS,`${token.name.split(",")[0]} is protected`);
+  if(!opp||!token||isOpponentDead(opp))return null;
+  if(!isKeyCreature(opp,token))return null;
+  const stats=aiStats();
+  stats.removalThreats=(stats.removalThreats||0)+1;
+  if(!heldProtectionOptions(opp,CPU_PROTECTION_SPELLS).length)return null;
+  stats.removalResponseChances=(stats.removalResponseChances||0)+1;
+  if(Math.random()>=cpuResponseChance(cpuSettings()))return null;
+  const response=cpuCastHeldProtection(opp,CPU_PROTECTION_SPELLS,`${token.name.split(",")[0]} is protected`);
+  if(response)stats.removalResponses=(stats.removalResponses||0)+1;
+  return response;
 }
 /**
  * The CPU may answer a board wipe with Heroic Intervention when it has its
- * commander or 2+ creatures on the battlefield. Returns {cardName,label} or null.
+ * commander or 2+ creatures on the battlefield (probability scaled by the
+ * interaction setting). Returns {cardName,label} or null.
  */
 function cpuRespondToWipe(opp){
-  if(!opp)return null;
+  if(!opp||isOpponentDead(opp))return null;
   if(!commanderOnField(opp)&&opp.tokens.length<2)return null;
-  return cpuCastHeldProtection(opp,CPU_WIPE_PROTECTION_SPELLS,"its permanents gain indestructible");
+  const stats=aiStats();
+  stats.wipeThreats=(stats.wipeThreats||0)+1;
+  if(!heldProtectionOptions(opp,CPU_WIPE_PROTECTION_SPELLS).length)return null;
+  stats.wipeResponseChances=(stats.wipeResponseChances||0)+1;
+  if(Math.random()>=cpuResponseChance(cpuSettings()))return null;
+  const response=cpuCastHeldProtection(opp,CPU_WIPE_PROTECTION_SPELLS,"its permanents gain indestructible");
+  if(response)stats.wipeResponses=(stats.wipeResponses||0)+1;
+  return response;
 }
 /**
- * Deterministic guess of who this CPU attacks next (no randomness, no state
- * change): weakest player if someone is at 10 or less, the last big hitter
- * (10+ damage), otherwise the highest threat score.
+ * Who this CPU would attack if its turn started now: the same planTarget
+ * used for its real attack (lethal first, then the archenemy with grudge /
+ * damage adjustments and the 2-per-round cap), with its creatures treated
+ * as untapped. No randomness, no state change.
  * Returns {targetId, targetName, reason} or null.
  */
 function cpuIntentPreview(opp, state){
   const s=state||liveGameState();
   if(!opp||!s||isOpponentDead(opp))return null;
-  const alive=allPlayersForTargeting(s).filter(p=>p.id!==opp.id&&!isEliminatedTarget(p));
+  const all=allPlayersForTargeting(s);
+  const alive=all.filter(p=>p.id!==opp.id&&!isEliminatedTarget(p));
   if(!alive.length)return null;
-  let pick=null,reason="";
-  const weakest=[...alive].sort((a,b)=>a.life-b.life)[0];
-  if(alive.length===1){pick=alive[0];reason="Only opponent left";}
-  else if(weakest.life<=10){pick=weakest;reason=STRATEGY_LABELS[STRATEGIES.GANG_UP];}
-  else if(opp.lastAttacker&&(opp.damageLog[opp.lastAttacker]||0)>=10&&alive.find(p=>p.id===opp.lastAttacker)){pick=alive.find(p=>p.id===opp.lastAttacker);reason=STRATEGY_LABELS[STRATEGIES.LAST_HITTER];}
-  else{pick=[...alive].sort((a,b)=>threatScore(b)-threatScore(a))[0];reason=STRATEGY_LABELS[STRATEGIES.THREAT];}
-  return {targetId:pick.id,targetName:pick.id==="player"?"You":shortName(pick),reason};
+  const plan=planTarget(opp,all,{assumeUntapped:true});
+  if(!plan)return null;
+  const pick=alive.find(p=>p.id===plan.targetId)||alive[0];
+  let reason=alive.length===1&&!plan.lethal?"Only opponent left":STRATEGY_LABELS[plan.strategy]||STRATEGY_LABELS[STRATEGIES.THREAT];
+  if(plan.lethal)reason=`${STRATEGY_LABELS[STRATEGIES.LETHAL]} (${plan.lethalKind==="commander"?"commander damage":plan.lethalKind==="poison"?"poison":"life total"})`;
+  return {targetId:pick.id,targetName:pick.id==="player"?"You":shortName(pick),reason,lethal:!!plan.lethal};
 }
 /** What a CPU hand contains, by type: {lands, creatures, gear, protection, other, unknown}. */
 function cpuHandBreakdown(opp){
@@ -1206,24 +1736,28 @@ function cpuHandBreakdown(opp){
   return result;
 }
 /**
- * Table warnings for the player: commander damage at 15+ (or lethal next
- * swing) and boards whose ready power meets the player's life.
- * Returns [{oppId, text}].
+ * Table warnings for the player: a CPU that can eliminate you on its next
+ * turn (same lethal math the AI uses), commander damage at 15+, and boards
+ * whose power meets your life. Returns [{oppId, text}].
  */
 function cpuLethalWarnings(state){
   const s=state||liveGameState();
   if(!s)return [];
   const warnings=[];
   const player=s.player;
+  const projection=playerAsTarget(s);
   aliveOpponents(s).forEach(opp=>{
     const name=shortName(opp);
     const cmd=(player.commanderDamageReceived||{})[opp.id]||0;
     const commander=commanderOnField(opp);
     const commanderHit=commander?commander.p*combatStrikeCount(commander):0;
-    if(commander&&cmd+commanderHit>=21)warnings.push({oppId:opp.id,text:`${name}: ${cmd}/21 commander damage to you — lethal next hit (${commanderHit} power)`});
+    const plan=isPlayerDead(s)?{lethal:false}:lethalPlan(opp,projection,{assumeUntapped:true});
+    if(plan.lethal&&plan.kind==="commander")warnings.push({oppId:opp.id,text:`${name}: ${cmd}/21 commander damage to you — lethal next hit (${commanderHit} power)`});
     else if(cmd>=15)warnings.push({oppId:opp.id,text:`${name}: ${cmd}/21 commander damage to you`});
-    const power=opp.tokens.filter(t=>!isManaToken(t)).reduce((sum,t)=>sum+(t.p||0)*combatStrikeCount(t),0);
-    if(power>0&&power>=player.life)warnings.push({oppId:opp.id,text:`${name}: ${power} power on board vs your ${player.life} life`});
+    const power=boardPower(opp);
+    if(plan.lethal&&plan.kind==="life")warnings.push({oppId:opp.id,text:`${name}: can deal lethal damage next turn (${power} power on board vs your ${player.life} life)`});
+    else if(power>0&&power>=player.life)warnings.push({oppId:opp.id,text:`${name}: ${power} power on board vs your ${player.life} life`});
+    if(plan.lethal&&plan.kind==="poison")warnings.push({oppId:opp.id,text:`${name}: lethal poison next turn`});
   });
   if((player.poison||0)>=7)warnings.push({oppId:null,text:`You have ${player.poison}/10 poison counters`});
   return warnings;
@@ -1271,6 +1805,10 @@ function ensureCommanderEffectState(state){
   player.tokens=player.tokens||[];
   player.tokens.forEach(token=>registerToken(player,token));
   if(state.firstSeat==null)state.firstSeat="player";
+  state.settings=state.settings||{};
+  state.settings.cpu=normalizeCpuSettings(state.settings.cpu);
+  state.roundTargets=state.roundTargets||{};
+  state.aiStats=state.aiStats||{};
   state.discardHistory=state.discardHistory||[];
   state.battlefieldRules=state.battlefieldRules||[];
   state.nextBattlefieldRuleId=state.nextBattlefieldRuleId||state.battlefieldRules.length;
@@ -1291,6 +1829,9 @@ function ensureCommanderEffectState(state){
     opp.looseGear=opp.looseGear||[];
     if(opp.poison==null)opp.poison=0;
     if(opp.heldMana==null)opp.heldMana=0;
+    opp.utilityPermanents=opp.utilityPermanents||[];
+    if(opp.commanderInHand==null)opp.commanderInHand=false;
+    opp.damageLog=opp.damageLog||{};
     opp.tokens.forEach(token=>registerToken(opp,token));
     normalizeOpponentLibrary(opp);
   });
@@ -1696,6 +2237,10 @@ function opponentPermanentOptions(opp,type){
     (opp.looseGear||[]).forEach((gear,index)=>options.push({key:`loose:${index}`,label:`⚙ ${gear.name} (unattached)`,type:"artifact"}));
     for(let index=0;index<opp.explosiveInPlay;index++)options.push({key:`fastMana:${index}`,label:"⚙ Fast mana",type:"artifact"});
   }
+  (opp.utilityPermanents||[]).forEach((entry,index)=>{
+    const types=(CPU_UTILITY_PERMANENTS[entry.name]||{}).types||["Permanent"];
+    if(type==="permanent"||(type==="artifact"&&types.includes("Artifact")))options.push({key:`util:${index}`,label:`${entry.ico||"✦"} ${entry.name}`,type:types.includes("Artifact")?"artifact":"enchantment"});
+  });
   if(includes("land"))for(let index=0;index<opp.landsInPlay;index++)options.push({key:`land:${index}`,label:"🌲 Land",type:"land"});
   return options;
 }
@@ -1716,6 +2261,7 @@ function cpuPermanentPriority(opp,option){
     return (gear?.bonus||0)+(gear?.kw?8:0)+10;
   }
   if(kind==="fastMana")return 40;
+  if(kind==="util")return 25;
   if(kind==="land")return opp.landsInPlay<=3?70:5;
   return Infinity;
 }
@@ -1778,7 +2324,8 @@ function removeOpponentPermanent(opp,key,destination="graveyard"){
     if(token.kind==="commander"){
       if(destination==="hand")returnCommanderToHand(opp);
       else returnCommanderToZone(opp);
-      return {name:token.name,ico:token.ico||opp.ico,types:["Legendary","Creature"],destination:"command zone",uid:token.uid};
+      noteCommanderRemoved(opp);
+      return {name:token.name,ico:token.ico||opp.ico,types:["Legendary","Creature"],destination:destination==="hand"?"hand":"command zone",uid:token.uid};
     }
     if(isManaToken(token))opp.rampInPlay=Math.max(0,opp.rampInPlay-(token.rampValue||1));
     if(destination==="hand"){
@@ -1794,6 +2341,12 @@ function removeOpponentPermanent(opp,key,destination="graveyard"){
     if(kind==="gear")refreshCommanderGear(opp);
     if(destination==="hand"){returnPermanentCardToHand(opp,gear.name,null);return {name:gear.name,ico:"⚙",types:["Artifact","Equipment"],destination:"hand"};}
     return recordOpponentPermanentZone(opp,destination,gearZoneCard(gear));
+  }
+  if(kind==="util"&&(opp.utilityPermanents||[])[index]){
+    const [entry]=opp.utilityPermanents.splice(index,1);
+    if(destination==="hand"){returnPermanentCardToHand(opp,entry.name,null);return {name:entry.name,ico:entry.ico||"✦",types:(CPU_UTILITY_PERMANENTS[entry.name]||{}).types||["Permanent"],destination:"hand"};}
+    const ref=entry.ref||findCardRefByName(entry.name);
+    return recordOpponentPermanentZone(opp,destination,ref?typedGraveyardCard(typedHandCard(ref)):{name:entry.name,ico:entry.ico||"✦",types:["Permanent"],virtual:false});
   }
   if(kind==="fastMana"&&opp.explosiveInPlay>0){
     opp.explosiveInPlay--;
@@ -1855,7 +2408,7 @@ function resolvePlayerEffect(effect,draft,options){
   const log=message=>{lines.push(message);cmdLog(message);};
   if(targets.length===0)return lines;
   if(!opts.quiet&&typeof cmdSnapshot==="function")cmdSnapshot();
-  targets.forEach(target=>{
+  withRemovalSource("player",()=>targets.forEach(target=>{
     const name=effectTargetName(target);
     const amount=playerActionAmount(effect,target);
     if(effect.action==="exileGraveyards"){
@@ -1920,7 +2473,7 @@ function resolvePlayerEffect(effect,draft,options){
       if(moved.length)log(`${name} ${verb} ${moved.map(movementCardText).join(", ")}. Types: ${discardedTypeSummary(moved)}.`);
       else log(`${name} has no ${effect.cardType} to ${effect.action==="bounce"?"return":effect.action}.`);
     }
-  });
+  }));
   commanderEffectDraft={scope:draft.scope,action:draft.action,count:1,all:false,cardType:draft.cardType,targetId:null,choices:{},creaturesPlayed:draft.creaturesPlayed||0,actionOpen:draft.actionOpen};
   ensureCommanderEffectState(state);
   if(!opts.quiet){
