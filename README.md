@@ -1,6 +1,6 @@
 # Magic No Gathering
 
-**Solo Commander Simulator**
+**Solo Commander Simulator** · _Alpha_
 
 A free, unofficial **Magic: The Gathering** fan project: a solo Commander table for your **real paper deck**.
 You play your own cards at a physical table; the app runs 1–4 CPU Commander opponents — their decks, hands,
@@ -10,11 +10,14 @@ It also includes scripted one-on-one encounters (Solo Adventures).
 Free to play. No ads, no accounts, no paid features. Donations are optional and unlock nothing.
 
 ## Play
-- **Online:** _add the public itch.io / GitHub Pages URL here after publishing._
+- **Online:** https://thechandycompany.github.io/magic-no-gathering/
 - **Offline:** download or clone this repo and open `index.html` in a browser. No install, no server, no internet needed.
 
 Your game saves automatically in this browser. Use **⚙ Settings → Export backup** to keep a copy or move it
 to another device — clearing browser data erases saves otherwise.
+
+## Alpha feedback
+This is an early alpha — expect rough edges. Send bugs and ideas to **thechandycompany@gmail.com** (or use **Feedback** in the game's Settings → About).
 
 ## How a Commander game works
 1. Choose 1–4 opponents, their decks (or "Mixed"), and a difficulty on the setup screen.
@@ -46,7 +49,6 @@ The game is plain static files — there is no build step.
 ## License
 The code is free software under the **GNU General Public License v3.0 or later** — see [`LICENSE`](LICENSE).
 You may copy, modify and share it; any distributed version must stay GPL and include its source.
-GPL was chosen so the project can reuse material from [Forge](https://github.com/Card-Forge/forge) (GPL-3.0) in the future.
 
 The license covers this project's own code only. Magic: The Gathering names, card text and other Wizards of the Coast
 material are **not** licensed here — they are used as fan content under Wizards' Fan Content Policy (above).

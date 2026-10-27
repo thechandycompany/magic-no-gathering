@@ -1769,7 +1769,7 @@ function createCommanderBattle(numOpponents, settings) {
     gameMode:"commanderBattle", turn:1, phase:"cpu", cpuTurnIndex:0, firstSeat,
     opponents, player:{id:"player",name:"You",life:40,poison:0,creatures:0,handSize:7,librarySize:92,graveyardCount:0,graveyard:[],nextGraveyardCardId:0,discardHistory:[],exileCount:0,exile:[],nextExileCardId:0,commanderDamageReceived:{},commanderDamageDealt:{},tokens:[],nextTokenUid:0,planeswalkers:[]},
     battlefieldRules:[], nextBattlefieldRuleId:0,
-    discardHistory:[], log:[], viewMode:"all", viewTarget:0, gameOver:false, winner:null,
+    discardHistory:[], log:[], viewMode:"table", viewTarget:0, gameOver:false, winner:null,
     settings:decksSetting!=null?{cpu,decks:decksSetting}:{cpu}, roundTargets:{}, aiStats:{},
   };
 }

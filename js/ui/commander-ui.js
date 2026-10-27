@@ -81,7 +81,7 @@ function renderSetupScreen(onStartAdventure, onStartCommander) {
 
   modal.innerHTML=`
     <div class="big-ico">🎴</div>
-    <h2>${escapeHtml(GAME_TITLE)}</h2>
+    <h2>${gameTitleHtml()}</h2>
     <p class="setup-sub">${GAME_TAGLINE}</p>
     <div class="setup-columns">
       <div class="setup-col setup-col-commander">
@@ -123,8 +123,7 @@ function renderSetupScreen(onStartAdventure, onStartCommander) {
         ${themePickerButtonsHtml()}
       </div>
     </div>
-    ${externalUrl(DONATION_URL)?`<div class="setup-kofi"><a class="kofi-btn" href="${externalUrl(DONATION_URL)}" target="_blank" rel="noopener noreferrer"><span aria-hidden="true">☕</span> Support me on Ko-fi</a></div>`:""}
-    <p class="setup-fan-note">Free, unofficial fan project — not approved or endorsed by Wizards of the Coast.</p>`;
+    <footer class="project-foot"><p class="project-links">${projectLinksHtml()}</p><p class="setup-fan-note">Free, unofficial fan project — not approved or endorsed by Wizards of the Coast.</p></footer>`;
   overlay.classList.add("show");
 
   const persist=()=>saveCommanderSetup(setup);
@@ -337,6 +336,45 @@ function renderLethalStrip(state,hud){
   strip.innerHTML=warnings.map(w=>`<span class="cmd-lethal-item">⚠ ${escapeHtml(w.text)}</span>`).join("");
 }
 
+/* ---------- Board controls shared by both views (Table · Detail) ----------
+   Every view renders the same data-* controls and wires them through wireBoardControls, so no edit
+   ever needs a view switch. */
+const BOARD_VIEWS=[["table","🂠","Table"],["single","◻","Detail"]];
+function viewSwitchHtml(state){
+  return `<div class="view-switch" role="group" aria-label="Board view">${BOARD_VIEWS.map(([mode,ico,label])=>`<button type="button" class="view-switch-btn" data-view-mode="${mode}" aria-pressed="${state.viewMode===mode}" title="${label} view"><span aria-hidden="true">${ico}</span><span class="view-switch-lbl">${label}</span></button>`).join("")}</div>`;
+}
+// Compact − value + control. data is the attribute string that identifies the stat (see wireBoardControls).
+function stepHtml(data,label,value,opts={}){
+  return `<span class="step ${opts.warn?"warn":""} ${opts.className||""}" title="${escapeHtml(opts.title||label)}"><button type="button" class="step-btn" ${data} data-d="-1" aria-label="Decrease ${escapeHtml(label)}">−</button><span class="step-val">${opts.ico?`<span class="step-ico" aria-hidden="true">${opts.ico}</span>`:""}${value}</span><button type="button" class="step-btn" ${data} data-d="1" aria-label="Increase ${escapeHtml(label)}">+</button></span>`;
+}
+function refreshBoard(state){renderBoardView(state);renderLifeHud(state);saveState();}
+function wireBoardControls(board,state){
+  board.querySelectorAll('[data-view-mode]').forEach(btn=>{btn.onclick=event=>{event.stopPropagation();
+    const mode=btn.dataset.viewMode;
+    if(mode==="single"&&state.viewMode!=="single"){const active=oppById(state.activeOppId);state.viewTarget=active&&state.phase==="cpu"?active.index:-1;}
+    state.viewMode=mode;renderBoardView(state);};});
+  board.querySelectorAll('[data-view-target]').forEach(el=>{el.onclick=event=>{if(event.target.closest('button:not([data-view-target]),[data-graveyard-owner],[data-exile-owner],input'))return;
+    state.viewMode="single";state.viewTarget=parseInt(el.dataset.viewTarget,10);renderBoardView(state);};});
+  board.querySelectorAll('[data-opp-stat]').forEach(btn=>{btn.onclick=event=>{event.stopPropagation();
+    const opp=oppById(btn.dataset.oppId);if(!opp)return;
+    opp[btn.dataset.oppStat]=Math.max(0,(opp[btn.dataset.oppStat]||0)+parseInt(btn.dataset.d,10));refreshBoard(state);};});
+  board.querySelectorAll('[data-player-stat]').forEach(btn=>{btn.onclick=event=>{event.stopPropagation();
+    const key=btn.dataset.playerStat;state.player[key]=Math.max(0,(state.player[key]||0)+parseInt(btn.dataset.d,10));refreshBoard(state);};});
+  board.querySelectorAll('[data-cmdr-from]').forEach(btn=>{btn.onclick=event=>{event.stopPropagation();
+    const id=btn.dataset.cmdrFrom;state.player.commanderDamageReceived[id]=Math.max(0,(state.player.commanderDamageReceived[id]||0)+parseInt(btn.dataset.d,10));refreshBoard(state);};});
+  board.querySelectorAll('[data-rm-uid]').forEach(btn=>{btn.onclick=event=>{event.stopPropagation();removeCpuTokenFromBoard(oppById(btn.dataset.opp),btn.dataset.rmUid);};});
+  board.querySelectorAll('[data-perm-key]').forEach(btn=>{btn.onclick=async event=>{event.stopPropagation();
+    const owner=oppById(btn.dataset.opp);if(!owner)return;
+    const destination=await askCommanderRemovalDestination({name:btn.dataset.permName,ico:btn.dataset.permIco,type:"Permanent"});
+    if(!destination)return;
+    cmdSnapshot();
+    const moved=removeOpponentPermanent(owner,btn.dataset.permKey,destination);
+    if(moved)logCommander(`You ${destination==="exile"?"exile":"destroy"} ${movementCardText({...moved,destination:moved.destination||destination})} (${nm(owner)}).`);
+    saveState();renderBoardView(gameState);renderLifeHud(gameState);refreshActivePanel();};});
+  wireGraveyardViewerControls(board,state);
+  wirePlaneswalkerControls(board,state);
+}
+
 function renderBoardView(state){
   updateCommanderTurnBanner(state);
   const originalBoard=document.getElementById('board');
@@ -348,8 +386,9 @@ function renderBoardView(state){
     if(hud&&hud.nextSibling)hud.parentNode.insertBefore(board,hud.nextSibling);
     else if(originalBoard)originalBoard.parentNode.insertBefore(board,originalBoard);
   }
-  if(state.viewMode==="all")renderAllView(state,board);
-  else renderSingleView(state,board);
+  if(state.viewMode!=="single")state.viewMode="table";  // older saves may hold the retired "all" view
+  if(state.viewMode==="table")renderTableView(state,board);
+  else{tableAnimState=null;tableAnimLive.clear();hideTablePeek();renderSingleView(state,board);}
 }
 
 function renderSingleView(state,board){
@@ -381,7 +420,7 @@ function renderSingleView(state,board){
   const intent=dead?"":intentText(state,opp);
   board.innerHTML=`<div class="board-h"><span class="ico">${opp.ico}</span><span>${opp.name}</span>
     <span class="atk-note">${opp.currentStrategy?STRATEGY_LABELS[opp.currentStrategy]||'':''}</span>
-    <div class="view-controls"><button class="btn-ghost view-btn" id="prevOppBtn" title="Previous player" aria-label="Previous player">◂</button><span class="view-counter">${viewLabel}</span><button class="btn-ghost view-btn" id="nextOppBtn" title="Next player" aria-label="Next player">▸</button><button class="btn-ghost view-btn" id="allViewBtn" title="Show all players" aria-label="Show all players">⊞</button></div>
+    <div class="view-controls"><button class="btn-ghost view-btn" id="prevOppBtn" title="Previous player" aria-label="Previous player">◂</button><span class="view-counter">${viewLabel}</span><button class="btn-ghost view-btn" id="nextOppBtn" title="Next player" aria-label="Next player">▸</button>${viewSwitchHtml(state)}</div>
   </div><div class="board-inner commander-board-inner"><div class="garruk-col">
     <div class="commander-board-stats">
       <div class="cbs-item"><span class="cbs-label">Life</span><div class="cbs-adj"><button type="button" class="cbs-btn" data-opp-stat="life" data-opp-id="${opp.id}" data-d="-1">−</button><span class="cbs-val ${opp.life<=10?'warn':''}">${opp.life}</span><button type="button" class="cbs-btn" data-opp-stat="life" data-opp-id="${opp.id}" data-d="1">+</button></div></div>
@@ -393,7 +432,7 @@ function renderSingleView(state,board){
       ${(opp.poison||0)>0?`<div class="cbs-item"><span class="cbs-label">Poison</span><span class="cbs-val ${opp.poison>=7?'warn':''}">☣ ${opp.poison}/10</span></div>`:""}
       <div class="cbs-item"><span class="cbs-label">Commander ${helpTip("Commander tax: each recast from the command zone costs 2 more mana.")}</span><span class="cbs-val">${commanderOnField(opp)?'Battlefield':opp.commanderInHand?'In hand (no tax)':'Command zone (+'+opp.commanderTax+')'}</span></div>
       <div class="cbs-item cbs-wide"><span class="cbs-label">Equipment</span><span class="cbs-val cbs-small">${gearNames.length?escapeHtml(gearNames.join(", ")):"None"}</span></div>
-      ${(opp.utilityPermanents||[]).length?`<div class="cbs-item cbs-wide"><span class="cbs-label">Other permanents</span><span class="cbs-val cbs-small">${opp.utilityPermanents.map((u,i)=>`<span class="cbs-util">${escapeHtml(u.ico||"✦")} ${escapeHtml(u.name)}${dead?"":`<button type="button" class="cbs-util-remove" data-util-opp="${opp.id}" data-util-index="${i}" aria-label="Remove ${escapeHtml(u.name)}">✕</button>`}</span>`).join("")}</span></div>`:""}
+      ${(opp.utilityPermanents||[]).length?`<div class="cbs-item cbs-wide"><span class="cbs-label">Other permanents</span><span class="cbs-val cbs-small">${opp.utilityPermanents.map((u,i)=>`<span class="cbs-util">${escapeHtml(u.ico||"✦")} ${escapeHtml(u.name)}${dead?"":`<button type="button" class="cbs-util-remove" data-opp="${opp.id}" data-perm-key="util:${i}" data-perm-name="${escapeHtml(u.name)}" data-perm-ico="${escapeHtml(u.ico||"✦")}" aria-label="Remove ${escapeHtml(u.name)}">✕</button>`}</span>`).join("")}</span></div>`:""}
       ${intent?`<div class="cbs-item cbs-wide"><span class="cbs-label">Likely next attack ${helpTip("A prediction from this CPU's current targeting priorities. It can change before its turn.")}</span><span class="cbs-val cbs-small">${escapeHtml(intent)}</span></div>`:""}
       <div class="cbs-item"><span class="cbs-label">Graveyard</span><button type="button" class="cbs-zone-btn" data-graveyard-owner="${opp.id}">⚰ ${opp.graveyardCount}</button></div>
       <div class="cbs-item"><span class="cbs-label">Exile</span><button type="button" class="cbs-zone-btn" data-exile-owner="${opp.id}">✦ ${opp.exileCount}</button></div>
@@ -402,47 +441,8 @@ function renderSingleView(state,board){
 
   document.getElementById('prevOppBtn').onclick=()=>{state.viewTarget=viewIdx===0?-1:(viewIdx-1);renderBoardView(state);};
   document.getElementById('nextOppBtn').onclick=()=>{state.viewTarget=viewIdx>=state.opponents.length-1?-1:(viewIdx+1);renderBoardView(state);};
-  document.getElementById('allViewBtn').onclick=()=>{state.viewMode="all";renderBoardView(state);};
-  wireGraveyardViewerControls(board,state);
-
-  board.querySelectorAll('[data-opp-stat]').forEach(btn=>{
-    btn.onclick=()=>{
-      const targetOpp=oppById(btn.dataset.oppId);
-      if(!targetOpp)return;
-      const d=parseInt(btn.dataset.d);
-      if(btn.dataset.oppStat==="life")targetOpp.life=Math.max(0,targetOpp.life+d);
-      renderBoardView(state);renderLifeHud(state);saveState();
-    };
-  });
-  wireCommanderDamageControls(board,state);
-  board.querySelectorAll('[data-util-opp]').forEach(btn=>{
-    btn.onclick=async event=>{
-      event.stopPropagation();
-      const owner=oppById(btn.dataset.utilOpp);const entry=owner&&(owner.utilityPermanents||[])[parseInt(btn.dataset.utilIndex)];
-      if(!entry)return;
-      const destination=await askCommanderRemovalDestination({name:entry.name,ico:entry.ico,type:"Permanent"});
-      if(!destination)return;
-      cmdSnapshot();
-      const moved=removeOpponentPermanent(owner,`util:${btn.dataset.utilIndex}`,destination);
-      if(moved)logCommander(`You ${destination==="exile"?"exile":"destroy"} ${movementCardText({...moved,destination:moved.destination||destination})} (${nm(owner)}).`);
-      saveState();renderBoardView(gameState);renderLifeHud(gameState);refreshActivePanel();
-    };
-  });
-  board.querySelectorAll('.c-remove[data-rm-uid]').forEach(btn=>{
-    btn.onclick=event=>{event.stopPropagation();removeCpuTokenFromBoard(oppById(btn.dataset.opp),btn.dataset.rmUid);};
-  });
+  wireBoardControls(board,state);
 }
-function wireCommanderDamageControls(board,state){
-  board.querySelectorAll('[data-cmdr-from]').forEach(btn=>{
-    btn.onclick=()=>{
-      const oppId=btn.dataset.cmdrFrom;
-      const d=parseInt(btn.dataset.d);
-      state.player.commanderDamageReceived[oppId]=Math.max(0,(state.player.commanderDamageReceived[oppId]||0)+d);
-      renderBoardView(state);renderLifeHud(state);saveState();
-    };
-  });
-}
-
 /* Board "✕ Remove": snapshot, let the CPU respond, remove by uid, then refresh the active form. */
 async function removeCpuTokenFromBoard(opp,uid){
   if(!opp)return;
@@ -543,7 +543,7 @@ function renderPlayerBoardView(state,board,totalViews){
 
   board.innerHTML=`<div class="board-h"><span class="ico">🗡️</span><span>You</span>
     <span class="atk-note"></span>
-    <div class="view-controls"><button class="btn-ghost view-btn" id="prevOppBtn" title="Previous player" aria-label="Previous player">◂</button><span class="view-counter">1/${totalViews}</span><button class="btn-ghost view-btn" id="nextOppBtn" title="Next player" aria-label="Next player">▸</button><button class="btn-ghost view-btn" id="allViewBtn" title="Show all players" aria-label="Show all players">⊞</button></div>
+    <div class="view-controls"><button class="btn-ghost view-btn" id="prevOppBtn" title="Previous player" aria-label="Previous player">◂</button><span class="view-counter">1/${totalViews}</span><button class="btn-ghost view-btn" id="nextOppBtn" title="Next player" aria-label="Next player">▸</button>${viewSwitchHtml(state)}</div>
   </div><div class="board-inner commander-board-inner"><div class="garruk-col">
     <div class="commander-board-stats">
       ${stat("life","Life",p.life,p.life<=10)}
@@ -560,50 +560,211 @@ function renderPlayerBoardView(state,board,totalViews){
 
   document.getElementById('prevOppBtn').onclick=()=>{state.viewTarget=state.opponents.length-1;renderBoardView(state);};
   document.getElementById('nextOppBtn').onclick=()=>{state.viewTarget=0;renderBoardView(state);};
-  document.getElementById('allViewBtn').onclick=()=>{state.viewMode="all";renderBoardView(state);};
-  wireGraveyardViewerControls(board,state);
-  wirePlaneswalkerControls(board,state);
-  board.querySelectorAll('[data-player-stat]').forEach(btn=>{
-    btn.onclick=()=>{
-      const key=btn.dataset.playerStat;
-      const d=parseInt(btn.dataset.d);
-      state.player[key]=Math.max(0,(state.player[key]||0)+d);
-      renderBoardView(state);renderLifeHud(state);saveState();
-    };
-  });
-  wireCommanderDamageControls(board,state);
+  wireBoardControls(board,state);
 }
 
-function renderAllView(state,board){
-  board.className='board all-view';board.style.borderColor='';
-  const player=state.player;
-  const planeswalkers=player.planeswalkers||[];
-  const playerPlaneswalkersHtml=planeswalkers.length
-    ?`<div class="all-pw-list">${planeswalkers.map(pw=>`<div class="all-pw-card"><span class="all-pw-name" title="${escapeHtml(pw.name)}">⬡ ${escapeHtml(pw.name)}</span><div class="all-pw-controls"><button type="button" class="cbs-btn" data-pw-loyalty="${pw.id}" data-d="-1" aria-label="Decrease ${escapeHtml(pw.name)} loyalty">−</button><span class="all-pw-loyalty">${pw.loyalty}</span><button type="button" class="cbs-btn" data-pw-loyalty="${pw.id}" data-d="1" aria-label="Increase ${escapeHtml(pw.name)} loyalty">+</button><button type="button" class="all-pw-remove" data-pw-remove="${pw.id}" title="Remove ${escapeHtml(pw.name)} from the battlefield" aria-label="Remove ${escapeHtml(pw.name)}">✕</button></div></div>`).join('')}</div>`
-    :'<span class="all-pw-empty">No planeswalkers on your battlefield.</span>';
-  let html=`<div class="board-h"><span class="ico">⊞</span><span>All Players</span><div class="view-controls"><button class="btn-ghost view-btn" id="singleViewBtn" title="Open the active player view" aria-label="Open the active player view">◻</button></div></div><div class="all-opponents-grid">`;
-  html+=`<div class="all-opp-card player-card" data-idx="-1" style="border-color:var(--gold-dim)">
-    <div class="all-opp-header"><span>🗡️</span><span class="all-opp-name">You</span><span class="all-opp-life">${player.life}</span></div>
-    <div class="all-opp-body"><span>♟ ${plural(player.creatures,"creature")}</span><span>⬡ ${plural(planeswalkers.length,"planeswalker")}</span><span title="Cards in hand">🃏 ${player.handSize||0} in hand</span><span title="Cards in library">📚 ${player.librarySize||0} in library</span><span>⚰ ${player.graveyardCount}</span>${(player.poison||0)>0?`<span>☣ ${player.poison}/10 poison</span>`:`<span>✦ ${player.exileCount}</span>`}</div>
-    <div class="all-opp-pws"><div class="all-pw-heading"><span>Planeswalkers</span><button type="button" class="all-pw-add" data-pw-add>+ Add</button></div>${playerPlaneswalkersHtml}</div>
-  </div>`;
-  state.opponents.forEach((opp,i)=>{
-    const dead=isOpponentDead(opp);const commander=commanderOnField(opp);
-    const commanderSummary=commander?cardReferenceHtml(commander,{className:"all-opp-card-reference"}):(opp.commanderInHand?'<span title="Returned to its owner\'s hand. Its next cast has no tax.">⚜ In hand</span>':'<span title="Commander is in the command zone">⚜ In zone</span>');
-    const active=state.phase==="cpu"&&state.activeOppId===opp.id;
-    const attacking=active&&state.responseStage==="combat"&&state.activeResult&&state.activeResult.target;
-    const intent=dead?"":intentText(state,opp);
-    html+=`<div class="all-opp-card ${dead?'dead':''} ${active?'is-active':''}" data-idx="${i}" style="border-color:${oppColor(opp)}">
-      <div class="all-opp-header"><span>${opp.ico}</span><span class="all-opp-name">${nm(opp)}</span><span class="all-opp-life">${dead?'☠':opp.life}</span></div>
-      <div class="all-opp-body"><span>♟ ${plural(opp.tokens.length,"creature")}</span>${commanderSummary}<span title="Mana available · mana held open">◇ ${manaAvailable(opp)}${opp.heldMana?` · ${opp.heldMana} open`:" mana"}</span><span>📚 ${opponentDeckSize(opp)}</span></div>
-      ${dead?"":`<div class="all-opp-hand" title="Cards in hand by type">🃏 ${handBreakdownText(opp)}</div>`}
-      ${attacking?`<div class="all-opp-target">⚔ Attacking ${state.activeResult.target==="player"?"you":getTargetName(state,state.activeResult.target)}</div>`:intent?`<div class="all-opp-intent">Likely next attack: ${escapeHtml(intent)}</div>`:""}
-    </div>`;
+/* ---------- Tabletop view: every battlefield laid out as physical cards ---------- */
+// Tapped/attacking cards turn sideways; P/T shows buffs (green) and shrinks (red) against the printed stats.
+// Identical cards share one slot with a ×N stack. Cards that are new since the last table render animate in;
+// cards whose tapped state changed animate the turn. Undo/new game/switching views re-prime without animating.
+let tableAnimPrev=null,tableAnimState=null;
+// The board can re-render several times in one tick; a started animation is remembered so later renders resume it.
+const TABLE_ANIM_MS={"tt-enter":1400,"tt-tap":300,"tt-untap":300,"tt-bump":350};
+let tableAnimLive=new Map();
+function tableAnimClass(anim,keys,value){
+  keys.forEach(k=>anim.next.set(k,value));
+  let cls="";
+  if(anim.prev){
+    const seen=keys.filter(k=>anim.prev.has(k));
+    if(!seen.length)cls=value===0?"":"tt-enter";
+    else if(typeof value==="number")cls=value>anim.prev.get(keys[0])?"tt-bump":"";
+    else if(seen.length<keys.length)cls="tt-bump";
+    else if(seen.some(k=>anim.prev.get(k)!==value))cls=value?"tt-tap":"tt-untap";
+  }
+  const now=performance.now();
+  if(cls){keys.forEach(k=>tableAnimLive.set(k,{cls,start:now}));return {cls,delay:0};}
+  const live=keys.map(k=>tableAnimLive.get(k)).find(l=>l&&now-l.start<TABLE_ANIM_MS[l.cls]);
+  return live?{cls:live.cls,delay:Math.round(now-live.start)}:{cls:"",delay:0};
+}
+function animAttrs(a){return a&&a.cls?{cls:a.cls,style:`--tt-delay:-${a.delay}ms;`}:{cls:"",style:""};}
+// Same card, same state → same stack. The commander never stacks.
+function tableCardSignature(card){
+  return card.kind==="commander"?`uid:${card.uid}`:JSON.stringify([card.name,card.ico,card.kind,card.p,card.t,card.baseP,card.baseT,(card.kws||[]).join(","),card.effect||"",!!card.isToken,!!card.attacking,!!card.tapped,!!card.summoningSick]);
+}
+function groupTableCards(cards){
+  const groups=new Map();
+  cards.forEach(card=>{const sig=tableCardSignature(card);if(!groups.has(sig))groups.set(sig,[]);groups.get(sig).push(card);});
+  return [...groups.values()];
+}
+function tableCardHtml(card,opts={}){
+  const tapped=!!(card.attacking||card.tapped);
+  const commander=card.kind==="commander";
+  const count=opts.count||1;
+  const hasStats=card.p!=null&&card.t!=null;
+  const baseP=card.baseP!=null?card.baseP:card.p,baseT=card.baseT!=null?card.baseT:card.t;
+  const ptClass=!hasStats?"":(card.p>baseP||card.t>baseT)?"buffed":(card.p<baseP||card.t<baseT)?"shrunk":"";
+  const kws=(card.kws||[]).filter(Boolean);
+  const gear=opts.gear||[];
+  const tooltip=[`${count>1?`${count}× `:""}${card.name}${hasStats?` — ${card.p}/${card.t}`:""}`,kws.join(", "),card.effect||"",gear.length?`Equipped: ${gear.map(g=>g.name).join(", ")}`:"",tapped?"Tapped":"",card.summoningSick?"Summoning sick":""].filter(Boolean).join(" · ");
+  const classes=["tt-card",opts.className||"",commander?"commander":"",card.isToken?"token":"",card.summoningSick?"sick":"",count>1?"stacked":"",count>2?"stacked-3":""].filter(Boolean).join(" ");
+  const stat=opts.stat!=null?opts.stat:hasStats?`${card.p}/${card.t}`:"";
+  const peekIndex=tablePeek.push({card,count,gear,tapped,stat:opts.stat,className:opts.className||""})-1;
+  const gearHtml=gear.map((g,i)=>`<span class="tt-gear ${animAttrs(g.anim).cls}" style="--i:${i};${animAttrs(g.anim).style}" title="${escapeHtml(`${g.name}${g.effect?` — ${g.effect}`:""}`)}">⚙ ${escapeHtml(g.name)}</span>`).join("");
+  const removeTarget=opts.permKey?`data-perm-key="${escapeHtml(opts.permKey)}" data-perm-name="${escapeHtml(card.name)}" data-perm-ico="${escapeHtml(card.ico||"✦")}"`:opts.pwId?`data-pw-remove="${escapeHtml(opts.pwId)}"`:`data-rm-uid="${escapeHtml(card.uid)}"`;
+  const removeHtml=opts.removeOpp||opts.pwId?`<button type="button" class="tt-remove" data-opp="${escapeHtml(opts.removeOpp||"")}" ${removeTarget} title="${commander?"Return to the command zone":count>1?"Remove one from the battlefield":"Remove from the battlefield"}" aria-label="Remove ${count>1?"one ":""}${escapeHtml(card.name)}">✕</button>`:"";
+  const a=animAttrs(opts.anim);
+  return `<div class="tt-slot ${tapped?"is-tapped":""} ${a.cls}" style="--gear:${gear.length};${a.style}">${gearHtml}${count>1?`<span class="tt-count">×${count}</span>`:""}<div class="${classes}" data-peek="${peekIndex}" tabindex="0" aria-label="${escapeHtml(tooltip)}">
+    <span class="tt-name">${escapeHtml(card.name)}</span>
+    <span class="tt-art">${escapeHtml(card.ico||"🃏")}</span>
+    ${kws.length?`<span class="tt-kw">${escapeHtml(kws.join(" · "))}</span>`:""}
+    ${stat!==""?`<span class="tt-pt ${ptClass}">${escapeHtml(stat)}</span>`:""}
+    ${card.attacking?'<span class="tt-badge tt-atk" title="Attacking">⚔</span>':card.summoningSick?'<span class="tt-badge" title="Summoning sick">💤</span>':""}
+    ${opts.extraHtml||""}${removeHtml}</div></div>`;
+}
+// Battlefield creatures, stacked; one remove button per stack takes the last copy.
+function tableCreaturesHtml(anim,ownerId,cards,opts={}){
+  return groupTableCards(cards).map(group=>{
+    const card=group[0];const tapped=!!(card.attacking||card.tapped);
+    const anim_=tableAnimClass(anim,group.map(c=>`${ownerId}|${c.uid}`),tapped);
+    const gear=card.kind==="commander"?(opts.gear||[]).map((g,i)=>({...g,anim:tableAnimClass(anim,[`${ownerId}|gear|${g.name}|${i}`],true)})):[];
+    return tableCardHtml({...card,uid:group[group.length-1].uid},{count:group.length,anim:anim_,gear,className:opts.className,removeOpp:opts.removeOpp});
+  }).join("");
+}
+// Non-creature permanents without uids (loose gear, utility): stack by name.
+function tablePermanentsHtml(anim,ownerId,items,className,removeOpp){
+  const byName=new Map();
+  items.forEach(item=>{const key=`${item.name}|${item.ico}`;if(!byName.has(key))byName.set(key,[]);byName.get(key).push(item);});
+  return [...byName.values()].map(group=>{
+    const item=group[0];
+    const anim_=tableAnimClass(anim,group.map((_,i)=>`${ownerId}|${className}|${item.name}|${i}`),true);
+    return tableCardHtml(item,{className,stat:"",count:group.length,anim:anim_,removeOpp,permKey:removeOpp?group[group.length-1].key:null});
+  }).join("");
+}
+// A face-down or face-up pile (lands, library, graveyard…) with a count; grows with a bump.
+function tablePileHtml(ico,label,count,opts={}){
+  const attrs=opts.attrs||"";
+  const tag=attrs?"button":"div";
+  const step=opts.stepData?`<span class="tt-pile-step"><button type="button" class="step-btn" ${opts.stepData} data-d="-1" aria-label="Decrease ${escapeHtml(label)}">−</button><button type="button" class="step-btn" ${opts.stepData} data-d="1" aria-label="Increase ${escapeHtml(label)}">+</button></span>`:"";
+  if(step)return `<div class="tt-pile ${opts.className||""} ${count?"":"empty"} ${animAttrs(opts.anim).cls}" style="${animAttrs(opts.anim).style}" title="${escapeHtml(opts.title||`${label}: ${count}`)}"><span class="tt-pile-ico">${ico}</span><span class="tt-pile-count">${count}</span><span class="tt-pile-lbl">${escapeHtml(label)}</span>${step}</div>`;
+  return `<${tag} ${tag==="button"?'type="button"':""} class="tt-pile ${opts.className||""} ${count?"":"empty"} ${animAttrs(opts.anim).cls}" style="${animAttrs(opts.anim).style}" ${attrs} title="${escapeHtml(opts.title||`${label}: ${count}`)}"><span class="tt-pile-ico">${ico}</span><span class="tt-pile-count">${count}</span><span class="tt-pile-lbl">${escapeHtml(label)}</span></${tag}>`;
+}
+function tablePile(anim,key,ico,label,count,opts={}){return tablePileHtml(ico,label,count,{...opts,anim:tableAnimClass(anim,[key],count)});}
+function tableOpponentSeatHtml(state,opp,anim){
+  const dead=isOpponentDead(opp);
+  const active=state.phase==="cpu"&&state.activeOppId===opp.id;
+  const cd=state.player.commanderDamageReceived[opp.id]||0;
+  const commander=commanderOnField(opp);
+  const creatures=opp.tokens.slice().sort((a,b)=>(b.kind==="commander")-(a.kind==="commander"));
+  const creaturesHtml=creatures.length?tableCreaturesHtml(anim,opp.id,creatures,{gear:opp.attachedGear||[],removeOpp:dead?null:opp.id}):'<span class="tt-empty">No creatures</span>';
+  const commandZone=commander?"":tableCardHtml({name:opp.name,ico:opp.ico,kind:"commander",effect:"Command zone"},{className:"in-zone",stat:opp.commanderInHand?"Hand":`+${opp.commanderTax||0}`});
+  const removeOpp=dead?null:opp.id;
+  const permanents=tablePermanentsHtml(anim,opp.id,(opp.looseGear||[]).map((g,i)=>({name:g.name,ico:"⚙",effect:`${g.effect||""} (unattached)`,key:`loose:${i}`})),"artifact",removeOpp)
+    +tablePermanentsHtml(anim,opp.id,(opp.utilityPermanents||[]).map((u,i)=>({name:u.name,ico:u.ico||"✦",effect:u.effect||"",key:`util:${i}`})),"enchantment",removeOpp);
+  const rocks=(opp.rampInPlay||0)+(opp.explosiveInPlay||0);
+  return `<div class="tt-seat ${dead?"dead":""} ${active?"is-active":""}" style="--seat:${oppColor(opp)}">
+    <div class="tt-seat-h"><button type="button" class="tt-seat-name" data-view-target="${opp.index}" title="Open ${escapeHtml(nm(opp))}'s detail view">${opp.ico} ${escapeHtml(nm(opp))}</button>
+      ${dead?'<span class="tt-life">☠</span>':stepHtml(`data-opp-stat="life" data-opp-id="${opp.id}"`,`${nm(opp)} life`,opp.life,{className:"tt-life",ico:"♥",warn:opp.life<=10})}
+      ${(opp.poison||0)>0?`<span class="tt-chip" title="Poison counters">☣ ${opp.poison}</span>`:""}
+      ${dead?"":stepHtml(`data-cmdr-from="${opp.id}"`,`commander damage from ${nm(opp)}`,`${cd}/21`,{className:"tt-chip",ico:"⚜",warn:cd>=14,title:"Commander damage this opponent has dealt you"})}
+      <span class="tt-chip" title="Mana available${opp.heldMana?" · held open":""}">◇ ${manaAvailable(opp)}${opp.heldMana?` (${opp.heldMana} open)`:""}</span>
+      <span class="tt-chip" title="${escapeHtml(handBreakdownText(opp))}">🃏 ${opponentHandSize(opp)}</span>
+      ${active?'<span class="tt-chip tt-turn">Taking turn</span>':""}</div>
+    <div class="tt-zone tt-creatures">${commandZone}${creaturesHtml}</div>
+    <div class="tt-zone tt-back">
+      ${tablePile(anim,`${opp.id}|lands`,"🌲","Lands",opp.landsInPlay||0,{className:"land"})}
+      ${rocks?tablePile(anim,`${opp.id}|rocks`,"💠","Mana rocks",rocks,{className:"artifact"}):""}
+      ${permanents}
+      <span class="tt-spacer"></span>
+      ${tablePileHtml("📚","Library",opponentDeckSize(opp),{className:"facedown"})}
+      ${tablePile(anim,`${opp.id}|gy`,"⚰","Graveyard",opp.graveyardCount||0,{attrs:`data-graveyard-owner="${opp.id}"`,title:"View graveyard"})}
+      ${opp.exileCount?tablePile(anim,`${opp.id}|ex`,"✦","Exile",opp.exileCount,{attrs:`data-exile-owner="${opp.id}"`,title:"View exile"}):""}
+    </div></div>`;
+}
+function tablePlayerSeatHtml(state,anim){
+  const p=state.player;
+  const pws=(p.planeswalkers||[]).map(pw=>tableCardHtml({name:pw.name,ico:"⬡"},{className:"pw",stat:`◆${pw.loyalty}`,pwId:pw.id,anim:tableAnimClass(anim,[`player|${pw.id}`],true),
+    extraHtml:`<div class="tt-pw-adj"><button type="button" class="step-btn" data-pw-loyalty="${pw.id}" data-d="-1" aria-label="Decrease ${escapeHtml(pw.name)} loyalty">−</button><button type="button" class="step-btn" data-pw-loyalty="${pw.id}" data-d="1" aria-label="Increase ${escapeHtml(pw.name)} loyalty">+</button></div>`})).join("");
+  const reanimated=tableCreaturesHtml(anim,"player",(p.tokens||[]).filter(t=>t.kind==="reanimated-creature"),{className:"reanimated"});
+  const cmdrDmg=state.opponents.filter(o=>(p.commanderDamageReceived[o.id]||0)>0).map(o=>{const v=p.commanderDamageReceived[o.id];return stepHtml(`data-cmdr-from="${o.id}"`,`commander damage from ${nm(o)}`,`${v}/21`,{className:"tt-chip",ico:o.ico,warn:v>=14});}).join("");
+  return `<div class="tt-seat tt-you ${state.phase==="player"?"is-active":""}" style="--seat:var(--gold)">
+    <div class="tt-seat-h"><button type="button" class="tt-seat-name" data-view-target="-1" title="Open your detail view">🗡️ You</button>
+      ${stepHtml('data-player-stat="life"',"your life",p.life,{className:"tt-life",ico:"♥",warn:p.life<=10})}
+      ${stepHtml('data-player-stat="poison"',"your poison counters",p.poison||0,{className:"tt-chip",ico:"☣",warn:(p.poison||0)>=7})}${cmdrDmg}
+      ${stepHtml('data-player-stat="handSize"',"cards in your hand",p.handSize||0,{className:"tt-chip",ico:"🃏"})}
+      ${state.phase==="player"?'<span class="tt-chip tt-turn">Your turn</span>':""}
+      <button type="button" class="btn-ghost tt-add" data-pw-add>+ Planeswalker</button></div>
+    <div class="tt-zone tt-creatures">${pws}${reanimated}
+      ${tablePile(anim,"player|creatures","♟","Creatures (paper)",p.creatures||0,{stepData:'data-player-stat="creatures"',title:"Creatures on your real table"})}
+      <span class="tt-spacer"></span>
+      ${tablePileHtml("📚","Library",p.librarySize||0,{className:"facedown",stepData:'data-player-stat="librarySize"'})}
+      ${tablePile(anim,"player|gy","⚰","Graveyard",p.graveyardCount||0,{attrs:'data-graveyard-owner="player"',title:"View graveyard"})}
+      ${p.exileCount?tablePile(anim,"player|ex","✦","Exile",p.exileCount,{attrs:'data-exile-owner="player"',title:"View exile"}):""}
+    </div></div>`;
+}
+// Card detail popup (hover/keyboard focus unless turned off in Settings; click/tap always): type, stats vs printed, keywords with reminders, effect, gear, state.
+let tablePeek=[];
+function keywordReminder(kw){
+  const key=String(kw).toLowerCase().replace(/\s*\d+$/,"");
+  return (typeof KEYWORD_REMINDERS!=="undefined"&&KEYWORD_REMINDERS[key])||"";
+}
+function tablePeekHtml(entry){
+  const {card,count,gear,tapped}=entry;
+  const commander=card.kind==="commander";
+  const type=card.type||(commander?"Legendary Creature — Commander":/artifact/.test(entry.className)?"Artifact":/enchantment/.test(entry.className)?"Permanent":/pw/.test(entry.className)?"Planeswalker":card.p!=null?"Creature":"Card");
+  const hasStats=card.p!=null&&card.t!=null&&entry.stat==null;
+  const baseP=card.baseP!=null?card.baseP:card.p,baseT=card.baseT!=null?card.baseT:card.t;
+  const changed=hasStats&&(card.p!==baseP||card.t!==baseT);
+  const kws=(card.kws||[]).filter(Boolean);
+  const state=[count>1?`${count} identical copies`:"",card.attacking?"Attacking":tapped?"Tapped":"",card.summoningSick?"Summoning sick":"",card.isToken?"Token":"",card.kind==="reanimated-creature"&&card.owner?`Reanimated from ${card.owner}`:""].filter(Boolean);
+  return `<div class="tt-peek-h"><span class="tt-peek-ico">${escapeHtml(card.ico||"🃏")}</span><strong>${escapeHtml(card.name)}</strong>${count>1?`<span class="tt-peek-count">×${count}</span>`:""}</div>
+    <div class="tt-peek-type">${escapeHtml(type)}${hasStats?`<span class="tt-peek-pt ${changed?(card.p>=baseP&&card.t>=baseT?"buffed":"shrunk"):""}">${card.p}/${card.t}</span>`:entry.stat?`<span class="tt-peek-pt">${escapeHtml(entry.stat)}</span>`:""}</div>
+    ${changed?`<div class="tt-peek-sub">Printed ${baseP}/${baseT}</div>`:""}
+    ${kws.length?`<ul class="tt-peek-kws">${kws.map(k=>{const r=keywordReminder(k);return `<li><b>${escapeHtml(k)}</b>${r?` — ${escapeHtml(r)}`:""}</li>`;}).join("")}</ul>`:""}
+    ${card.effect?`<p class="tt-peek-effect">${escapeHtml(card.effect)}</p>`:""}
+    ${gear.length?`<div class="tt-peek-gear"><span>Equipped</span>${gear.map(g=>`<div>⚙ ${escapeHtml(g.name)}${g.effect?` <em>${escapeHtml(g.effect)}</em>`:""}</div>`).join("")}</div>`:""}
+    ${state.length?`<div class="tt-peek-state">${state.map(x=>`<span>${escapeHtml(x)}</span>`).join("")}</div>`:""}`;
+}
+const PEEK_KEY="ratt_card_peek";
+function peekOnHover(){return safeGet(PEEK_KEY)!=="off";}
+function updatePeekToggle(){const t=document.getElementById('peekToggle');if(t)t.checked=peekOnHover();}
+function ensureTablePeek(){
+  let el=document.getElementById('ttPeek');
+  if(!el){el=document.createElement('div');el.id='ttPeek';el.className='tt-peek';el.setAttribute('role','tooltip');el.hidden=true;document.body.appendChild(el);
+    window.addEventListener('scroll',hideTablePeek,{passive:true});
+    document.addEventListener('pointerdown',e=>{if(!e.target.closest('[data-peek]'))hideTablePeek();});}
+  return el;
+}
+function hideTablePeek(){const el=document.getElementById('ttPeek');if(el)el.hidden=true;}
+function showTablePeek(cardEl){
+  const entry=tablePeek[parseInt(cardEl.dataset.peek,10)];if(!entry)return;
+  const el=ensureTablePeek();
+  el.innerHTML=tablePeekHtml(entry);el.hidden=false;
+  const r=cardEl.getBoundingClientRect(),w=el.offsetWidth,h=el.offsetHeight,gap=10;
+  let left=r.right+gap;if(left+w>window.innerWidth-8)left=r.left-gap-w;if(left<8)left=Math.max(8,Math.min(window.innerWidth-w-8,r.left+r.width/2-w/2));
+  let top=r.top+r.height/2-h/2;if(left<r.right&&left+w>r.left)top=r.top-gap-h<8?r.bottom+gap:r.top-gap-h;
+  el.style.left=`${Math.round(left)}px`;el.style.top=`${Math.round(Math.max(8,Math.min(window.innerHeight-h-8,top)))}px`;
+}
+function wireTablePeek(board){
+  board.querySelectorAll('[data-peek]').forEach(cardEl=>{
+    cardEl.addEventListener('mouseenter',()=>{if(peekOnHover())showTablePeek(cardEl);});
+    cardEl.addEventListener('mouseleave',hideTablePeek);
+    cardEl.addEventListener('focus',()=>{if(peekOnHover())showTablePeek(cardEl);});
+    cardEl.addEventListener('blur',hideTablePeek);
+    cardEl.addEventListener('click',e=>{if(e.target.closest('button'))return;showTablePeek(cardEl);});
   });
-  html+='</div>';board.innerHTML=html;
-  document.getElementById('singleViewBtn').onclick=()=>{state.viewMode="single";const active=oppById(state.activeOppId);state.viewTarget=active&&state.phase==="cpu"?active.index:-1;renderBoardView(state);};
-  wirePlaneswalkerControls(board,state);
-  board.querySelectorAll('.all-opp-card').forEach(card=>{card.onclick=()=>{state.viewTarget=parseInt(card.dataset.idx,10);state.viewMode="single";renderBoardView(state);};});
+}
+function renderTableView(state,board){
+  const seatCount=state.opponents.length;
+  board.className=`board table-view seats-${seatCount}`;board.style.borderColor='';
+  const anim={prev:tableAnimState===state?tableAnimPrev:null,next:new Map()};
+  tablePeek=[];hideTablePeek();
+  const seats=state.opponents.map(opp=>tableOpponentSeatHtml(state,opp,anim)).join("");
+  board.innerHTML=`<div class="board-h"><span class="ico">🂠</span><span>Table</span><div class="view-controls">${viewSwitchHtml(state)}</div></div>
+    <div class="tt-felt"><div class="tt-table">${seats}${tablePlayerSeatHtml(state,anim)}</div></div>`;
+  tableAnimPrev=anim.next;tableAnimState=state;
+  const now=performance.now();tableAnimLive.forEach((l,k)=>{if(now-l.start>2000)tableAnimLive.delete(k);});
+  wireBoardControls(board,state);
+  wireTablePeek(board);
 }
 
 /* =====================================================================
@@ -1932,7 +2093,7 @@ function boot(){
         resumeTurnFlow();
         return;
       }
-    }catch(e){console.log("[RATT boot] Commander save parse error:",e);}
+    }catch(e){console.warn("Commander save could not be read:",e);}
   }
   if(window._adventureEngine){
     const adventureSave=load();
@@ -1987,6 +2148,11 @@ if(recapToggle)recapToggle.onchange=()=>{
   if(gameState&&gameState.phase==="player"&&gameState.playerStep==="draw")showDrawStep();
 };
 updateRecapToggle();
+
+// Card details popup on hover (Table view). Off = details only open when you click/tap a card.
+const peekToggle=document.getElementById('peekToggle');
+if(peekToggle)peekToggle.onchange=()=>{safeSet(PEEK_KEY,peekToggle.checked?"on":"off");if(!peekToggle.checked)hideTablePeek();};
+updatePeekToggle();
 
 // Boot is called externally by bootGame() in the HTML after all scripts load
 

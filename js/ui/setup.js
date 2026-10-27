@@ -194,25 +194,31 @@ window._adventureEngine = {
 /* ---------- boot ---------- */
 /* Writes GAME_TITLE (js/data/modes.js) into the window title and header. */
 function applyGameTitle(){
-  document.title=`${GAME_TITLE} — ${GAME_TAGLINE}`;
-  const h=document.getElementById('brandTitle');if(h)h.textContent=GAME_TITLE;
+  document.title=`${GAME_TITLE}${GAME_STAGE?` (${GAME_STAGE})`:""} — ${GAME_TAGLINE}`;
+  const h=document.getElementById('brandTitle');if(h)h.innerHTML=gameTitleHtml();
   const sub=document.getElementById('brandSub');if(sub)sub.textContent=GAME_TAGLINE;
   applyAboutInfo();
 }
 
 /* ===== ABOUT: fan-content notice + optional links (constants in js/data/modes.js) ===== */
 function externalUrl(url){return typeof url==="string"&&/^https:\/\//.test(url)?url:"";}
+function escapeText(v){return String(v).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[c]));}
+/* Title plus the release-stage badge (GAME_STAGE), used by the header and the title screen. */
+function gameTitleHtml(){return `${escapeText(GAME_TITLE)}${GAME_STAGE?` <span class="stage-badge">${escapeText(GAME_STAGE)}</span>`:""}`;}
+/* One quiet line of project links, shared by the title screen and Settings → About. */
+function projectLinksHtml(){
+  const mail=typeof FEEDBACK_EMAIL==="string"&&/^[^@\s]+@[^@\s]+$/.test(FEEDBACK_EMAIL)?`mailto:${FEEDBACK_EMAIL}?subject=${encodeURIComponent(`${GAME_TITLE} ${GAME_STAGE} feedback`.replace(/\s+/g," ").trim())}`:"";
+  const links=[[mail,"Feedback",`Email ${FEEDBACK_EMAIL}`],[externalUrl(SOURCE_URL),"Source code","View the source on GitHub"],[externalUrl(DONATION_URL),"Tip on Ko-fi","Optional — tips unlock nothing"]]
+    .filter(([href])=>href).map(([href,label,title])=>`<a href="${escapeText(href)}" title="${escapeText(title)}"${href.startsWith("mailto:")?"":' target="_blank" rel="noopener noreferrer"'}>${label}</a>`);
+  return links.join('<span aria-hidden="true">·</span>');
+}
 function applyAboutInfo(){
   const notice=document.getElementById('fanNotice');
   if(notice)notice.textContent=FAN_CONTENT_NOTICE;
   const title=document.getElementById('aboutTitle');
   if(title)title.textContent=`${GAME_TITLE} — a free fan project`;
-  [['donateLink',DONATION_URL],['sourceLink',SOURCE_URL]].forEach(([id,url])=>{
-    const link=document.getElementById(id);if(!link)return;
-    const safe=externalUrl(url);
-    link.hidden=!safe;
-    if(safe)link.href=safe;else link.removeAttribute('href');
-  });
+  const links=document.getElementById('projectLinks');
+  if(links){links.innerHTML=projectLinksHtml();links.hidden=!links.innerHTML;}
 }
 
 /* ===== BACKUP: export / import every ratt_* key (saves + settings) =====
@@ -262,7 +268,6 @@ function readBackupFile(file){
 }
 function escapeHtmlText(text){return String(text).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
 function bootGame(){
-  console.log("[BOOT] bootGame called. _commanderMain:", !!window._commanderMain);
   applyGameTitle();
   wire();
   // Let the commander module handle boot — it checks for commander saves,

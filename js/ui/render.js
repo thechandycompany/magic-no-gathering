@@ -66,7 +66,7 @@ function modeHelpHtml(){
 }
 function updateModePresentation(){
   const cfg=modeConfig();
-  document.getElementById('brandTitle').textContent=GAME_TITLE;
+  document.getElementById('brandTitle').innerHTML=gameTitleHtml();
   document.getElementById('brandSub').textContent=modeDisplayName(cfg);
   document.getElementById('modePill').textContent=modeDisplayName(cfg);
   document.getElementById('boardIcon').textContent=cfg.boardIcon;

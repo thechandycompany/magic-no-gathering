@@ -9,6 +9,7 @@
    Defined once here; every display reads GAME_TITLE. */
 var GAME_TITLE = "Magic No Gathering";
 var GAME_TAGLINE = "Solo Commander Simulator";
+var GAME_STAGE = "Alpha";   // release stage badge next to the title; empty hides it
 
 /* Free, unofficial fan project (see README.md "Fan content & donations").
    FAN_CONTENT_NOTICE is the wording Wizards of the Coast's Fan Content Policy asks for.
@@ -16,6 +17,7 @@ var GAME_TAGLINE = "Solo Commander Simulator";
 var FAN_CONTENT_NOTICE = GAME_TITLE + " is unofficial Fan Content permitted under the Fan Content Policy. Not approved/endorsed by Wizards. Portions of the materials used are property of Wizards of the Coast. ©Wizards of the Coast LLC.";
 var DONATION_URL = "https://ko-fi.com/chandlerandrew";   // optional tips; the game stays free and nothing is unlocked
 var SOURCE_URL = "https://github.com/thechandycompany/magic-no-gathering";
+var FEEDBACK_EMAIL = "thechandycompany@gmail.com";   // "Feedback" link (mailto); empty hides it
 
 var MODES = {
   vanilla: {
@@ -99,3 +101,21 @@ var LEGACY_TITLE_NAMES = [
   ["Reckoning of the Wild", "Overrun the Weak"],
   ["Arcane Conclave", "Aether Conclave"]
 ];
+
+/* Short reminder text for keywords, shown in the card detail popup (table view).
+   Keys are lower-case; "Ward 2" matches "ward" and keeps its number. */
+var KEYWORD_REMINDERS = {
+  "trample": "Excess combat damage beyond what kills its blockers goes to the player it attacks.",
+  "haste": "Can attack and tap the turn it comes under its controller's control.",
+  "hexproof": "Can't be the target of spells or abilities your opponents control.",
+  "first strike": "Deals combat damage before creatures without first strike.",
+  "double strike": "Deals both first-strike and regular combat damage.",
+  "ward": "Spells or abilities your opponents target it with are countered unless they pay the ward cost.",
+  "reach": "Can block creatures with flying.",
+  "flying": "Can only be blocked by creatures with flying or reach.",
+  "indestructible": "Damage and \"destroy\" effects don't destroy it.",
+  "deathtouch": "Any amount of damage it deals to a creature is enough to destroy it.",
+  "lifelink": "Damage it deals also causes its controller to gain that much life.",
+  "vigilance": "Attacking doesn't cause it to tap.",
+  "menace": "Can't be blocked except by two or more creatures."
+};
