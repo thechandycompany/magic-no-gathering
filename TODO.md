@@ -6,7 +6,8 @@ No Steam, no desktop build, no paid content. See README.md for the fan-content a
 ## [PRIORITY] Web release
 
 **Before publishing**
-- [ ] Set `DONATION_URL` (Ko-fi or similar) and `SOURCE_URL` in `js/data/modes.js` — leave empty to hide the buttons
+- [x] Set `DONATION_URL` (https://ko-fi.com/chandlerandrew) in `js/data/modes.js`
+- [ ] Set `SOURCE_URL` if the repo is published — leave empty to hide the button
 - [ ] Pick a code license for the repo (e.g. MIT) and add `LICENSE` — covers the code only, not Wizards' IP
 - [ ] Favicon / social preview image (original art only — no Wizards logos, set symbols, mana-symbol artwork or card images)
 - [ ] Run the manual checklist below on desktop Chrome, Firefox, Safari, and one phone/tablet

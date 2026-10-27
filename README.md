@@ -27,7 +27,7 @@ This project follows Wizards of the Coast's [Fan Content Policy](https://company
 
 That means:
 - The game is **free** — never paywall it, sell it, or gate any feature behind a payment.
-- **Donations are optional tips** (set `DONATION_URL` in `js/data/modes.js`; leave it empty to hide the button). Donors get nothing extra.
+- **Donations are optional tips** via [Ko-fi](https://ko-fi.com/chandlerandrew) (`DONATION_URL` in `js/data/modes.js`; empty hides the button). Donors get nothing extra.
 - **No Wizards logos, set symbols, mana-symbol artwork, or card images** are included. The app uses emoji and original styling.
 - Real card names, characters, and rules terms are used descriptively; the product name ("Rivals at the Table") is original and the project never claims to be official.
 - Keep the notice above visible in the app (Settings → About) and on any page that hosts the game.

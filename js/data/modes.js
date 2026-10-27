@@ -13,7 +13,7 @@ var GAME_TITLE = "Rivals at the Table";
    FAN_CONTENT_NOTICE is the wording Wizards of the Coast's Fan Content Policy asks for.
    Leave a URL empty to hide its button. */
 var FAN_CONTENT_NOTICE = GAME_TITLE + " is unofficial Fan Content permitted under the Fan Content Policy. Not approved/endorsed by Wizards. Portions of the materials used are property of Wizards of the Coast. ©Wizards of the Coast LLC.";
-var DONATION_URL = "";   // e.g. "https://ko-fi.com/yourname" — optional tips; the game stays free
+var DONATION_URL = "https://ko-fi.com/chandlerandrew";   // optional tips; the game stays free and nothing is unlocked
 var SOURCE_URL = "";     // e.g. "https://github.com/you/rivals-at-the-table"
 
 var MODES = {
