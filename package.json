@@ -1,0 +1,8 @@
+{
+  "name": "magic-no-gathering",
+  "private": true,
+  "description": "Solo card game engine (vanilla JS, file://). No runtime dependencies.",
+  "scripts": {
+    "test": "node tests/run.js"
+  }
+}
