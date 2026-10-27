@@ -387,10 +387,9 @@ function setStepStatus(panel,key,text,isSet){
    Adventure #endTurnBtn. Ignored while typing, while a control has focus
    (so it keeps its native behaviour), or while a dialog is open.
    ===================================================================== */
-/* commander-ui.js still has its own Space/Enter handler. While it does, this one
-   stays out of Commander mode so one key press can't fire twice. Set to false
-   when that handler is removed. */
-var ADVANCE_KEY_DEFERS_TO_COMMANDER=true;
+/* This is the only Space/Enter handler for both modes (commander-ui.js has none).
+   Set to true only if Commander mode ever gets its own handler again. */
+var ADVANCE_KEY_DEFERS_TO_COMMANDER=false;
 function commanderGameActive(){return typeof gameState!=="undefined"&&!!gameState;}
 function advanceKeyTarget(){
   // Only trust Commander's button while a Commander game is live (a stale bar must not be pressed in Adventure)
@@ -424,9 +423,9 @@ document.addEventListener('keydown',event=>{
 });
 /* A mouse click shouldn't leave focus on a stepper or card — otherwise the next
    Space/Enter is swallowed by that control. (event.detail is 0 for keyboard
-   activation, so keyboard users keep their focus.) Commander has its own copy. */
+   activation, so keyboard users keep their focus.) Shared by both modes. */
 document.addEventListener('click',event=>{
-  if(!S||commanderGameActive()||event.detail===0)return;
+  if((!S&&!commanderGameActive())||event.detail===0)return;
   const btn=event.target.closest&&event.target.closest('button');
   if(btn&&btn.id!=="menuBtn"&&!btn.closest('.overlay'))btn.blur();
 });
