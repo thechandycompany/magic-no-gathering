@@ -1,13 +1,20 @@
 /* =====================================================================
    tests/sim-commander.js — Commander Battle simulation.
 
-   Plays N seeded games (env SIM_GAMES, default 300) with 1–4 CPU seats.
-   Each round mirrors js/ui/commander-ui.js:
-     runCpuPhase → advanceCpuQueue → (CPU turn) → resolveResponseAndContinue
-   with a scripted "player" who takes all incoming attack damage, plays one
-   creature per turn and deals a fixed amount of damage back each turn.
+   Plays N seeded games (env SIM_GAMES, default 300) with 1–4 CPU seats,
+   using the same turn-flow code as js/ui/commander-ui.js
+   (js/engine/commander-turn.js):
+     beginCommanderRoundQueue → nextCommanderSeat (skips eliminated CPUs)
+     CPU seat: executeOpponentMainPhase → resolveCpuResponse("main")
+               → executeOpponentCombat → resolveCpuResponse("combat")
+               → executeOpponentEndStep
+     your seat: playerDrawStep → applyPlayerTurnInputs → computePlayerAttack
+               → applyPlayerCombat → playerDiscard (hand size)
+   The scripted player resolves spells aimed at its board, counters some
+   commander casts, blocks the biggest attacker when it can, attacks with up
+   to two 2/2 creatures and deals 5 extra damage to the weakest CPU.
 
-   Invariants are checked after setup and after every CPU / player step.
+   Invariants are checked after setup and after every CPU / player turn.
    Exceptions abort the game and are fatal; invariant violations are
    collected as KNOWN FAILURES (fatal only with --strict).
    ===================================================================== */
@@ -24,8 +31,8 @@ function run(options) {
   var h = harnessLib.createHarness();
   var ctx = h.ctx;
   var res = report.newResult("commander");
-  var phased = h.has("executeOpponentMainPhase") && h.has("executeOpponentCombat") && h.has("executeOpponentEndStep");
-  res.notes.push("CPU turn API: " + (phased ? "executeOpponentMainPhase → executeOpponentCombat → (damage) → executeOpponentEndStep" : "executeOpponentTurn (single call)"));
+  res.notes.push("turn flow: js/engine/commander-turn.js (resolveCpuResponse, computePlayerAttack, applyPlayerCombat), the same code the UI runs");
+  res.stats.cpuTurns = res.stats.cpuTurns || 0;
 
   var isDead = function (opp) { return ctx.isOpponentDead(opp); };
 
@@ -39,56 +46,42 @@ function run(options) {
     try {
       var gs = h.call("createCommanderBattle", seats);
       ctx.gameState = gs;
-      if (h.has("ensureCommanderEffectState")) h.call("ensureCommanderEffectState", gs);
+      h.call("ensureCommanderEffectState", gs);
       var eliminated = new Set();
       var markEliminations = function () {
         gs.opponents.forEach(function (o) { if (isDead(o)) eliminated.add(o.id); });
       };
       checkInvariants(ctx, gs, fail, eliminated);
+      h.call("beginCommanderRoundQueue", gs);
 
-      for (var turn = 1; turn <= MAX_TURNS && !outcome; turn++) {
-        where.turn = turn;
-        /* ---- CPU phase (runCpuPhase builds the queue once, like the UI) ---- */
-        gs.phase = "cpu";
-        var queue = gs.opponents.filter(function (o) { return !isDead(o); });
-        for (var qi = 0; qi < queue.length && !outcome; qi++) {
-          var opp = queue[qi];
-          where.step = "cpu"; where.opp = opp.name.split(",")[0];
-          // advanceCpuQueue: eliminations + battle end check
-          markEliminations();
-          var end = h.call("checkCommanderBattleEnd", gs);
-          if (end.over) { outcome = end; break; }
-          // advanceCpuQueue does NOT re-check isOpponentDead before running the queued CPU.
-          if (eliminated.has(opp.id)) fail("eliminated-opponent-acted", "queued at round start, killed earlier this round, still takes a turn (advanceCpuQueue does not re-check)");
-          var lifeBefore = opp.life;
-          var result = cpuTurn(h, opp, gs, phased, fail);
-          if (opp.life > lifeBefore && eliminated.has(opp.id)) fail("eliminated-opponent-revived", "life went from " + lifeBefore + " to " + opp.life);
-          opp.tokens.forEach(function (t) { t.summoningSick = false; });
-          res.stats.cpuTurns++;
+      while (!outcome && gs.turn <= MAX_TURNS) {
+        where.turn = gs.turn;
+        markEliminations();
+        var end = h.call("checkCommanderBattleEnd", gs);
+        if (end.over) { outcome = end; break; }
+        var seat = h.call("nextCommanderSeat", gs);
+        if (seat === null) {
+          gs.turn++;
+          if (gs.turn > MAX_TURNS) break;
+          h.call("beginCommanderRoundQueue", gs);
+          continue;
+        }
+        if (seat === "player") {
+          where.step = "player"; where.opp = null;
+          gs.phase = "player";
+          playerTurn(h, gs, fail);
           checkInvariants(ctx, gs, fail, eliminated);
+          continue;
         }
-        if (outcome) break;
-        markEliminations();
-        var endAfterCpu = h.call("checkCommanderBattleEnd", gs);
-        if (endAfterCpu.over) { outcome = endAfterCpu; break; }
-
-        /* ---- Player phase (startPlayerPhase + scripted player) ---- */
-        where.step = "player"; where.opp = null;
-        gs.phase = "player";
-        if (!phased) gs.opponents.forEach(function (o) { o.tokens.forEach(function (t) { t.attacking = false; }); });
-        gs.player.creatures = (gs.player.creatures || 0) + 1;
-        var living = gs.opponents.filter(function (o) { return !isDead(o); }).sort(function (a, b) { return a.life - b.life || a.index - b.index; });
-        if (living.length) {
-          var tgt = living[0];
-          tgt.life = Math.max(0, tgt.life - PLAYER_DAMAGE_PER_TURN);
-          tgt.damageLog.player = (tgt.damageLog.player || 0) + PLAYER_DAMAGE_PER_TURN;
-          tgt.lastAttacker = "player";
-        }
+        var opp = gs.opponents.find(function (o) { return o.id === seat; });
+        where.step = "cpu"; where.opp = opp.name.split(",")[0];
+        gs.phase = "cpu";
+        if (eliminated.has(opp.id)) fail("eliminated-opponent-acted", "nextCommanderSeat returned an opponent eliminated earlier");
+        var lifeBefore = opp.life;
+        cpuTurn(h, opp, gs, g, fail);
+        if (opp.life > lifeBefore && eliminated.has(opp.id)) fail("eliminated-opponent-revived", "life went from " + lifeBefore + " to " + opp.life);
+        res.stats.cpuTurns++;
         checkInvariants(ctx, gs, fail, eliminated);
-        markEliminations();
-        var endAfterPlayer = h.call("checkCommanderBattleEnd", gs);
-        if (endAfterPlayer.over) { outcome = endAfterPlayer; break; }
-        gs.turn++;
       }
       endTurn = where.turn;
       if (!outcome) {
@@ -122,71 +115,80 @@ function run(options) {
   return res;
 }
 
-/* One CPU turn + combat resolution, mirroring advanceCpuQueue + resolveResponseAndContinue. */
-function cpuTurn(h, opp, gs, phased, fail) {
+/* One CPU seat, exactly as the UI runs it (window 1 → combat → window 2 → end step). */
+function cpuTurn(h, opp, gs, game, fail) {
   var ctx = h.ctx;
-  var all = h.call("allPlayersForTargeting", gs);
-  var result, endStep = null;
-  if (phased) {
-    var main = h.call("executeOpponentMainPhase", opp, all) || {};
-    var combat = h.call("executeOpponentCombat", opp, h.call("allPlayersForTargeting", gs)) || {};
-    result = Object.assign({}, combat, { actions: [].concat(main.actions || [], combat.actions || []) });
-  } else {
-    result = h.call("executeOpponentTurn", opp, all);
-  }
-  if (!result || !Array.isArray(result.actions)) { fail("bad-turn-result", "turn result missing actions[]"); return result; }
-  if (result.actions.some(function (a) { return a.deckOut; })) opp._deckedOut = true;
+  var main = h.call("executeOpponentMainPhase", opp, h.call("allPlayersForTargeting", gs)) || {};
+  if (!Array.isArray(main.actions)) { fail("bad-turn-result", "main phase result missing actions[]"); return; }
+  if (main.actions.some(function (a) { return a.deckOut; })) opp._deckedOut = true;
+  if (ctx.isOpponentDead(opp)) return;
 
-  // Board wipes aimed at the player: scripted player always clears the board.
-  result.actions.forEach(function (a) {
-    if (a.boardWipe === "symmetric" || (a.boardWipe === "targeted" && a.wipeTarget === "player")) gs.player.creatures = 0;
+  /* Window 1: spells aimed at your board, counters. */
+  var mainResult = { stage: "main", actions: main.actions };
+  var mainResponse = { stage: "main", playerRemoval: [], counters: [] };
+  h.call("pendingPlayerRemovalActions", mainResult).forEach(function (entry) {
+    mainResponse.playerRemoval.push({ key: entry.key, countered: false, creaturesLost: entry.action.boardWipe ? gs.player.creatures : 0 });
   });
+  var counteredCommander = false;
+  if (game % 5 === 0) {
+    h.call("counterableCpuActions", mainResult).forEach(function (entry) {
+      if (entry.action.type === "commander") { mainResponse.counters.push(entry.key); counteredCommander = true; }
+    });
+  }
+  h.call("resolveCpuResponse", opp, mainResult, mainResponse);
+  if (counteredCommander && ctx.commanderOnField(opp)) fail("countered-commander-stayed", opp.id + " commander still on the battlefield after counter");
+  if (h.call("checkCommanderBattleEnd", gs).over || ctx.isOpponentDead(opp)) return;
 
-  if (result.target === "player") {
-    var attackers = opp.tokens.filter(function (t) { return t.attacking; });
-    var actualPower = attackers.reduce(function (s, t) { return s + t.p; }, 0);
-    var cmdr = attackers.find(function (t) { return t.kind === "commander"; });
-    var declared = actualPower;                          // player takes everything
-    var declaredCmd = Math.min(cmdr ? cmdr.p : 0, declared);
-    var prev = h.call("applyCpuDamagePrevention", declared, declaredCmd);
-    if (prev.damage > 0) {
-      gs.player.life = Math.max(0, gs.player.life - prev.damage);
-      opp.damageLog.player = (opp.damageLog.player || 0) + prev.damage;
+  /* Combat declaration. */
+  var combat = h.call("executeOpponentCombat", opp, h.call("allPlayersForTargeting", gs)) || {};
+  if (combat.target && combat.target === opp.id) fail("cpu-attacked-itself", opp.id);
+  var defender = combat.target && combat.target !== "player" ? gs.opponents.find(function (o) { return o.id === combat.target; }) : null;
+  if (defender && ctx.isOpponentDead(defender) && combat.attackPower > 0) fail("cpu-attacked-eliminated-opponent", opp.id + " → " + defender.id);
+
+  /* Window 2: blocks and damage. */
+  if (combat.attackPower > 0 && combat.target) {
+    var result = { stage: "combat", target: combat.target, attackPower: combat.attackPower, commanderAttacking: combat.commanderAttacking,
+      planeswalkerTargetId: combat.planeswalkerTarget ? combat.planeswalkerTarget.id : null, actions: combat.actions };
+    var response = { stage: "combat" };
+    if (combat.target === "player" && gs.player.creatures > 0) {
+      var biggest = opp.tokens.filter(function (t) { return t.attacking; }).sort(function (a, b) { return b.p - a.p; })[0];
+      if (biggest) { response.blocks = [{ uid: biggest.uid, blockerToughness: 2 }]; response.playerDeaths = biggest.p >= 2 ? 1 : 0; }
     }
-    if (prev.commanderDamage > 0) {
-      gs.player.commanderDamageReceived[opp.id] = (gs.player.commanderDamageReceived[opp.id] || 0) + prev.commanderDamage;
+    var preview = h.call("previewCpuResponse", opp, result, response);
+    var lifeBefore = gs.player.life;
+    var defenderLifeBefore = defender ? defender.life : null;
+    h.call("resolveCpuResponse", opp, result, response);
+    if (preview.attack && lifeBefore - gs.player.life !== Math.min(lifeBefore, preview.attack.playerDamage)) {
+      fail("preview-mismatch:player", "preview " + preview.attack.playerDamage + " applied " + (lifeBefore - gs.player.life));
     }
-  } else if (result.target) {
-    var defender = gs.opponents.find(function (o) { return o.id === result.target; });
-    var atk = opp.tokens.filter(function (t) { return t.attacking; });
-    if (defender && defender.id === opp.id) fail("cpu-attacked-itself", opp.id);
-    if (defender && ctx.isOpponentDead(defender) && atk.length) fail("cpu-attacked-eliminated-opponent", opp.id + " → " + defender.id);
-    if (defender && !ctx.isOpponentDead(defender) && atk.length > 0) {
-      var c = h.call("resolveCpuCombat", opp, defender, atk);
-      var p = h.call("applyCpuDamagePrevention", c.damageToDefender, c.commanderDamage);
-      if (p.damage > 0) {
-        defender.life = Math.max(0, defender.life - p.damage);
-        defender.damageLog[opp.id] = (defender.damageLog[opp.id] || 0) + p.damage;
-        defender.lastAttacker = opp.id;
-      }
-      if (p.commanderDamage > 0) defender.commanderDamageReceived[opp.id] = (defender.commanderDamageReceived[opp.id] || 0) + p.commanderDamage;
-      c.defenderCreaturesKilled.forEach(function (dead) {
-        var i = defender.tokens.indexOf(dead);
-        if (i >= 0) removePermanent(h, defender, dead, i);
-      });
-      c.attackerCreaturesKilled.forEach(function (dead) {
-        var i = opp.tokens.indexOf(dead);
-        if (i >= 0) removePermanent(h, opp, dead, i);
-      });
+    if (preview.cpuCombat && defender && defenderLifeBefore - defender.life !== Math.min(defenderLifeBefore, preview.cpuCombat.damage)) {
+      fail("preview-mismatch:cpu", "preview " + preview.cpuCombat.damage + " applied " + (defenderLifeBefore - defender.life));
     }
   }
-  if (phased) endStep = h.call("executeOpponentEndStep", opp);
-  return result;
+  if (ctx.isOpponentDead(opp)) return;
+  h.call("executeOpponentEndStep", opp);
 }
 
-function removePermanent(h, owner, token, index) {
-  if (token.uid != null && h.has("removeOpponentPermanentByUid")) return h.call("removeOpponentPermanentByUid", owner, token.uid, "graveyard");
-  return h.call("removeOpponentPermanent", owner, "token:" + index, "graveyard");
+/* Your seat: draw, play, attack, discard to hand size. */
+function playerTurn(h, gs, fail) {
+  var ctx = h.ctx;
+  h.call("playerDrawStep", gs);
+  h.call("applyPlayerTurnInputs", gs, { creaturesPlayed: 1, cardsPlayed: 1 });
+  var living = gs.opponents.filter(function (o) { return !ctx.isOpponentDead(o); }).sort(function (a, b) { return a.life - b.life || a.index - b.index; });
+  if (!living.length) return;
+  var tgt = living[0];
+  var rows = [];
+  for (var i = 0; i < Math.min(2, gs.player.creatures); i++) rows.push({ p: 2, t: 2, kws: i === 0 ? ["Trample"] : [], targetId: tgt.id, commander: false });
+  if (rows.length) {
+    var lifeBefore = tgt.life;
+    var outcome = h.call("computePlayerAttack", gs, rows);
+    var expected = outcome.perOpp.reduce(function (s, e) { return s + e.damage; }, 0);
+    h.call("applyPlayerCombat", gs, outcome);
+    if (lifeBefore - tgt.life !== Math.min(lifeBefore, expected)) fail("player-attack-mismatch", "expected " + expected + " applied " + (lifeBefore - tgt.life));
+  }
+  if (!ctx.isOpponentDead(tgt)) h.call("applyPlayerCombat", gs, { perOpp: [{ oppId: tgt.id, damage: PLAYER_DAMAGE_PER_TURN }] });
+  if (gs.player.handSize > 7) h.call("playerDiscard", gs, gs.player.handSize - 7, "to hand size");
+  if (gs.player.handSize > 7) fail("player-hand-over-7", "hand " + gs.player.handSize);
 }
 
 /* ---------- invariants ---------- */

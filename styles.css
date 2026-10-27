@@ -1151,3 +1151,69 @@ header.app-bar{
 .turn-actions .endturn .cmd-preview[hidden]{display:none;}
 .atk-note .help-tip{margin-left:4px;}
 @media(max-width:760px){.turn-actions .endturn .cmd-key{display:none;}}
+
+/* ===== Commander turn flow v2 ===== */
+/* Seat order + lethal warnings under the life HUD */
+.life-first{padding:0 5px; border-radius:999px; border:1px solid var(--gold-dim); color:var(--gold); font-size:9px; letter-spacing:.5px; text-transform:uppercase;}
+.life-poison{color:var(--green-lt); font-size:11px; font-weight:600;}
+.cmd-lethal-strip{display:flex; flex-wrap:wrap; gap:6px; margin:-4px 0 8px; padding:6px 10px; border:1px solid var(--blood-lt); border-radius:var(--radius-sm); background:color-mix(in srgb,var(--blood) 16%,var(--panel));}
+.cmd-lethal-strip[hidden]{display:none;}
+.cmd-lethal-item{font-size:11.5px; font-weight:600; color:var(--danger-ink);}
+/* CPU information */
+.cbs-item.cbs-wide{flex-wrap:wrap; gap:4px;}
+.cbs-val.cbs-small{font-size:11px; color:var(--ink2); text-align:right; white-space:normal;}
+.all-opp-hand{margin-top:8px; font-size:11px; color:var(--ink2);}
+.all-opp-intent{margin-top:auto; padding-top:8px; font-size:11px; color:var(--muted);}
+.all-opp-card.is-active{box-shadow:0 0 0 2px var(--gold-dim),0 6px 16px color-mix(in srgb,var(--gold) 15%,transparent);}
+/* Response form */
+.kill-btn .kill-btn-label{position:absolute; z-index:3; bottom:-8px; left:50%; transform:translateX(-50%); padding:1px 7px; border-radius:999px; border:1px solid var(--border-lt); background:var(--panel2); color:var(--ink); font-size:10px; white-space:nowrap;}
+.kill-btn.card-choice{position:relative;}
+.lt-countered-note{display:inline-block; margin-left:8px; font-size:10px; color:var(--danger-ink); text-decoration:none;}
+.instant-target-row{flex-wrap:wrap;}
+.instant-dmg-targets .tiny-target{font-size:12px!important;}
+.combat-choice-btns:has(.choice-removed){grid-template-columns:repeat(3,minmax(0,1fr));}
+.combat-choice-btn.choice-removed:hover{border-color:var(--arcane-lt); background:color-mix(in srgb,var(--arcane-lt) 20%,transparent);}
+.combat-choice-btn.choice-removed:hover .choice-label{color:var(--arcane-lt);}
+@media(max-width:430px){.combat-choice-btns:has(.choice-removed){grid-template-columns:1fr;}}
+/* Dialogs */
+.input-actions.hide-cancel #inputCancel{display:none;}
+.cmd-dialog-steppers{display:flex; flex-direction:column; gap:8px; margin:10px 0 4px;}
+.cmd-dialog-steppers .inline-stepper{display:flex; align-items:center; gap:6px; border:none; background:none; overflow:visible; font-size:12px;}
+.cmd-dialog-steppers .inline-stepper label{flex:1; color:var(--ink2);}
+.cmd-dialog-steppers .inline-stepper button{width:28px; height:28px; border-radius:6px; border:1px solid var(--border-lt); background:var(--panel2); color:var(--ink); cursor:pointer;}
+.cmd-dialog-steppers .inline-stepper input{width:52px; padding:4px; text-align:center; border:1px solid var(--border-lt); border-radius:6px; background:var(--bg2); color:var(--ink);}
+.cmd-dialog-pws{display:flex; flex-direction:column; gap:4px; font-size:12px; color:var(--ink2);}
+.cmd-text-field{display:block;}
+.cmd-text-field input{width:100%; padding:8px; margin-top:6px; border:1px solid var(--border-lt); border-radius:6px; background:var(--panel); color:var(--ink); font-size:14px;}
+/* Your attack declaration */
+.attack-row{margin-bottom:8px; padding:8px 10px; border:1px solid var(--border-lt); border-radius:var(--radius-sm); background:color-mix(in srgb,var(--bg) 14%,transparent);}
+.attack-row.is-commander{border-color:var(--cmdr); background:color-mix(in srgb,var(--cmdr) 10%,transparent);}
+.attack-row-h{display:flex; align-items:center; gap:10px; margin-bottom:6px; font-size:12px;}
+.attack-row-h strong{color:var(--ink);}
+.attack-cmdr-toggle{display:inline-flex; align-items:center; gap:4px; margin-left:auto; color:var(--ink2); font-size:11px; cursor:pointer;}
+.attack-row-remove{text-decoration:none; font-size:13px;}
+.attack-row-b{display:flex; flex-wrap:wrap; align-items:center; gap:10px; font-size:12px;}
+.attack-row-b .inline-stepper{display:flex; align-items:center; gap:6px; border:none; background:none; overflow:visible;}
+.attack-row-b .inline-stepper button{width:26px; height:26px; border-radius:6px; border:1px solid var(--border-lt); background:var(--panel2); color:var(--ink); cursor:pointer;}
+.attack-row-b .inline-stepper input{width:46px; padding:3px; text-align:center; border:1px solid var(--border-lt); border-radius:6px; background:var(--bg2); color:var(--ink);}
+.attack-target{display:inline-flex; align-items:center; gap:6px; color:var(--ink2);}
+.attack-target select{padding:4px 6px; border:1px solid var(--border-lt); border-radius:6px; background:var(--panel2); color:var(--ink); font:12px var(--font);}
+.kw-chips{display:flex; flex-wrap:wrap; gap:5px; margin-top:7px;}
+.kw-chip{padding:3px 9px; border-radius:999px; border:1px solid var(--border-lt); background:var(--panel2); color:var(--ink2); font:11px var(--font); cursor:pointer;}
+.kw-chip:hover{border-color:var(--gold-dim); color:var(--gold);}
+.kw-chip.active{border-color:var(--gold); background:color-mix(in srgb,var(--gold) 18%,transparent); color:var(--ink);}
+.attack-builder-actions{display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-top:8px;}
+.attack-outcome{margin:6px 0 0; padding-left:18px; font-size:12px; color:var(--ink2); line-height:1.6;}
+.cmd-hand-reminder{margin:8px 0 0; padding:6px 9px; border-left:3px solid var(--gold-dim); font-size:12px; color:var(--ink2);}
+@media(max-width:760px){.attack-cmdr-toggle{margin-left:0;} .attack-row-h{flex-wrap:wrap;}}
+.commander-player-actions .instant-target-row{display:flex; flex-wrap:wrap; align-items:center; gap:8px; width:100%;}
+.instant-dmg-targets{display:flex; flex-wrap:wrap; gap:6px;}
+.instant-dmg-targets .tiny-target{min-width:0!important; padding:4px 9px!important; white-space:nowrap;}
+.response-step.is-lethal{border-color:var(--blood-lt); box-shadow:0 0 0 1px var(--blood-lt) inset;}
+.response-step.is-lethal .resolution-step-h strong::after{content:" · Lethal"; color:var(--danger-ink);}
+.lt-response-note,.lt-lethal-note{display:inline-block; margin-left:8px; padding:0 7px; border-radius:999px; font-size:10px;}
+.lt-response-note{border:1px solid var(--arcane-lt); color:var(--arcane-ink);}
+.lt-lethal-note{border:1px solid var(--blood-lt); color:var(--danger-ink);}
+.cbs-util{display:inline-flex; align-items:center; gap:4px; margin-left:6px;}
+.cbs-util-remove{border:0; background:transparent; color:var(--muted); cursor:pointer; font-size:11px;}
+.cbs-util-remove:hover{color:var(--danger-ink);}
