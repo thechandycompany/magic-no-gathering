@@ -1,4 +1,6 @@
-# Magic No Gathering — Project Guide
+# Rivals at the Table — Project Guide
+
+> Working title, defined once as `GAME_TITLE` in `js/data/modes.js`. The entry HTML file still carries the pre-rename filename.
 
 ## What This Is
 
@@ -11,7 +13,7 @@ Magic No Gathering.html    ← single entry point, loads all scripts in order
 styles.css                 ← all styles (themes via CSS variables)
 js/
 ├── data/                  ← PURE DATA. No functions that modify state. No DOM.
-│   ├── modes.js           ← Mode configs (name, icon, resource, life, summary)
+│   ├── modes.js           ← GAME_TITLE + mode configs (name, icon, resource, life, summary)
 │   ├── cards-adventure.js ← Card/unit definitions for adventure encounters
 │   └── decks/             ← One file per commander deck archetype
 │       ├── deck-base.js   ← Shared deck utilities (shuffle, draw, mana math)
@@ -130,6 +132,8 @@ Only one is active at a time. When in commander mode, `S` is null. When in adven
 
 - Theme variables are in `:root` / `[data-theme="X"]` blocks at the top of `styles.css`
 - Use `var(--name)` for all colors — never hardcode hex in component styles
+- Storage keys use the `ratt_` prefix. Old keys are migrated on load by `migrateStorageKey()` / `LEGACY_STORAGE_KEYS` in `js/engine/state.js` — add a pair there when renaming a key.
+- Legacy `.garruk-*` / `.garruk` CSS class names are internal only (not user-visible) and were kept deliberately.
 - Card variants: `.card.commander`, `.card.horde`, `.card.synergy`, `.card.voltron-creature`
 - Responsive: mobile breakpoints at 760px and 430px
 - New components: add styles at the end of `styles.css`, grouped with a `/* ===== Section ===== */` comment

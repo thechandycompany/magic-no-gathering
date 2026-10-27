@@ -145,7 +145,7 @@
   .panel-h .ico{font-size:16px;}
   .panel-b{padding:16px;}
 
-  /* ===== GARRUK'S BOARD — centerpiece ===== */
+  /* ===== ENEMY BOARD — centerpiece (.garruk-* class names are legacy) ===== */
   .board{
     margin-bottom:16px;
     background:radial-gradient(700px 300px at 20% 0%, color-mix(in srgb,var(--green) 28%,transparent), transparent 60%),linear-gradient(180deg,color-mix(in srgb,var(--green) 18%,var(--panel)),var(--bg2));
@@ -655,7 +655,7 @@ header.app-bar{
 .resolution-step .context-section{padding:0; border:0; background:transparent;}
 .resolution-note{padding:0 3px; color:var(--ink2); font-size:10.5px;}
 
-/* Commander Rival: Gruul Voltron */
+/* Commander Rival (voltron mode) */
 .commander-status{display:flex; flex-wrap:wrap; gap:4px; align-items:center;}
 .commander-status span{padding:2px 6px; border:1px solid color-mix(in srgb,var(--gold) 45%,transparent); border-radius:999px; background:color-mix(in srgb,var(--cmdr) 20%,transparent); color:var(--cmdr-ink); font-size:8.5px; letter-spacing:.35px; white-space:nowrap;}
 .card.commander{background:linear-gradient(160deg,#7a351b 0%,#4c2110 52%,#251107 100%); border-color:var(--cmdr); box-shadow:0 4px 14px rgba(0,0,0,.55),0 0 0 1px color-mix(in srgb,var(--gold) 24%,transparent) inset;}
@@ -1000,7 +1000,7 @@ header.app-bar{
 .player-action-disclosure[open] summary small::after,.rules-disclosure[open] summary small::after{content:"▾ Collapse";}
 .player-action-disclosure summary:hover small,.rules-disclosure summary:hover small{border-color:var(--gold-dim); color:var(--gold); background:color-mix(in srgb,var(--gold) 10%,transparent);}
 
-/* ===== Planeswalker Cards ===== */
+/* ===== PW (loyalty) Cards ===== */
 .pw-card{background:linear-gradient(160deg,#2a3a5a 0%,#1a2440 55%,#0f1625 100%)!important; border-color:var(--info-lt)!important; position:relative;}
 .pw-card .c-art{color:var(--info-ink); font-size:38px;}
 .pw-card .c-pt{background:linear-gradient(180deg,#1a2440,#0c1220)!important; border-color:var(--info-lt)!important; color:var(--info-ink)!important;}

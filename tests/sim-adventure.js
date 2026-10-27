@@ -3,7 +3,7 @@
 
    For every mode in js/data/modes.js, plays N seeded games (env
    SIM_ADV_GAMES, default 100) through the adventure engine:
-     startGarrukTurn()  → scripted enemy-turn resolution → startPlayerTurn()
+     startEnemyTurn()  → scripted enemy-turn resolution → startPlayerTurn()
      → scripted player (0-2 creatures/turn, 2-8 damage, kills one token)
      → checkEnd() → S.turn++
    The enemy-turn resolution mirrors js/ui/inputs.js resolveEnemyTurnInputs
@@ -11,7 +11,7 @@
    all attack damage is taken). That function lives in the UI layer, so it
    is re-implemented here rather than loaded.
 
-   The engine's showGarrukTurn/showPlayerTurn/endGame write to the DOM;
+   The engine's showEnemyTurn/showPlayerTurn/endGame write to the DOM;
    those touches go to the shim and are reported as warnings.
    ===================================================================== */
 "use strict";
@@ -55,7 +55,7 @@ function run(options) {
           where.turn = S.turn;
           /* ---- enemy turn ---- */
           where.step = "enemy";
-          h.call("startGarrukTurn");
+          h.call("startEnemyTurn");
           if (ctx.S !== S) { fail("state-replaced", "S object replaced during enemy turn"); S = ctx.S; }
           if (ctx.gameOver) { ended = true; break; }
           resolveEnemyTurn(h, S);
@@ -69,7 +69,7 @@ function run(options) {
           if (S.phase !== "player") fail("phase-not-player", "S.phase=" + S.phase + " after startPlayerTurn");
           h.call("adjust", "creatures", Math.floor(playerRng() * 3));
           h.call("jumpToStep", ctx.TURN_STEPS.COMBAT);   // lets the CPU react (evaluateCpuResponse)
-          // Damage escalates by +1 every 5 turns so stalemates (e.g. Hard Garruk's +6 loyalty income) still end.
+          // Damage escalates by +1 every 5 turns so stalemates (e.g. Hard Ulvar's +6 loyalty income) still end.
           h.call("damageLoyalty", PLAYER_DAMAGE_MIN + Math.floor(playerRng() * (PLAYER_DAMAGE_MAX - PLAYER_DAMAGE_MIN + 1)) + Math.floor(S.turn / 5));
           var kills = 1 + Math.floor(playerRng() * 3);
           for (var k = 0; k < kills && S.tokens.length; k++) {

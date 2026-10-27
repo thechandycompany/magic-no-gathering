@@ -1,11 +1,11 @@
 /**
- * tokens.js — Token/creature manipulation functions for the MTG engine.
+ * tokens.js — Token/creature manipulation functions for the game engine.
  *
  * Handles creation, removal, buffing, zone transitions, and stat
  * computation for enemy battlefield tokens (wolves, horde units,
  * conclave synergy units, voltron commander/support). Also contains
  * the Voltron mana-model and deck-draw simulation, support-card
- * casting AI, and the Garruk slay-target picker.
+ * casting AI, and the Ulvar slay-target picker.
  *
  * Globals expected (loaded before this file):
  *   S, MODES, CONCLAVE_UNITS, VOLTRON_COMMANDER, VOLTRON_CARDS,
@@ -18,11 +18,21 @@ var SLAY_TARGETS = [
   "your commander, if it can be targeted","your highest-toughness creature","your biggest threat on the battlefield",
   "your most valuable creature (best abilities)","the creature that is hardest for you to replace"
 ];
-function garrukSlayTarget(){ return SLAY_TARGETS[Math.floor(Math.random()*SLAY_TARGETS.length)]; }
+function ulvarSlayTarget(){ return SLAY_TARGETS[Math.floor(Math.random()*SLAY_TARGETS.length)]; }
 
 /* ---------- mode helpers ---------- */
 function modeConfig(){ return MODES[S?.mode] || MODES.vanilla; }
 function enemyName(){ return modeConfig().enemy; }
+/* Display name for a mode config. Modes tied to a commander deck read the
+   deck's name from the deck object instead of hardcoding it. */
+function modeDisplayName(cfg){
+  cfg = cfg || modeConfig();
+  if(cfg.deckId && typeof getDeck === "function"){
+    var deck = getDeck(cfg.deckId);
+    if(deck && deck.name) return cfg.name + ": " + deck.name;
+  }
+  return cfg.name;
+}
 
 /* ---------- mutations ---------- */
 function damageLoyalty(n){

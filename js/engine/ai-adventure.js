@@ -5,7 +5,7 @@
    are available at runtime from earlier script loads.
    ===================================================================== */
 
-function hardGarrukEmergencyDecision(st,p,tokens,readyPower){
+function hardUlvarEmergencyDecision(st,p,tokens,readyPower){
   var boardDeficit=p.creatures-tokens;
   var afterSlay=st.loyalty-10;
   var afterWipe=st.loyalty-25;
@@ -15,46 +15,46 @@ function hardGarrukEmergencyDecision(st,p,tokens,readyPower){
   var recentHit=st.lastPlayerDamage||0;
 
   // A large hit signals evasive, trampling, or oversized pressure that raw creature
-  // counts cannot describe. Hard Garruk reacts before repeating its normal plan.
+  // counts cannot describe. Hard Ulvar reacts before repeating its normal plan.
   if(recentHit>=10&&p.creatures>=3&&afterWipe>=8){
-    S.aiReason=`Hard Garruk took ${recentHit} damage last turn and uses a safe board clear to stop lethal momentum.`;
+    S.aiReason=`Hard Ulvar took ${recentHit} damage last turn and uses a safe board clear to stop lethal momentum.`;
     return "wipe";
   }
   if(recentHit>=5&&p.creatures>=1&&afterSlay>=8){
-    S.aiReason=`Hard Garruk took ${recentHit} damage last turn and removes the best creature responsible for the pressure.`;
+    S.aiReason=`Hard Ulvar took ${recentHit} damage last turn and removes the best creature responsible for the pressure.`;
     return "slay";
   }
 
   // When a wide player board is running away with the game, reset it—but retain
   // enough loyalty to survive the following turn rather than spending suicidally.
   if(severelyOverwhelmed&&p.creatures>=4&&afterWipe>=8){
-    S.aiReason=`Hard Garruk is overwhelmed (${tokens} creature${tokens===1?"":"s"} vs. ${p.creatures}) and has enough loyalty to safely reset the board.`;
+    S.aiReason=`Hard Ulvar is overwhelmed (${tokens} creature${tokens===1?"":"s"} vs. ${p.creatures}) and has enough loyalty to safely reset the board.`;
     return "wipe";
   }
 
   // Spend surplus loyalty on targeted removal even before the pack reaches three.
   // A larger deficit demands a larger safety reserve after Slay.
   if(clearlyBehind&&afterSlay>=10){
-    S.aiReason=`Hard Garruk is ${boardDeficit} creatures behind and uses surplus loyalty to remove your best threat.`;
+    S.aiReason=`Hard Ulvar is ${boardDeficit} creatures behind and uses surplus loyalty to remove your best threat.`;
     return "slay";
   }
   if(slightlyBehind&&afterSlay>=8&&readyPower<Math.max(4,p.creatures*2)){
-    S.aiReason=`Hard Garruk is falling behind on board and uses Slay while retaining ${afterSlay} loyalty.`;
+    S.aiReason=`Hard Ulvar is falling behind on board and uses Slay while retaining ${afterSlay} loyalty.`;
     return "slay";
   }
 
   return null;
 }
 
-function garrukDecide(){
+function ulvarDecide(){
   var st=S,p=st.player,tokens=st.tokens.length;
   var readyPower=readyPowerTotal();
   st.enraged=st.loyalty<=8;
   S.aiReason="";
 
-  // Hard Garruk can abandon its normal go-wide plan to equalize a losing board.
+  // Hard Ulvar can abandon its normal go-wide plan to equalize a losing board.
   if(S.mode==="hard"){
-    var emergency=hardGarrukEmergencyDecision(st,p,tokens,readyPower);
+    var emergency=hardUlvarEmergencyDecision(st,p,tokens,readyPower);
     if(emergency)return emergency;
   }
 
@@ -75,36 +75,36 @@ function garrukDecide(){
   var primarySlayFloor=S.mode==="hard"?10:8;
   var secondarySlayFloor=S.mode==="hard"?8:6;
   if(loyaltyAfterSlay>=primarySlayFloor&&p.creatures>=2&&tokens>=3){
-    S.aiReason="The pack is established, so Garruk can safely spend loyalty on the best opposing creature.";
+    S.aiReason="The pack is established, so Ulvar can safely spend loyalty on the best opposing creature.";
     return "slay";
   }
   if(loyaltyAfterSlay>=secondarySlayFloor&&p.creatures>=1&&tokens>=4){
-    S.aiReason="A wide pack lets Garruk remove a key blocker while preserving a loyalty buffer.";
+    S.aiReason="A wide pack lets Ulvar remove a key blocker while preserving a loyalty buffer.";
     return "slay";
   }
 
   var unbuffed=st.tokens.filter(t=>!t.kws.includes("Deathtouch"));
   if(unbuffed.length>0){
     if(unbuffed.length>=2&&tokens<5){
-      S.aiReason="The pack is stable; Garruk adds another body before distributing buffs.";
+      S.aiReason="The pack is stable; Ulvar adds another body before distributing buffs.";
       return "wolf";
     }
-    S.aiReason="Garruk strengthens the pack and rebuilds loyalty.";
+    S.aiReason="Ulvar strengthens the pack and rebuilds loyalty.";
     return "buff";
   }
   if(tokens<6){
-    S.aiReason="The existing pack is empowered, so Garruk goes wider.";
+    S.aiReason="The existing pack is empowered, so Ulvar goes wider.";
     return "wolf";
   }
   if(st.loyalty<18||readyPower<p.life){
-    S.aiReason="Garruk converts a buff into both pressure and a loyalty reserve.";
+    S.aiReason="Ulvar converts a buff into both pressure and a loyalty reserve.";
     return "buff";
   }
-  S.aiReason="Garruk continues expanding the pack.";
+  S.aiReason="Ulvar continues expanding the pack.";
   return "wolf";
 }
 
-function resolveGarrukAction(id){
+function resolveEnemyAction(id){
   if(id==="wolf"){
     addWolf();
     var size=S.mode==="hard"&&S.turn>=5?4:2;
@@ -112,12 +112,12 @@ function resolveGarrukAction(id){
   }
   else if(id==="buff"){buffRandomWolf();gainLoyalty(4);logG("empowers a creature: +1/+0 & deathtouch. Loyalty +4. [+4]");}
   else if(id==="slay"){S.loyalty=Math.max(0,S.loyalty-10);logG(`uses Slay, targeting ${S.slayTarget}. [-10]`);}
-  else if(id==="wipe"){S.loyalty=Math.max(0,S.loyalty-25);logG("unleashes Overrun the Weak! [-25]");}
+  else if(id==="wipe"){S.loyalty=Math.max(0,S.loyalty-25);logG("unleashes Reckoning of the Wild! [-25]");}
   render();
 }
 
-function startGarrukTurn(){
-  S.phase="garruk"; S.turnPowerBonus=0; S.spellLock="";
+function startEnemyTurn(){
+  S.phase="enemy"; S.turnPowerBonus=0; S.spellLock="";
   // Untap: clear attacking flags from last turn
   S.tokens.forEach(t=>{ t.attacking=false; });
   if(S.mode==="horde"){startHordeTurn();return;}
@@ -130,9 +130,9 @@ function startHunterTurn(){
   var loyaltyGain=S.mode==="hard"?2+Math.min(4,Math.floor((S.turn-1)/2)):2;
   gainLoyalty(loyaltyGain);
   logG(`gains ${loyaltyGain} loyalty at the start of turn. Loyalty → ${S.loyalty}.`);
-  var id=garrukDecide();
-  S.pendingDecl=id; S.slayTarget=id==="slay"?garrukSlayTarget():null;
-  resolveGarrukAction(id);
+  var id=ulvarDecide();
+  S.pendingDecl=id; S.slayTarget=id==="slay"?ulvarSlayTarget():null;
+  resolveEnemyAction(id);
   declareAttackers();
   S.attackPower=totalPower();
   var d=ABILITIES[id];
@@ -140,12 +140,12 @@ function startHunterTurn(){
   var size=S.mode==="hard"&&S.turn>=5?"4/4":"2/2";
   var abilityDetail=id==="wolf"?`${S.declFlavor} Put a ${size} Wolf token onto the battlefield.`:S.declFlavor+" "+d.mech+(id==="slay"?` Target: ${S.slayTarget}.`:"");
   S.actionSteps=[
-    {label:`Loyalty +${loyaltyGain} (passive)`,detail:S.mode==="hard"?`Hard Mode escalation grants ${loyaltyGain} loyalty this turn; income rises every two turns (maximum +6).`:`Garruk gains ${loyaltyGain} loyalty at the start of his turn.`}
+    {label:`Loyalty +${loyaltyGain} (passive)`,detail:S.mode==="hard"?`Hard Mode escalation grants ${loyaltyGain} loyalty this turn; income rises every two turns (maximum +6).`:`Ulvar gains ${loyaltyGain} loyalty at the start of his turn.`}
   ];
   if(S.mode==="hard"&&S.aiReason)S.actionSteps.push({label:"Threat assessment",detail:S.aiReason});
   S.actionSteps.push({label:d.label,detail:abilityDetail});
   appendAttackStep();
-  showGarrukTurn();
+  showEnemyTurn();
 }
 
 function startHordeTurn(){
@@ -171,7 +171,7 @@ function startHordeTurn(){
   S.declFlavor="The dead pour forward without fear or strategy—only hunger.";
   appendAttackStep();
   logG(`reveals a wave of ${spawned.length}; ${S.loyalty} cards remain in the Horde deck.`);
-  showGarrukTurn();
+  showEnemyTurn();
 }
 
 function startConclaveTurn(){
@@ -213,7 +213,7 @@ function startConclaveTurn(){
   S.attackPower=totalPower();
   S.declFlavor="Vaelora conducts the battlefield like a living spell.";
   appendAttackStep();
-  showGarrukTurn();
+  showEnemyTurn();
 }
 
 function startVoltronTurn(){
@@ -305,7 +305,7 @@ function startVoltronTurn(){
   S.attackPower=totalPower();
   S.declFlavor=voltronCommander()?"Rukha builds toward a commander-damage strike.":"Rukha develops mana and board presence.";
   appendAttackStep();
-  showGarrukTurn();
+  showEnemyTurn();
 }
 
 function appendAttackStep(){
@@ -327,8 +327,8 @@ function appendAttackStep(){
 }
 
 /* Turn views: the engine sets the phase, the UI (render.js) draws it. */
-function showGarrukTurn(){
-  S.phase="garruk";
+function showEnemyTurn(){
+  S.phase="enemy";
   renderEnemyTurnView();
   checkEnd();
 }
@@ -431,7 +431,7 @@ function cpuReaction(){
 
 function evaluateCpuResponse(){
   if(S.mode==="vanilla"||S.mode==="hard"){
-    return evaluateGarrukReaction();
+    return evaluateEnemyReaction();
   }
   if(S.mode==="conclave"){
     return evaluateConclaveReaction();
@@ -440,12 +440,12 @@ function evaluateCpuResponse(){
   return null;
 }
 
-function evaluateGarrukReaction(){
-  // Garruk reacts during combat if the incoming damage would be lethal
+function evaluateEnemyReaction(){
+  // Ulvar reacts during combat if the incoming damage would be lethal
   // and he has enough loyalty for tricks
   if(S.playerStep===TURN_STEPS.COMBAT){
     if(S.loyalty<=8 && S.tokens.length>0 && S.player.creatures>=3){
-      // Garruk could buff a blocker as a combat trick
+      // Ulvar could buff a blocker as a combat trick
       var unbuffed=S.tokens.filter(t=>!t.kws.includes("Deathtouch"));
       if(unbuffed.length>0){
         return {
@@ -495,7 +495,7 @@ function checkCpuReactionAtStep(){
 function resolveTurn(){
   if(!S)return;
   snapshot();
-  var isEnemyTurn=S.phase==="garruk";
+  var isEnemyTurn=S.phase==="enemy";
   var input=ensureTurnInput();
 
   if(isEnemyTurn){
@@ -534,7 +534,7 @@ function resolveTurn(){
     logSys(`— Your turn ${S.turn} ends —`);
     S.turn++;
     if(checkEnd())return;
-    startGarrukTurn();save();
+    startEnemyTurn();save();
     return;
   }
 
@@ -543,7 +543,7 @@ function resolveTurn(){
     logSys(`— Your turn ${S.turn} ends —`);
     S.turn++;
     if(checkEnd())return;
-    startGarrukTurn();save();
+    startEnemyTurn();save();
   }else{
     showPlayerTurn();save();
   }
@@ -560,7 +560,7 @@ function endPlayerTurnNow(){
   logSys(`— Your turn ${S.turn} ends —`);
   S.turn++;
   if(checkEnd())return;
-  startGarrukTurn();
+  startEnemyTurn();
   save();
 }
 

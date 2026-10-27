@@ -6,12 +6,24 @@
    Globals expected from other modules: MODES, CONCLAVE_UNITS,
    PLAYER_TURN_SEQUENCE, TURN_STEPS, TURN_PHASES, turnInput,
    currentTurnInputKey, logSys, render, renderLog, showPlayerTurn,
-   showGarrukTurn, and the UI globals updateUndoBtn / hideGameOverlay.
+   showEnemyTurn, and the UI globals updateUndoBtn / hideGameOverlay.
    ===================================================================== */
 
 /* ---------- constants ---------- */
-var SAVE_KEY = "magic_no_gathering_save_v1";
-var LEGACY_SAVE_KEY = "garruk_slayer_save_v4";
+var SAVE_KEY = "ratt_save_adventure_v1";
+var ADVENTURE_SAVE_KEY = SAVE_KEY; // alias for code that shadows SAVE_KEY (commander-ui.js)
+var COMMANDER_SAVE_KEY = "ratt_save_commander_v2";
+/* Pre-rename storage keys → current keys. Migrated once on load by
+   migrateLegacyStorageKeys() (see the persistence section). Order matters:
+   the first old key that exists wins for a given new key. */
+var LEGACY_STORAGE_KEYS = [
+  ["magic_no_gathering_save_v1", "ratt_save_adventure_v1"],
+  ["garruk_slayer_save_v4",      "ratt_save_adventure_v1"],
+  ["magic_no_gathering_save_v2", "ratt_save_commander_v2"],
+  ["mng_theme",                  "ratt_theme"],
+  ["mng_recap",                  "ratt_recap"],
+  ["mng_commander_setup",        "ratt_commander_setup"]
+];
 
 /* ---------- helpers ---------- */
 function shuffled(values){ return values.slice().sort(function(){ return Math.random()-.5; }); }
@@ -20,7 +32,7 @@ function shuffled(values){ return values.slice().sort(function(){ return Math.ra
 function freshState(mode){
   var cfg = MODES[mode] || MODES.vanilla;
   return {
-    version:1, mode:cfg.id, turn:1, phase:"garruk", loyalty:cfg.startResource, maxLoyaltySeen:cfg.startResource,
+    version:1, mode:cfg.id, turn:1, phase:"enemy", loyalty:cfg.startResource, maxLoyaltySeen:cfg.startResource,
     difficulty:cfg.id, enraged:false, player:{life:cfg.life,creatures:0}, tokens:[], pendingDecl:null,
     attackPower:0, slayTarget:null, declFlavor:"", actionSteps:[], log:[], turnPowerBonus:0,
     spellLock:"", lastPlayerDamage:0, conclaveAscension:0, conclaveRoster:shuffled(CONCLAVE_UNITS.map(function(c){ return c.id; })), lastConclaveId:null,
@@ -39,6 +51,11 @@ function freshState(mode){
 function normalizeState(state){
   if(!state) return null;
   if(!state.mode) state.mode="vanilla";
+  if(state.phase==="garruk") state.phase="enemy"; // pre-rename saves
+  (state.log||[]).forEach(function(e){ // pre-rename log text
+    if(e&&typeof e.who==="string") e.who=e.who.replace(/Garruk, the Slayer/g,"Ulvar, the Huntmaster").replace(/Garruk, Apex Slayer/g,"Ulvar, Apex Huntmaster").replace(/Garruk/g,"Ulvar");
+    if(e&&typeof e.msg==="string") e.msg=e.msg.replace(/Garruk/g,"Ulvar").replace(/Overrun the Weak/g,"Reckoning of the Wild");
+  });
   state.version=1;
   state.actionSteps=state.actionSteps||[]; state.tokens=state.tokens||[]; state.log=state.log||[];
   state.turnPowerBonus=state.turnPowerBonus||0; state.spellLock=state.spellLock||""; state.lastPlayerDamage=state.lastPlayerDamage||0;
@@ -98,6 +115,21 @@ function safeGet(k){ try{ return localStorage.getItem(k); }catch(e){ return (k i
 function safeSet(k,v){ try{ localStorage.setItem(k,v); }catch(e){ memStore[k]=v; } }
 function safeRemove(k){ try{ localStorage.removeItem(k); }catch(e){ delete memStore[k]; } }
 
+/* Copy oldKey → newKey when newKey is empty, then remove oldKey. If newKey
+   already holds data the stale oldKey is simply removed. */
+function migrateStorageKey(oldKey,newKey){
+  var old = safeGet(oldKey);
+  if(old==null) return false;
+  var moved = false;
+  if(safeGet(newKey)==null){ safeSet(newKey, old); moved = true; }
+  safeRemove(oldKey);
+  return moved;
+}
+function migrateLegacyStorageKeys(){
+  LEGACY_STORAGE_KEYS.forEach(function(pair){ migrateStorageKey(pair[0], pair[1]); });
+}
+migrateLegacyStorageKeys();
+
 function serializeTurnInput(){
   if(!turnInput) return null;
   return {...turnInput, enemyDeaths:Array.from(turnInput.enemyDeaths||[]), blockedCreatures:Array.from(turnInput.blockedCreatures||[])};
@@ -114,9 +146,7 @@ function save(){ safeSet(SAVE_KEY, JSON.stringify({...S,pendingTurnInput:seriali
 function load(){
   try{
     var current = safeGet(SAVE_KEY);
-    if(current) return normalizeState(JSON.parse(current));
-    var legacy = safeGet(LEGACY_SAVE_KEY);
-    return legacy ? normalizeState(JSON.parse(legacy)) : null;
+    return current ? normalizeState(JSON.parse(current)) : null;
   }catch(e){ return null; }
 }
 
@@ -132,7 +162,7 @@ function undo(){
   if(typeof render==='function') render();
   if(typeof renderLog==='function') renderLog();
   if(S.phase==="player"){ if(typeof showPlayerTurn==='function') showPlayerTurn(); }
-  else{ if(typeof showGarrukTurn==='function') showGarrukTurn(); }
+  else{ if(typeof showEnemyTurn==='function') showEnemyTurn(); }
   if(typeof updateUndoBtn==='function') updateUndoBtn();
   if(typeof logSys==='function') logSys("↶ Reverted to the previous step.");
   save();

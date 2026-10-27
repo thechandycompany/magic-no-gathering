@@ -1,4 +1,4 @@
-# Magic No Gathering — TODO
+# Rivals at the Table — TODO
 
 ## [PRIORITY] Refactor Bug Testing
 
@@ -7,10 +7,10 @@ Validate the 16-file modular refactor works identically to the monolithic origin
 **Test checklist:**
 - [ ] Clear localStorage (`localStorage.clear(); location.reload()`) and confirm setup screen shows
 - [ ] Begin Commander Battle (3 opponents) — game starts, CPU turns execute, player can respond
-- [ ] Begin Solo Adventure (Easy Garruk) — wolves spawn, combat resolves, undo works
-- [ ] Test Hard Garruk — escalating loyalty, emergency slay/wipe decisions fire
+- [ ] Begin Solo Adventure (Easy Ulvar) — wolves spawn, combat resolves, undo works
+- [ ] Test Hard Ulvar — escalating loyalty, emergency slay/wipe decisions fire
 - [ ] Test Horde Mode — waves spawn, horde deck depletes, win condition triggers
-- [ ] Test Aether Conclave — named creatures enter, auras apply, spell locks work
+- [ ] Test Arcane Conclave — named creatures enter, auras apply, spell locks work
 - [ ] Test Voltron (adventure) — mana ramps, Rukha casts, gear equips, commander damage tracks
 - [ ] Save/load — save mid-game, reload page, game resumes correctly
 - [ ] Undo — works in both adventure and commander modes
@@ -54,8 +54,8 @@ Add a step during the player's combat phase where the player explicitly declares
 Prepare the game for a Steam release with a free-to-play base + paid DLC model.
 
 **Pre-launch blockers:**
-- Rename all MTG IP references (Garruk, Wolf tokens, planeswalker terminology) — WotC will enforce
-- Rename the game itself — "Magic No Gathering" references their trademark
+- ~~Rename MTG IP references in UI copy (Garruk → Ulvar, planeswalker → PW, Aether → Arcane Conclave, real card names in help text)~~ DONE outside `js/data/decks/*` and `js/engine/ai-commander.js` (those still need a pass)
+- ~~Rename the game itself~~ DONE — working title "Rivals at the Table" (`GAME_TITLE` in `js/data/modes.js`); rename the entry HTML file before shipping
 - Visual polish — card art, layout, animations, overall graphic design pass
 - Wrap in Electron/NW.js for desktop distribution
 

@@ -11,7 +11,7 @@ function currentTurnInputKey(){
 function ensureTurnInput(){
   const key=currentTurnInputKey();
   if(turnInput&&turnInput.key===key)return turnInput;
-  const isEnemy=S.phase==="garruk";
+  const isEnemy=S.phase==="enemy";
   const timing=isEnemy?null:currentTimingInfo();
   const initialCommander=isEnemy&&S.mode==="voltron"?voltronCommander():null;
   turnInput={
@@ -76,7 +76,7 @@ function projectedCommanderDamagePower(input=ensureTurnInput()){
   return commander?tokenPower(commander):0;
 }
 function syncIncomingDamageToAttack(){
-  if(S.phase!=="garruk"||!turnInput)return;
+  if(S.phase!=="enemy"||!turnInput)return;
   const remainingPower=projectedEnemyAttackPower(turnInput);
   if(turnInput.incomingDamageAuto)turnInput.incomingDamage=remainingPower;
   else turnInput.incomingDamage=Math.min(turnInput.incomingDamage,remainingPower);
@@ -214,7 +214,7 @@ function renderEnemyTurnInputs(){
         {value:"dies",label:"Target dies"},{value:"protected",label:"I protected it"}
       ])}${input.slayOutcome==="dies"?numberFieldHtml("slayToughness","Destroyed creature's toughness","",null,"Added to the enemy's loyalty."):""}</div>`;
     }else{
-      const label=S.pendingDecl==="conclaveWipe"?"Prismatic Ruin":"Overrun the Weak";
+      const label=S.pendingDecl==="conclaveWipe"?"Prismatic Ruin":"Reckoning of the Wild";
       actionHtml=`<div class="context-section"><div class="context-section-title">${label}</div>${outcomeChoiceHtml("wipeOutcome",[
         {value:"wiped",label:"Resolve the board clear"},{value:"protected",label:"I protected my board"}
       ])}${input.wipeOutcome==="wiped"?numberFieldHtml("wipeSurvivors","Your creatures that survive","Defaults to zero.",S.player.creatures):""}</div>`;
@@ -330,7 +330,7 @@ function wireContextualInputs(){
 }
 function renderContextualInputs(){
   ensureTurnInput();
-  if(S.phase==="garruk")renderEnemyTurnInputs();
+  if(S.phase==="enemy")renderEnemyTurnInputs();
   else renderPlayerTurnInputs();
   wireContextualInputs();
   renderTokens();
@@ -353,7 +353,7 @@ function turnPreviewText(){
   const input=turnInput;
   const removed=selectedEnemyDeathIndices().length;
   const added=input.creaturesPlayed>0?`+${plural(input.creaturesPlayed,"creature")}`:"";
-  if(S.phase==="garruk"){
+  if(S.phase==="enemy"){
     const {damage,commander}=projectedEnemyTurnDamage(input);
     return previewParts([removed&&`Remove ${removed}`,`Take ${damage}${commander>0?` (${commander} cmdr)`:""}`,added]);
   }
@@ -384,7 +384,7 @@ function refreshEnemyStepStatus(){
 }
 function refreshTurnPreview(){
   if(!S)return;
-  if(S.phase==="garruk")refreshEnemyStepStatus();
+  if(S.phase==="enemy")refreshEnemyStepStatus();
   const el=document.querySelector('#endTurnBtn .cmd-preview');
   if(!el)return;
   const text=turnPreviewText();
@@ -397,15 +397,15 @@ function resolveEnemyTurnInputs(input){
   // Enemy abilities resolve before combat.
   if(S.pendingDecl==="slay"){
     if(input.slayOutcome==="protected"){
-      logP("You protect the targeted creature — Slay is negated after Garruk spends 10 loyalty.");
+      logP("You protect the targeted creature — Slay is negated after Ulvar spends 10 loyalty.");
     }else if(S.player.creatures>0){
       adjust("creatures",-1);
       gainLoyalty(input.slayToughness);
-      logP(`The targeted creature dies; Garruk gains ${input.slayToughness} loyalty → ${S.loyalty}.`);
+      logP(`The targeted creature dies; Ulvar gains ${input.slayToughness} loyalty → ${S.loyalty}.`);
     }
   }
   if(S.pendingDecl==="wipe"||S.pendingDecl==="conclaveWipe"){
-    const label=S.pendingDecl==="conclaveWipe"?"Prismatic Ruin":"Overrun the Weak";
+    const label=S.pendingDecl==="conclaveWipe"?"Prismatic Ruin":"Reckoning of the Wild";
     if(input.wipeOutcome==="protected")logP(`Your creatures survive ${label}.`);
     else{
       setStat("creatures",input.wipeSurvivors);
