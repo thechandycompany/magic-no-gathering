@@ -71,3 +71,14 @@ top level outside the commander-ui IIFE, no modules, load order).
   so the simulation test exercises the same code. The UI only collects the `response` object.
 - Commander cast from hand (after a bounce) costs its base cost with NO tax; tax only applies
   to casts from the command zone (engine tracks `opp.commanderInHand`).
+
+## Wave 2 — delivered by the CPU-behaviour agent (merged)
+- `createCommanderBattle(n, settings?)` — optional `settings` (`{cpu:{powerLevel 1–5, aggression 0–1, interaction 0–1}}`),
+  defaults to the previous game's settings. Read with `cpuSettings(state)`.
+- `opp.commanderInHand` — commander bounced to hand (next cast: base cost, no tax). `commanderZone` stays `true`
+  while in hand for compatibility; the UI should show "In hand" when `commanderInHand` is set.
+- `opp.utilityPermanents` (Outpost Siege / Lifecrafter's Bestiary) — removable/counterable via `util:<i>` keys.
+- Attack actions and `cpuIntentPreview` results carry `lethal: true` when the attack is lethal.
+- CPU-vs-CPU removal actions carry `response` when the target CPU protected itself.
+- `state.aiStats` — counters for tests/diagnostics (no UI needed).
+- Tax model unchanged: +2 is recorded when the commander returns to the command zone.
