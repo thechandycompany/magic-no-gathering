@@ -36,7 +36,7 @@ so a failure line such as `game=26 seed=1026 seats=3 turn=9` can be replayed exa
 
 Commander (after setup, after every CPU turn, and after every player step):
 - no exception, and every engine call returns within 2 s
-- life, creatures, hand size, library size, poison, and commander damage are finite and ≥ 0, for the player and for each opponent
+- life, creatures, library size, poison, and commander damage are finite and ≥ 0, for the player and for each opponent
 - for each opponent: `landsInPlay`, `rampInPlay`, `explosiveInPlay`, `commanderTax`, `gear`, `graveyardCount`, `exileCount`, `heldMana`, `manaAvailable()`, every `hand.*` and `deck.*` count, `opponentHandSize()` and `opponentDeckSize()` are finite and ≥ 0
 - `deck.other === otherDeck.length` (the typed library tracks the generic count)
 - `hand.other >= typedHand.length`

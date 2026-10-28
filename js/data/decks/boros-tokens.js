@@ -60,10 +60,10 @@ var BOROS_TOKENS = (function() {
       {name: "Legion Quartermistress", ico: "🏰", p: 2, t: 3, cost: 5, kind: "utility", effect: "When this enters, create three 1/1 Soldier tokens.", makesTokens: soldiers(3)},
       {name: "Sunspire Paladin", ico: "🌅", p: 3, t: 3, cost: 5, kind: "utility", effect: "First strike. When this enters, create two 1/1 Soldier tokens.", kws: ["First Strike"], makesTokens: soldiers(2)},
       {name: "Ashfield Lancer", ico: "🐎", p: 2, t: 1, cost: 2, kind: "utility", effect: "First strike.", kws: ["First Strike"]},
-      {name: "Brightsteel Warden", ico: "🛡", p: 2, t: 4, cost: 3, kind: "utility", effect: "No abilities.", kws: []},
+      {name: "Brightsteel Warden", ico: "🛡", p: 2, t: 4, cost: 3, kind: "utility", effect: "Vigilance.", kws: ["Vigilance"]},
       {name: "Pyreborn Charger", ico: "🐗", p: 3, t: 1, cost: 3, kind: "utility", effect: "Haste.", kws: ["Haste"], haste: true},
       {name: "Ironbanner Knight", ico: "🗡️", p: 3, t: 2, cost: 3, kind: "utility", effect: "No abilities.", kws: []},
-      {name: "Rampart Colossus", ico: "🗿", p: 4, t: 5, cost: 6, kind: "utility", effect: "No abilities.", kws: []},
+      {name: "Rampart Colossus", ico: "🗿", p: 4, t: 5, cost: 6, kind: "utility", effect: "Vigilance.", kws: ["Vigilance"]},
       {name: "Cindermane Griffin", ico: "🦅", p: 3, t: 3, cost: 4, kind: "utility", effect: "Haste.", kws: ["Haste"], haste: true}
     ],
     // 8 token sorceries

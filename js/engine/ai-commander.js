@@ -241,9 +241,13 @@ function noteCommanderRemoved(owner){
    ===================================================================== */
 function isPlayerEntry(p){return !!p&&p.id==="player";}
 /** The player's creatures as combat profiles: tracked tokens with P/T, else 2/2 per creature. */
-function playerCreatureProfile(p){
-  const count=Math.max(0,p.creatures||0);
-  const tracked=(p.tokens||[]).filter(t=>typeof t.p==="number").map(t=>({name:t.name,p:t.p||0,t:t.t||1,kws:t.kws||[]}));
+/** Your creatures as the AI sees them: tracked cards, then 2/2s for untracked paper creatures.
+ * untappedOnly: leave out tracked creatures still tapped from attacking (possible blockers). */
+function playerCreatureProfile(p,untappedOnly){
+  const all=(p.tokens||[]).filter(t=>typeof t.p==="number");
+  const skipped=untappedOnly?all.filter(isCreatureTapped).length:0;
+  const count=Math.max(0,(p.creatures||0)-skipped);
+  const tracked=all.filter(t=>!untappedOnly||!isCreatureTapped(t)).map(t=>({name:t.name,p:t.p||0,t:t.t||1,kws:t.kws||[],kind:t.commander?"commander":"creature"}));
   const list=tracked.slice(0,count);
   while(list.length<count)list.push({name:"Creature",p:2,t:2,kws:[]});
   return list;
@@ -262,7 +266,8 @@ function commanderPressure(p){
   if(commander)return attackPowerOf(commander);
   return manaAvailable(p)+1>=commanderCost(p)?(deckCommanderBase(p).p||0)*0.5:0;
 }
-function entryHandSize(p){return isPlayerEntry(p)?Math.max(0,p.handSize!=null?p.handSize:7):opponentHandSize(p);}
+/** Your hand is not tracked; the AI assumes a full grip of 7. */
+function entryHandSize(p){return isPlayerEntry(p)?7:opponentHandSize(p);}
 function maxCommanderDamageDealt(p){return Object.values(p.commanderDamageDealt||{}).reduce((best,d)=>Math.max(best,d||0),0);}
 /**
  * Table-wide archenemy score: who is AHEAD scores high. Board power,
@@ -321,7 +326,7 @@ function estimateAttackDamage(opp,target,attackers){
     const prevented=previewCpuDamagePrevention(combat.damageToDefender,combat.commanderDamage);
     return {damage:prevented.damage,commanderDamage:prevented.commanderDamage,poison:poisonOf(combat.unblocked)};
   }
-  const blockers=playerCreatureProfile(target).length;
+  const blockers=playerCreatureProfile(target,true).length;
   const ordered=[...attackers].sort((a,b)=>(b.kind==="commander")-(a.kind==="commander")||attackPowerOf(b)-attackPowerOf(a));
   let damage=0,commanderDamage=0;const unblocked=[];
   ordered.forEach((attacker,index)=>{
@@ -378,7 +383,7 @@ function deckStrategyLabels(opp){const deck=deckOf(opp);return (deck&&deck.strat
 function profitableAttackers(opp,target){
   const policy=deckAttackPolicy(opp);
   const ready=opp.tokens.filter(t=>!t.summoningSick&&!isManaToken(t));
-  const defenders=isPlayerEntry(target)?playerCreatureProfile(target):(target&&target.tokens||[]);
+  const defenders=isPlayerEntry(target)?playerCreatureProfile(target,true):(target&&target.tokens||[]);
   const options={commanderAlwaysAttacks:policy.commanderAlwaysAttacks};
   const chosen=ready.filter(t=>{
     if(t.kind==="commander"&&policy.commanderAlwaysAttacks)return (t.p||0)>=1;
@@ -429,7 +434,8 @@ function applyHomeGuard(opp,attackers,allPlayers,settings,target){
   const threat=incomingThreats(opp,allPlayers)[0];
   if(!threat)return attackers;
   const sending=[...attackers];
-  const homeCount=()=>opp.tokens.length-sending.length;
+  // Vigilant attackers stay untapped, so they still count as home blockers.
+  const homeCount=()=>opp.tokens.filter(t=>!sending.includes(t)||hasKeyword(t,"Vigilance")).length;
   if(guardSurvives(threat,homeCount(),opp.life,factor))return sending;
   if(!guardSurvives(threat,opp.tokens.length,opp.life,factor))return sending; // can't hold: race
   // A Voltron commander keeps swinging while it is racing (target within two
@@ -1767,7 +1773,7 @@ function createCommanderBattle(numOpponents, settings) {
   const firstSeat=seats[Math.floor(Math.random()*seats.length)];
   return {
     gameMode:"commanderBattle", turn:1, phase:"cpu", cpuTurnIndex:0, firstSeat,
-    opponents, player:{id:"player",name:"You",life:40,poison:0,creatures:0,handSize:7,librarySize:92,graveyardCount:0,graveyard:[],nextGraveyardCardId:0,discardHistory:[],exileCount:0,exile:[],nextExileCardId:0,commanderDamageReceived:{},commanderDamageDealt:{},tokens:[],nextTokenUid:0,planeswalkers:[]},
+    opponents, player:{id:"player",name:"You",life:40,poison:0,creatures:0,librarySize:92,graveyardCount:0,graveyard:[],nextGraveyardCardId:0,discardHistory:[],exileCount:0,exile:[],nextExileCardId:0,commanderDamageReceived:{},commanderDamageDealt:{},tokens:[],nextTokenUid:0,planeswalkers:[]},
     battlefieldRules:[], nextBattlefieldRuleId:0,
     discardHistory:[], log:[], viewMode:"table", viewTarget:0, gameOver:false, winner:null,
     settings:decksSetting!=null?{cpu,decks:decksSetting}:{cpu}, roundTargets:{}, aiStats:{},
@@ -1778,7 +1784,7 @@ function playerAsTarget(state){
   const p=state.player;
   return {id:"player",name:"You",life:p.life,poison:p.poison||0,creatures:p.creatures,tokens:p.tokens||[],planeswalkers:p.planeswalkers||[],
     commanderDamageReceived:p.commanderDamageReceived||{},commanderDamageDealt:p.commanderDamageDealt||{},
-    handSize:p.handSize!=null?p.handSize:7,commanderPower:p.commanderPower||0};
+    commanderPower:p.commanderPower||0};
 }
 function allPlayersForTargeting(state){const all=[playerAsTarget(state)];state.opponents.forEach(o=>{if(!isOpponentDead(o))all.push(o);});return all;}
 function aliveOpponents(state){return state.opponents.filter(o=>!isOpponentDead(o));}
@@ -2144,7 +2150,7 @@ function ensureCommanderEffectState(state){
     refreshLegacyCardData(state);
   }
   const player=state.player;
-  if(player.handSize==null)player.handSize=7;
+  delete player.handSize; // no longer tracked (older saves)
   if(player.librarySize==null)player.librarySize=92;
   if(player.graveyardCount==null)player.graveyardCount=0;
   player.graveyard=player.graveyard||[];
@@ -2455,7 +2461,7 @@ function createPlayerEffect(draft){
 }
 function playerActionAmount(effect,target){
   if(!effect.all)return effect.count;
-  if(effect.action==="discard")return target.id==="player"?Math.max(0,target.handSize||0):opponentHandSize(target);
+  if(effect.action==="discard")return target.id==="player"?0:opponentHandSize(target);
   if(effect.action==="mill"||effect.action==="draw")return target.id==="player"?Math.max(0,target.librarySize||0):opponentDeckSize(target);
   if(effect.action==="reanimate")return graveyardCreatureCards(target).length;
   if(isPermanentPlayerAction(effect)){
@@ -2783,7 +2789,7 @@ function playerEffectPermanentKeys(target,effect,draft,amount){
 /**
  * Canonical resolution of a player action (PLAYER_ACTIONS) against the
  * Commander battle state. Updates CPU state and the player's tracked
- * counts (handSize, librarySize, poison, creatures for tokens), logs each
+ * counts (librarySize, poison, creatures for tokens), logs each
  * result and returns the log lines.
  * options.quiet: skip the UI hooks (snapshot / save / re-render).
  */
@@ -2815,10 +2821,11 @@ function resolvePlayerEffect(effect,draft,options){
       else log(`${name}'s graveyard has no selected creature cards to resurrect.`);
     }else if(effect.action==="discard"){
       if(target.id==="player"){
-        const discardedAmount=Math.min(amount,target.handSize);target.handSize-=discardedAmount;
-        const discarded=Array.from({length:discardedAmount},()=>addPlayerGraveyardCard(target,{name:"Unrevealed discarded card",ico:"🃏",types:["Unknown"],virtual:true})).filter(Boolean);
+        // Your hand is not tracked: "all" is just an instruction; a count adds unrevealed graveyard cards.
+        if(effect.all){log(`${name} discard your hand.`);return;}
+        const discarded=Array.from({length:amount},()=>addPlayerGraveyardCard(target,{name:"Unrevealed discarded card",ico:"🃏",types:["Unknown"],virtual:true})).filter(Boolean);
         recordDiscardedCards(target,discarded);
-        log(`${name} discards ${discarded.length?discarded.map(discardedCardText).join(", "):"no cards"}. Types: ${discardedTypeSummary(discarded)}. Card names are not tracked for this hand.`);
+        log(`${name} discard ${discarded.length?discarded.map(discardedCardText).join(", "):"no cards"}. Types: ${discardedTypeSummary(discarded)}. Card names are not tracked for this hand.`);
       }else{
         const discarded=discardFromOpponent(target,amount);
         log(`${name} chooses to discard ${discarded.length?discarded.map(discardedCardText).join(", "):"no cards"}.${discarded.length?` Types: ${discardedTypeSummary(discarded)}.`:""}`);
@@ -2834,7 +2841,7 @@ function resolvePlayerEffect(effect,draft,options){
       }
     }else if(effect.action==="draw"){
       if(target.id==="player"){
-        const drawnAmount=Math.min(amount,target.librarySize);target.librarySize-=drawnAmount;target.handSize+=drawnAmount;
+        const drawnAmount=Math.min(amount,target.librarySize);target.librarySize-=drawnAmount;
         log(`${name} draws ${drawnAmount} card${drawnAmount===1?"":"s"}.`);
       }else{
         let drawn=0;for(let i=0;i<amount;i++)if(drawOpponentCard(target)!=="none")drawn++;
@@ -2851,7 +2858,6 @@ function resolvePlayerEffect(effect,draft,options){
       log(`You create ${amount} creature token${amount===1?"":"s"}. (${target.creatures} creature${target.creatures===1?"":"s"} on your battlefield)`);
     }else if(target.id==="player"){
       if(effect.action==="exile")target.exileCount+=amount;
-      if(effect.action==="bounce")target.handSize=(target.handSize||0)+amount;
       const subject=effect.all?`all ${effect.cardType}s you control`:`${amount} ${effect.cardType} card${amount===1?"":"s"} you control`;
       log(`${effect.action==="exile"?"Exile":effect.action==="bounce"?"Return to your hand":"Resolve"} ${subject}.`);
     }else{

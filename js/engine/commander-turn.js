@@ -67,40 +67,94 @@ function markCommanderEliminations(state){
   return fresh;
 }
 
+/* ---------- your tracked creatures ---------- */
+/**
+ * player.tokens holds the creatures you list on the board as cards (kind
+ * "player-creature", plus resurrected "reanimated-creature"). player.creatures
+ * stays the total on your battlefield; the rest are untracked paper creatures.
+ * Tracked attackers stay tapped (attacking) until your next untap step.
+ */
+var PLAYER_CREATURE_KEYWORDS=["Flying","Reach","Trample","Vigilance","Haste","Deathtouch","Lifelink","First Strike","Double Strike","Menace","Indestructible"];
+function trackedPlayerCreatures(player){return (player.tokens||[]).filter(function(t){return t.p!=null;});}
+function untrackedPlayerCreatures(player){return Math.max(0,(player.creatures||0)-trackedPlayerCreatures(player).length);}
+function playerCommanderCreature(player){return (player.tokens||[]).find(function(t){return t.commander;})||null;}
+/** Adds `count` copies of spec {name, ico, p, t, kws, commander, isToken}. Returns the new tokens. */
+function addPlayerCreatures(state,spec,count){
+  var player=state.player;player.tokens=player.tokens||[];
+  var n=Math.max(1,Math.min(99,parseInt(count,10)||1));
+  var p=Math.max(0,parseInt(spec.p,10)||0),t=Math.max(0,parseInt(spec.t,10)||0);
+  var commander=!!spec.commander&&!playerCommanderCreature(player);
+  var name=(spec.name||"").trim()||(commander?"Your commander":"Creature");
+  var made=[];
+  for(var i=0;i<n;i++){
+    var token={name:name,ico:spec.ico||(commander&&i===0?"⚜":"♟"),kind:"player-creature",type:"Creature",p:p,t:t,baseP:p,baseT:t,
+      kws:(spec.kws||[]).slice(),commander:commander&&i===0,isToken:!!spec.isToken,controller:"player"};
+    player.tokens.push(token);registerToken(player,token);made.push(token);
+  }
+  player.creatures=(player.creatures||0)+n;
+  if(commander)player.commanderPower=p;
+  cmdLog("You put "+(n>1?n+"× ":"")+name+" ("+p+"/"+t+") onto your battlefield.");
+  return made;
+}
+/** Adds `count` more copies of a tracked creature (never a second commander). */
+function duplicatePlayerCreature(state,uid,count){
+  var token=(state.player.tokens||[]).find(function(t){return t.uid===uid;});
+  if(!token)return [];
+  return addPlayerCreatures(state,{name:token.commander?token.name+" (copy)":token.name,ico:token.commander?"♟":token.ico,p:token.p,t:token.t,kws:token.kws,isToken:token.isToken},count);
+}
+/** Removes a tracked creature. destination: "graveyard" | "exile". Your commander goes to the command zone. */
+function removePlayerCreature(state,uid,destination,reason){
+  var player=state.player;
+  var index=(player.tokens||[]).findIndex(function(t){return t.uid===uid;});
+  if(index<0)return null;
+  var token=player.tokens.splice(index,1)[0];
+  player.creatures=Math.max(0,(player.creatures||0)-1);
+  var card={name:token.name,ico:token.ico,types:["Creature"],p:token.baseP!=null?token.baseP:token.p,t:token.baseT!=null?token.baseT:token.t,kws:(token.kws||[]).slice(),isToken:!!token.isToken};
+  var where;
+  if(token.commander){where="the command zone";player.commanderPower=0;}
+  else if(token.isToken)where="nowhere (token)";
+  else if(destination==="exile"){addOpponentExileCard(player,card);where="exile";}
+  else{addPlayerGraveyardCard(player,card);where="your graveyard";}
+  cmdLog(token.name+(reason?" "+reason:"")+" → "+where+".");
+  return token;
+}
+/** You lose `count` creatures: untracked paper creatures first, then tracked cards (commander last). */
+function playerLoseCreatures(state,count,reason){
+  var player=state.player;
+  var n=Math.max(0,Math.min(count||0,player.creatures||0));
+  var fromPaper=Math.min(n,untrackedPlayerCreatures(player));
+  player.creatures-=fromPaper;
+  var rest=n-fromPaper;
+  var order=trackedPlayerCreatures(player).slice().sort(function(a,b){return (a.commander?1:0)-(b.commander?1:0);});
+  for(var i=0;i<rest&&i<order.length;i++)removePlayerCreature(state,order[i].uid,"graveyard",reason);
+  return n;
+}
+/** Your untap step: tracked creatures untap and lose summoning sickness. */
+function untapPlayerCreatures(state){
+  (state.player.tokens||[]).forEach(function(t){t.attacking=false;t.tapped=false;t.summoningSick=false;});
+}
+
 /* ---------- your turn ---------- */
 /** In a one-CPU game the player who goes first skips their first draw. */
 function playerSkipsFirstDraw(state){
   return state.opponents.length===1&&state.firstSeat==="player"&&(state.turn||1)===1&&!state.player.turnsTaken;
 }
-/** Your draw step: hand +1, library −1 (or the skipped first draw). */
+/** Your draw step: library −1 (or the skipped first draw). Your hand is not tracked. */
 function playerDrawStep(state){
   var player=state.player;
-  if(playerSkipsFirstDraw(state)){player.turnsTaken=(player.turnsTaken||0)+1;cmdLog("You skip your first draw (first player in a two-player game).");return {drawn:0,skipped:true};}
+  if(playerSkipsFirstDraw(state)){untapPlayerCreatures(state);player.turnsTaken=(player.turnsTaken||0)+1;cmdLog("You skip your first draw (first player in a two-player game).");return {drawn:0,skipped:true};}
   player.turnsTaken=(player.turnsTaken||0)+1;
+  untapPlayerCreatures(state);
   if((player.librarySize||0)<=0){cmdLog("Your library is empty. You cannot draw.");return {drawn:0,skipped:false,empty:true};}
-  player.librarySize-=1;player.handSize=(player.handSize||0)+1;
+  player.librarySize-=1;
   return {drawn:1,skipped:false};
 }
-/** Records discarded cards from your hand (unrevealed cards in your graveyard). */
-function playerDiscard(state,count,reason){
-  var player=state.player;
-  var amount=Math.max(0,Math.min(count||0,player.handSize||0));
-  if(!amount)return 0;
-  player.handSize-=amount;
-  var discarded=[];
-  for(var i=0;i<amount;i++){var card=addPlayerGraveyardCard(player,{name:"Unrevealed discarded card",ico:"🃏",types:["Unknown"],virtual:true});if(card)discarded.push(card);}
-  recordDiscardedCards(player,discarded);
-  cmdLog("You discard "+plural(amount,"card")+(reason?" "+reason:"")+". (Hand → "+player.handSize+")");
-  return amount;
-}
-/** Main-phase entries: creatures played, cards played from hand, life gained. */
+/** Main-phase entries: creatures played, life gained. */
 function applyPlayerTurnInputs(state,inputs,whenText){
   var player=state.player;var input=inputs||{};
   var played=Math.max(0,input.creaturesPlayed||0);
-  var fromHand=Math.max(0,Math.min(input.cardsPlayed||0,player.handSize||0));
   var gained=Math.max(0,input.lifeGained||0);
   if(played){player.creatures=(player.creatures||0)+played;cmdLog("You play "+plural(played,"creature")+(whenText?" "+whenText:"")+".");}
-  if(fromHand){player.handSize-=fromHand;cmdLog("You play "+plural(fromHand,"card")+" from your hand. (Hand → "+player.handSize+")");}
   if(gained){player.life+=gained;cmdLog("You gain "+gained+" life. (Life → "+player.life+")");}
 }
 
@@ -148,7 +202,7 @@ function resolveCpuPlayerRemoval(opp,action,choice){
   if(!state)return lines;
   var player=state.player;
   var lost=Math.max(0,Math.min(c.creaturesLost!=null?c.creaturesLost:(action.boardWipe?player.creatures:0),player.creatures||0));
-  if(lost){player.creatures-=lost;log(name+" destroys "+plural(lost,"creature")+" you control. ("+player.creatures+" remaining)");}
+  if(lost){playerLoseCreatures(state,lost,"is destroyed");log(name+" destroys "+plural(lost,"creature")+" you control. ("+player.creatures+" remaining)");}
   else log("You resolve "+name+". No creatures you control are destroyed.");
   var gained=Math.max(0,c.creaturesGained||0);
   if(gained){player.creatures+=gained;log("You create "+plural(gained,"creature token")+".");}
@@ -186,19 +240,22 @@ function responseRemovedUids(response){
 /**
  * Damage a CPU attack on you deals after your removals and blocks (before
  * prevention). A blocked attacker deals nothing unless it tramples and the
- * blocker's toughness is known (trampleExcess). Commander damage is the
+ * blocker's toughness is known (trampleExcess), even if it dies in the block. Commander damage is the
  * commander's share. When the attack targets your planeswalker, the damage
  * goes to it instead. Manual overrides in `response` replace the totals.
  */
 function computeCpuAttackOnPlayer(opp,result,response){
   var r=response||{};
-  var removed=new Set(responseRemovedUids(r));
+  var removed=new Set((r.removals||[]).map(function(x){return x.uid;}));
+  var diedInCombat=new Set(r.combatDeaths||[]);
   var blocks={};(r.blocks||[]).forEach(function(b){blocks[b.uid]=b;});
   var attackers=opp.tokens.filter(function(t){return t.attacking&&!removed.has(t.uid);});
   var total=0,commander=0,perAttacker=[];
   attackers.forEach(function(a){
     var block=blocks[a.uid];
-    var through=block?(block.blockerToughness==null?0:trampleExcess(a,block.blockerToughness)):(a.p||0)*combatStrikeCount(a);
+    // A blocked trampler (even one your blocker kills) still deals its excess.
+    var through=block?(block.blockerToughness==null?0:trampleExcess(a,block.blockerToughness))
+      :diedInCombat.has(a.uid)?0:(a.p||0)*combatStrikeCount(a);
     total+=through;if(a.kind==="commander")commander+=through;
     perAttacker.push({uid:a.uid,name:a.name,blocked:!!block,damage:through});
   });
@@ -244,7 +301,10 @@ function cpuCombatDefender(opp,result){
  */
 function previewCpuResponse(opp,result,response){
   var r=response||{};
-  var out={countered:(r.counters||[]).length,removed:(r.removals||[]).length+(r.combatDeaths||[]).length,blocked:(r.blocks||[]).length,
+  var blockedUids=new Set((r.blocks||[]).map(function(b){return b.uid;}));
+  // An attacker you blocked and killed counts as blocked, not removed.
+  var unblockedDeaths=(r.combatDeaths||[]).filter(function(uid){return !blockedUids.has(uid);}).length;
+  var out={countered:(r.counters||[]).length,removed:(r.removals||[]).length+unblockedDeaths,blocked:(r.blocks||[]).length,
     attack:null,cpuCombat:null,flash:r.flashCreatures||0,lifeGained:r.lifeGained||0,
     instantDamage:(r.instantDamage||[]).reduce(function(s,d){return s+(d.amount||0);},0)};
   if(r.stage!=="combat"||!result||!(result.attackPower>0))return out;
@@ -276,7 +336,7 @@ function previewCpuResponse(opp,result,response){
  *   counters: [actionKey],                  // cpuActionKey of countered spells
  *   removals: [{ownerId, uid, destination, checked}],  // your instant-speed removal;
  *                                            // checked = protection already asked
- *   blocks: [{uid, blockerToughness}],      // attackers your creatures blocked
+ *   blocks: [{uid, blockerToughness, blockerUid, blockerDies}], // attackers you blocked (blockerUid: your tracked blocker)
  *   combatDeaths: [uid],                    // attackers that died to your blockers
  *   damageToPlayer, commanderDamageToPlayer, damageToPW: number | null (null = computed)
  *   playerDeaths, flashCreatures, lifeGained: number
@@ -347,8 +407,9 @@ function resolveCpuResponse(opp,result,response){
         if(pw.loyalty<=0){state.player.planeswalkers=state.player.planeswalkers.filter(function(p){return p.id!==pw.id;});log("⬡ "+pw.name+" is destroyed.");}
       }
     }
-    var deaths=Math.max(0,Math.min(r.playerDeaths||0,state.player.creatures||0));
-    if(deaths){state.player.creatures-=deaths;log(plural(deaths,"creature")+" you control died in combat.");}
+    (r.blocks||[]).forEach(function(b){if(b.blockerUid&&b.blockerDies)removePlayerCreature(state,b.blockerUid,"graveyard","dies blocking");});
+    var deaths=playerLoseCreatures(state,r.playerDeaths||0,"dies in combat");
+    if(deaths)log(plural(deaths,"creature")+" you control died in combat.");
   }else if(r.stage==="combat"&&result&&result.target&&result.target!=="player"){
     var defender=cpuCombatDefender(opp,result);
     if(defender)resolveCpuVsCpuAttack(opp,defender);
@@ -379,7 +440,7 @@ function resolveCpuResponse(opp,result,response){
 var PLAYER_ATTACK_KEYWORDS=["Trample","Flying","Deathtouch","First Strike","Double Strike","Lifelink"];
 /** A declared attacker row → a creature object the combat helpers understand. */
 function playerAttackerCreature(row,index){
-  return {uid:"player:atk"+index,name:row.commander?"Your commander":"Attacker "+(index+1),
+  return {uid:"player:atk"+index,trackedUid:row.uid||null,name:row.name||(row.commander?"Your commander":"Attacker "+(index+1)),
     p:Math.max(0,parseInt(row.p)||0),t:Math.max(0,parseInt(row.t)||0),kws:(row.kws||[]).slice(),
     kind:row.commander?"commander":"creature",row:index};
 }
@@ -390,7 +451,7 @@ function blockDamageDealt(attacker,blocker,outcome){
   return (attacker.p||0)*strikes;
 }
 /**
- * Your attack declaration. rows: [{p, t, kws, targetId, commander}].
+ * Your attack declaration. rows: [{p, t, kws, targetId, commander, uid?, name?}] (uid: a tracked creature).
  * Each targeted CPU chooses blockers with cpuAssignBlockers (creatures with
  * Flying can only be blocked by Flying/Reach creatures). Returns
  * {perOpp:[{oppId, damage, commanderDamage, kills:[uid], blocks:[text]}],
@@ -398,7 +459,8 @@ function blockDamageDealt(attacker,blocker,outcome){
  */
 function computePlayerAttack(state,rows){
   var attackers=(rows||[]).map(playerAttackerCreature);
-  var outcome={perOpp:[],playerDeaths:0,lifeGained:0,rows:[]};
+  var outcome={perOpp:[],playerDeaths:0,deadUids:[],attackerUids:[],lifeGained:0,rows:[]};
+  attackers.forEach(function(a){if(a.trackedUid&&rows[a.row].targetId)outcome.attackerUids.push(a.trackedUid);});
   var byTarget={};
   attackers.forEach(function(a,i){var id=rows[i].targetId;if(!id)return;(byTarget[id]=byTarget[id]||[]).push(a);});
   Object.keys(byTarget).forEach(function(oppId){
@@ -409,13 +471,17 @@ function computePlayerAttack(state,rows){
     var assignments=[];
     var flyers=group.filter(function(a){return hasKeyword(a,"Flying");});
     var ground=group.filter(function(a){return !hasKeyword(a,"Flying");});
-    var pass=function(list,canBlock){
-      if(!list.length)return;
+    var damageOf=function(list){return list.reduce(function(s,a){return s+(a.p||0)*combatStrikeCount(a);},0);};
+    var pass=function(list,canBlock,otherIncoming){
+      if(!list.length)return [];
       var proxy=Object.assign({},defender,{tokens:defender.tokens.filter(function(t){return !used.has(t.uid)&&canBlock(t);})});
-      cpuAssignBlockers(proxy,list).assignments.forEach(function(asg){used.add(asg.blocker.uid);assignments.push(asg);});
+      var res=cpuAssignBlockers(proxy,list,"player",otherIncoming);
+      res.assignments.forEach(function(asg){used.add(asg.blocker.uid);assignments.push(asg);});
+      return res.unblocked;
     };
-    pass(flyers,function(t){return hasKeyword(t,"Flying")||hasKeyword(t,"Reach");});
-    pass(ground,function(){return true;});
+    // Flyers first (only Flying/Reach can block them); each pass counts the other group toward lethal.
+    var flyersThrough=pass(flyers,function(t){return hasKeyword(t,"Flying")||hasKeyword(t,"Reach");},damageOf(ground));
+    pass(ground,function(){return true;},damageOf(flyersThrough||[]));
     var entry={oppId:oppId,damage:0,commanderDamage:0,kills:[],blocks:[]};
     group.forEach(function(a){
       var asg=assignments.find(function(x){return x.attacker===a;});
@@ -424,7 +490,7 @@ function computePlayerAttack(state,rows){
         var res=resolveSingleBlock(a,asg.blocker);
         row.blockedBy=asg.blocker.name;row.dies=res.attackerDies;row.blockerDies=res.blockerDies;row.damage=res.trampleDamage;
         if(res.blockerDies)entry.kills.push(asg.blocker.uid);
-        if(res.attackerDies)outcome.playerDeaths++;
+        if(res.attackerDies){if(a.trackedUid)outcome.deadUids.push(a.trackedUid);else outcome.playerDeaths++;}
         if(hasKeyword(a,"Lifelink"))outcome.lifeGained+=blockDamageDealt(a,asg.blocker,res);
         var text=res.attackerDies&&res.blockerDies?a.name+" trades with "+asg.blocker.name:res.attackerDies?asg.blocker.name+" blocks and destroys "+a.name:res.blockerDies?a.name+" destroys "+asg.blocker.name:asg.blocker.name+" blocks "+a.name;
         entry.blocks.push(text+(res.trampleDamage?" ("+res.trampleDamage+" trample)":""));
@@ -442,7 +508,8 @@ function computePlayerAttack(state,rows){
 }
 /**
  * Applies your combat results (from computePlayerAttack or manual entry).
- * results: {perOpp:[{oppId, damage, commanderDamage, kills:[uid]}], playerDeaths, lifeGained}
+ * results: {perOpp:[{oppId, damage, commanderDamage, kills:[uid]}], playerDeaths (untracked),
+ *   attackerUids / deadUids (your tracked attackers: tapped / died), lifeGained}
  * `damage` is the total combat damage to that opponent and includes the
  * commander damage, so commander damage always reduces life.
  */
@@ -472,8 +539,11 @@ function applyPlayerCombat(state,results){
       if(moved)cmdLog("You destroy "+movementCardText(moved)+" ("+name+"). Types: "+discardedTypeSummary([moved])+".");
     });
   });
-  var deaths=Math.max(0,Math.min(res.playerDeaths||0,state.player.creatures||0));
-  if(deaths){state.player.creatures-=deaths;cmdLog(plural(deaths,"creature")+" you control died in combat.");}
+  // Tracked attackers tap (vigilance aside); the ones that died leave the battlefield.
+  (res.attackerUids||[]).forEach(function(uid){var t=(state.player.tokens||[]).find(function(x){return x.uid===uid;});if(t)t.attacking=true;});
+  (res.deadUids||[]).forEach(function(uid){removePlayerCreature(state,uid,"graveyard","dies in combat");});
+  var deaths=playerLoseCreatures(state,res.playerDeaths||0,"dies in combat");
+  if(deaths)cmdLog(plural(deaths,"creature")+" you control died in combat.");
   var gained=Math.max(0,res.lifeGained||0);
   if(gained){state.player.life+=gained;cmdLog("You gain "+gained+" life. (Life → "+state.player.life+")");}
   markCommanderEliminations(state);

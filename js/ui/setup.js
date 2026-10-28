@@ -146,15 +146,8 @@ function wire(){
   document.getElementById('importBackupBtn').onclick=()=>{backupFile.value="";backupFile.click();};
   backupFile.onchange=()=>{closeSettings();readBackupFile(backupFile.files&&backupFile.files[0]);};
   document.getElementById('logClose').onclick=closeLog;
-  // Click/tap on the dimmed backdrop closes the popup. The press must also START on the
-  // backdrop, so dragging a text selection out of a dialog doesn't close it.
-  let backdropPress=null;
-  document.addEventListener('pointerdown',event=>{backdropPress=event.target.classList&&event.target.classList.contains('overlay')?event.target:null;});
-  document.addEventListener('click',event=>{
-    const target=event.target;
-    if(target.classList&&target.classList.contains('overlay')&&target.classList.contains('show')&&target===backdropPress&&target===topOverlay())dismissOverlay(target);
-    backdropPress=null;
-  });
+  // Clicking the dimmed backdrop does nothing (a stray click lost combat choices); popups
+  // close through their own buttons or Escape.
   document.addEventListener('keydown',event=>{
     const infoOverlay=document.getElementById('infoOverlay');
     const logOverlay=document.getElementById('logOverlay');

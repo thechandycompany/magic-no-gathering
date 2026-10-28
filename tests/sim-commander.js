@@ -9,7 +9,7 @@
                → executeOpponentCombat → resolveCpuResponse("combat")
                → executeOpponentEndStep
      your seat: playerDrawStep → applyPlayerTurnInputs → computePlayerAttack
-               → applyPlayerCombat → playerDiscard (hand size)
+               → applyPlayerCombat
    The scripted player resolves spells aimed at its board, counters some
    commander casts, blocks the biggest attacker when it can, attacks with up
    to two 2/2 creatures and deals 5 extra damage to the weakest CPU.
@@ -169,16 +169,20 @@ function cpuTurn(h, opp, gs, game, fail) {
   h.call("executeOpponentEndStep", opp);
 }
 
-/* Your seat: draw, play, attack, discard to hand size. */
+/* Your seat: draw, play (an untracked creature, plus a tracked card every other turn), attack. */
 function playerTurn(h, gs, fail) {
   var ctx = h.ctx;
   h.call("playerDrawStep", gs);
-  h.call("applyPlayerTurnInputs", gs, { creaturesPlayed: 1, cardsPlayed: 1 });
+  if ((gs.player.tokens || []).some(function (t) { return t.attacking; })) fail("player-creature-still-tapped", "tracked attacker did not untap");
+  h.call("applyPlayerTurnInputs", gs, { creaturesPlayed: 1 });
+  if ((gs.turn || 0) % 2 === 0) h.call("addPlayerCreatures", gs, { name: "Sim Bear", p: 3, t: 3, kws: gs.turn % 4 === 0 ? ["Vigilance"] : [], commander: gs.turn === 2 }, 1 + (gs.turn % 3 === 0 ? 1 : 0));
   var living = gs.opponents.filter(function (o) { return !ctx.isOpponentDead(o); }).sort(function (a, b) { return a.life - b.life || a.index - b.index; });
   if (!living.length) return;
   var tgt = living[0];
   var rows = [];
-  for (var i = 0; i < Math.min(2, gs.player.creatures); i++) rows.push({ p: 2, t: 2, kws: i === 0 ? ["Trample"] : [], targetId: tgt.id, commander: false });
+  var tracked = ctx.trackedPlayerCreatures(gs.player);
+  tracked.forEach(function (t) { if (!t.attacking) rows.push({ uid: t.uid, name: t.name, p: t.p, t: t.t, kws: t.kws, targetId: tgt.id, commander: !!t.commander }); });
+  for (var i = 0; i < Math.min(2, ctx.untrackedPlayerCreatures(gs.player)); i++) rows.push({ p: 2, t: 2, kws: i === 0 ? ["Trample"] : [], targetId: tgt.id, commander: false });
   if (rows.length) {
     var lifeBefore = tgt.life;
     var outcome = h.call("computePlayerAttack", gs, rows);
@@ -187,8 +191,6 @@ function playerTurn(h, gs, fail) {
     if (lifeBefore - tgt.life !== Math.min(lifeBefore, expected)) fail("player-attack-mismatch", "expected " + expected + " applied " + (lifeBefore - tgt.life));
   }
   if (!ctx.isOpponentDead(tgt)) h.call("applyPlayerCombat", gs, { perOpp: [{ oppId: tgt.id, damage: PLAYER_DAMAGE_PER_TURN }] });
-  if (gs.player.handSize > 7) h.call("playerDiscard", gs, gs.player.handSize - 7, "to hand size");
-  if (gs.player.handSize > 7) fail("player-hand-over-7", "hand " + gs.player.handSize);
 }
 
 /* ---------- invariants ---------- */
@@ -201,7 +203,10 @@ function checkInvariants(ctx, gs, fail, eliminated) {
   var p = gs.player;
   checkNumber(fail, "player.life", p.life);
   checkNumber(fail, "player.creatures", p.creatures);
-  if (p.handSize != null) checkNumber(fail, "player.handSize", p.handSize);
+  var trackedCount = (p.tokens || []).filter(function (t) { return t.p != null; }).length;
+  if ((p.creatures || 0) < trackedCount) fail("player-creatures-below-tracked", "creatures " + p.creatures + " < tracked " + trackedCount);
+  if ((p.tokens || []).filter(function (t) { return t.commander; }).length > 1) fail("player-two-commanders", "more than one tracked commander");
+  if (p.handSize != null) fail("player-hand-tracked", "player.handSize should not exist");
   if (p.librarySize != null) checkNumber(fail, "player.librarySize", p.librarySize);
   if (p.poison != null) checkNumber(fail, "player.poison", p.poison);
   Object.keys(p.commanderDamageReceived || {}).forEach(function (k) { checkNumber(fail, "player.commanderDamageReceived", p.commanderDamageReceived[k]); });

@@ -50,7 +50,14 @@ top level outside the commander-ui IIFE, no modules, load order).
 ## Player state additions
 - `gameState.player.poison` (0..), `opp.poison`; 10+ poison eliminates (engine checks in
   `isOpponentDead` / `checkCommanderBattleEnd`).
-- `gameState.player.handSize`, `gameState.player.librarySize` maintained by draw/discard/mill.
+- `gameState.player.librarySize` maintained by draw/mill. Your hand is not tracked (you track your paper hand; the AI assumes 7 cards).
+- `gameState.player.tokens`: your creatures entered as cards (`kind:"player-creature"`, optional
+  `commander`, `isToken`; plus `reanimated-creature`). `player.creatures` is the total; the
+  difference is untracked paper creatures. Helpers in `commander-turn.js`: `addPlayerCreatures`,
+  `duplicatePlayerCreature`, `removePlayerCreature`, `playerLoseCreatures` (untracked first),
+  `untapPlayerCreatures` (your draw step). Tracked attackers keep `attacking` until then;
+  `playerCreatureProfile(p, true)` leaves them out as blockers. Attack rows / CPU-attack blocks
+  carry the creature's `uid` / `blockerUid`.
 - `gameState.firstSeat` (`"player"` or an opponent id) chosen at random in
   `createCommanderBattle`; in a 1-CPU game the first player skips their first draw.
 - New `PLAYER_ACTIONS`: `bounce` (return permanents to hand; a bounced commander goes to

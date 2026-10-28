@@ -230,7 +230,7 @@ function showEnemyExile(){
 }
 
 /* ===== Dismissing popups =====
-   Clicking the dimmed backdrop or pressing Escape closes the TOPMOST popup — but only if it
+   Pressing Escape closes the TOPMOST popup (clicking the backdrop does not), but only if it
    can be dismissed. Each popup closes through its own cancel/close action so any pending
    promise still resolves. Not dismissible: the setup screen, victory/defeat, and prompts
    opened with askConfirm(..., {dismissible:false}). */

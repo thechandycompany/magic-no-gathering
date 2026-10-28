@@ -179,8 +179,10 @@ function resolveSingleBlock(attacker,blocker){
   return {attackerDies:attackerDies,blockerDies:blockerDies,trampleDamage:trampleDamage};
 }
 
+/** Tapped: attacked this turn cycle (unless it has vigilance) or tapped by an effect. */
+function isCreatureTapped(creature){return !!creature.tapped||(!!creature.attacking&&!hasKeyword(creature,"Vigilance"));}
 /** True when a creature is untapped and able to block (summoning sickness does NOT matter). */
-function canBlockCreature(creature){return !creature.attacking&&!creature.tapped;}
+function canBlockCreature(creature){return !isCreatureTapped(creature);}
 
 /**
  * Evaluate if an attacker would survive or trade favorably against the
@@ -270,23 +272,39 @@ function smartDeclareAttackers(opp, defenderTokens, options){
 
 /**
  * CPU blocking logic: defender assigns blockers strategically.
+ * attackerId (optional): who controls the attackers, for commander damage
+ * (defender.commanderDamageReceived[attackerId]).
+ * otherIncoming (optional): damage from attackers handled outside this call
+ * (e.g. flyers this defender can't block), counted toward lethal.
  * Returns an object with assignments array and unblocked attackers.
  *
  * Strategy:
  * - Block lethal threats (commander, big hitters) if we can trade favorably
- * - Chump-block (sacrifice a small creature) if life is critical
- * - Let small damage through to preserve board if life is healthy
- * - Never block if the blocker would die without killing the attacker AND life is safe
+ * - Block with any creature that survives the attacker (free damage prevention)
+ * - Chump-block (sacrifice a small creature) when the damage it saves is
+ *   worth more than the creature; the bar drops as life drops
+ * - Never let a lethal swing through: while the unblocked damage (or
+ *   commander damage) would kill, keep blocking with whatever is left
  */
-function cpuAssignBlockers(defender, attackers){
+function cpuAssignBlockers(defender, attackers, attackerId, otherIncoming){
   if(cpuCreaturesCannotBlock())return {assignments:[],unblocked:[].concat(attackers)};
-  // Summoning-sick creatures CAN block; creatures still tapped from attacking can't.
+  // Summoning-sick creatures CAN block; tapped creatures can't (vigilant attackers stay untapped).
   var available=(defender.tokens||[]).filter(canBlockCreature);
   var assignments=[]; // {attacker, blocker}
   var used=new Set();
+  var blockedSet=new Set();
   var defenderLife=defender.life;
+  var commanderLeft=21-(attackerId?((defender.commanderDamageReceived||{})[attackerId]||0):0);
 
-  // Total incoming if we block nothing
+  var damageOf=function(a){return (a.p||0)*combatStrikeCount(a);};
+  // Damage a block stops: all of it, or for a trampler only what the blocker's toughness soaks up.
+  var stoppedBy=function(a,b){return damageOf(a)-trampleExcess(a,b.t||0)*combatStrikeCount(a);};
+  var commanderLethal=function(a){return a.kind==="commander"&&damageOf(a)>=commanderLeft;};
+  // Damage still coming through if nothing else is blocked (drops as attackers are blocked).
+  var incoming=(otherIncoming||0)+attackers.reduce(function(s,a){return s+damageOf(a);},0);
+  var inDanger=function(){
+    return incoming>=defenderLife||attackers.some(function(a){return !blockedSet.has(a)&&commanderLethal(a);});
+  };
 
   // Sort attackers by threat: commander first, then by power descending
   var sorted=[].concat(attackers).sort(function(a,b){
@@ -295,68 +313,67 @@ function cpuAssignBlockers(defender, attackers){
     return b.p-a.p;
   });
 
+  var assign=function(attacker,blocker){
+    assignments.push({attacker:attacker,blocker:blocker});
+    used.add(blocker);blockedSet.add(attacker);
+    incoming-=stoppedBy(attacker,blocker);
+  };
+  var smallest=function(list){return list.sort(function(a,b){return (a.p+a.t)-(b.p+b.t);})[0];};
+  // A chump is worth it when it saves k damage per point of creature value: k = 1 at 15 life, up to 3 at 45.
+  var chumpRate=Math.max(1,Math.min(3,defenderLife/15));
+
   for(var i=0;i<sorted.length;i++){
     var attacker=sorted[i];
     // Find blockers that can kill this attacker, survive it, or do both.
-    var canKill=available.filter(function(b){return !used.has(b)&&combatDamageKills(b,attacker);});
-    var survives=available.filter(function(b){return !used.has(b)&&creatureSurvivesCombat(b,attacker);});
-    var perfectBlocks=available.filter(function(b){return !used.has(b)&&combatDamageKills(b,attacker)&&creatureSurvivesCombat(b,attacker);});
+    var open=available.filter(function(b){return !used.has(b);});
+    var canKill=open.filter(function(b){return combatDamageKills(b,attacker);});
+    var survives=open.filter(function(b){return creatureSurvivesCombat(b,attacker);});
+    var perfectBlocks=canKill.filter(function(b){return creatureSurvivesCombat(b,attacker);});
 
     // Priority 1: Perfect block (we kill their creature, ours lives)
-    if(perfectBlocks.length>0){
-      // Use the smallest perfect blocker (preserve big creatures for later)
-      var best=perfectBlocks.sort(function(a,b){return (a.p+a.t)-(b.p+b.t);})[0];
-      assignments.push({attacker:attacker,blocker:best});
-      used.add(best);
-      continue;
-    }
+    // Use the smallest perfect blocker (preserve big creatures for later)
+    if(perfectBlocks.length>0){assign(attacker,smallest(perfectBlocks));continue;}
 
     // Priority 2: Favorable trade (we both die, but their creature is more valuable)
     var favorableTrades=canKill.filter(function(b){return creatureCombatValue(attacker)>creatureCombatValue(b);});
-    if(favorableTrades.length>0){
-      var best2=favorableTrades.sort(function(a,b){return (a.p+a.t)-(b.p+b.t);})[0];
-      assignments.push({attacker:attacker,blocker:best2});
-      used.add(best2);
-      continue;
-    }
+    if(favorableTrades.length>0){assign(attacker,smallest(favorableTrades));continue;}
 
-    // Priority 3: Even trade - block commander or big threats to prevent damage
-    if(attacker.kind==="commander"||attacker.p>=5){
+    // Priority 3: Even trade against the commander, big threats, or once life is under 20
+    if(attacker.kind==="commander"||attacker.p>=4||defenderLife<=20){
       var evenTrades=canKill.filter(function(b){return creatureCombatValue(attacker)>=creatureCombatValue(b);});
-      if(evenTrades.length>0){
-        var best3=evenTrades.sort(function(a,b){return (a.p+a.t)-(b.p+b.t);})[0];
-        assignments.push({attacker:attacker,blocker:best3});
-        used.add(best3);
-        continue;
-      }
+      if(evenTrades.length>0){assign(attacker,smallest(evenTrades));continue;}
     }
 
-    // Priority 4: Chump block if life is critical (<=15) and attacker is big
-    if(defenderLife<=15&&attacker.p>=4){
-      var chumps=available.filter(function(b){return !used.has(b)&&b.kind!=="commander";}).sort(function(a,b){return (a.p+a.t)-(b.p+b.t);});
-      if(chumps.length>0){
-        assignments.push({attacker:attacker,blocker:chumps[0]});
-        used.add(chumps[0]);
-        continue;
-      }
-    }
+    // Priority 4: Free block - our creature survives, so stopping the damage costs nothing
+    if((attacker.p||0)>0&&survives.length>0){assign(attacker,smallest(survives));continue;}
 
-    // Priority 5: Block with a surviving creature to prevent damage (no trade)
-    // Only if this attacker's damage is significant relative to our life
-    if(attacker.p>=3&&defenderLife<=25&&survives.length>0){
-      var best4=survives.filter(function(b){return !used.has(b);}).sort(function(a,b){return (a.p+a.t)-(b.p+b.t);})[0];
-      if(best4){
-        assignments.push({attacker:attacker,blocker:best4});
-        used.add(best4);
-        continue;
-      }
+    // Priority 5: Chump block when it saves a lot of damage for a cheap creature,
+    // or stops lethal commander damage
+    var chumps=open.filter(function(b){return b.kind!=="commander";});
+    var chump=chumps.sort(function(a,b){return creatureCombatValue(a)-creatureCombatValue(b);})[0];
+    if(chump){
+      var saved=stoppedBy(attacker,chump);
+      if(commanderLethal(attacker)||(saved>=3&&saved>=creatureCombatValue(chump)*chumpRate)){assign(attacker,chump);continue;}
     }
 
     // Otherwise: let it through - we'd rather preserve our board than chump
   }
 
+  // Survival pass: never take a lethal hit with blockers still free. Block the
+  // most dangerous unblocked attacker with the creature that stops the most
+  // (cheapest first; the commander only as a last resort).
+  while(inDanger()){
+    var open2=available.filter(function(b){return !used.has(b);});
+    var threats=attackers.filter(function(a){return !blockedSet.has(a);});
+    if(!open2.length||!threats.length)break;
+    var threat=threats.sort(function(a,b){return (commanderLethal(b)-commanderLethal(a))||(damageOf(b)-damageOf(a));})[0];
+    var blocker=open2.sort(function(a,b){
+      return (stoppedBy(threat,b)-stoppedBy(threat,a))||((a.kind==="commander")-(b.kind==="commander"))||(creatureCombatValue(a)-creatureCombatValue(b));
+    })[0];
+    assign(threat,blocker);
+  }
+
   // Determine unblocked attackers
-  var blockedSet=new Set(assignments.map(function(a){return a.attacker;}));
   var unblocked=attackers.filter(function(a){return !blockedSet.has(a);});
 
   return {assignments:assignments, unblocked:unblocked};
@@ -367,7 +384,7 @@ function cpuAssignBlockers(defender, attackers){
  * Returns { damageToDefender, defenderCreaturesKilled[], attackerCreaturesKilled[], blocked[] }
  */
 function resolveCpuCombat(attackerOpp, defenderOpp, attackers){
-  var result=cpuAssignBlockers(defenderOpp,attackers);
+  var result=cpuAssignBlockers(defenderOpp,attackers,attackerOpp.id);
   var assignments=result.assignments;
   var unblocked=result.unblocked;
   var defenderCreaturesKilled=[];

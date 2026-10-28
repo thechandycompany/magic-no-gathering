@@ -359,7 +359,22 @@ function wireBoardControls(board,state){
     const opp=oppById(btn.dataset.oppId);if(!opp)return;
     opp[btn.dataset.oppStat]=Math.max(0,(opp[btn.dataset.oppStat]||0)+parseInt(btn.dataset.d,10));refreshBoard(state);};});
   board.querySelectorAll('[data-player-stat]').forEach(btn=>{btn.onclick=event=>{event.stopPropagation();
-    const key=btn.dataset.playerStat;state.player[key]=Math.max(0,(state.player[key]||0)+parseInt(btn.dataset.d,10));refreshBoard(state);};});
+    const key=btn.dataset.playerStat;
+    // The creature count never drops below your tracked creature cards (remove those with ✕).
+    const min=key==="creatures"?trackedPlayerCreatures(state.player).length:0;
+    state.player[key]=Math.max(min,(state.player[key]||0)+parseInt(btn.dataset.d,10));refreshBoard(state);
+    if(key==="creatures")refreshActivePanel();};});
+  board.querySelectorAll('[data-creature-add]').forEach(btn=>{btn.onclick=event=>{event.stopPropagation();addPlayerCreatureFlow();};});
+  board.querySelectorAll('[data-player-dup]').forEach(btn=>{btn.onclick=async event=>{event.stopPropagation();
+    const token=(state.player.tokens||[]).find(t=>t.uid===btn.dataset.playerDup);if(!token)return;
+    const n=await askCount(`Duplicate ${token.name}`,`How many more copies of <strong>${escapeHtml(token.name)}</strong> (${token.p}/${token.t})?`,1,1,99,"Add copies");
+    if(!n)return;
+    cmdSnapshot();duplicatePlayerCreature(state,token.uid,n);refreshBoard(state);refreshActivePanel();};});
+  board.querySelectorAll('[data-player-rm]').forEach(btn=>{btn.onclick=async event=>{event.stopPropagation();
+    const token=(state.player.tokens||[]).find(t=>t.uid===btn.dataset.playerRm);if(!token)return;
+    const destination=token.commander||token.isToken?"graveyard":await askCommanderRemovalDestination(token);
+    if(!destination)return;
+    cmdSnapshot();removePlayerCreature(state,token.uid,destination,destination==="exile"?"is exiled":"leaves the battlefield");refreshBoard(state);refreshActivePanel();};});
   board.querySelectorAll('[data-cmdr-from]').forEach(btn=>{btn.onclick=event=>{event.stopPropagation();
     const id=btn.dataset.cmdrFrom;state.player.commanderDamageReceived[id]=Math.max(0,(state.player.commanderDamageReceived[id]||0)+parseInt(btn.dataset.d,10));refreshBoard(state);};});
   board.querySelectorAll('[data-rm-uid]').forEach(btn=>{btn.onclick=event=>{event.stopPropagation();removeCpuTokenFromBoard(oppById(btn.dataset.opp),btn.dataset.rmUid);};});
@@ -404,14 +419,14 @@ function renderSingleView(state,board){
     opp.tokens.map(t=>{
       const kws=t.kws&&t.kws.length?t.kws.join(' · '):'';
       const tooltip=`${t.name}, ${t.p}/${t.t}${t.kws&&t.kws.length?' · '+t.kws.join(', '):''}${t.effect?'. '+t.effect:''}`;
-      return `<div class="card ${t.kind==='commander'?'commander':''} ${t.summoningSick?'sick':''} ${t.attacking||t.tapped?'tapped':''}" title="${escapeHtml(tooltip)}">
+      return `<div class="card ${t.kind==='commander'?'commander':''} ${t.summoningSick?'sick':''} ${isCreatureTapped(t)?'tapped':''}" title="${escapeHtml(tooltip)}">
       ${dead?"":`<button type="button" class="c-remove" data-opp="${opp.id}" data-rm-uid="${escapeHtml(t.uid)}" title="${t.kind==='commander'?`Return ${escapeHtml(t.name)} to the command zone`:`Remove ${escapeHtml(t.name)} from the battlefield`}" aria-label="Remove ${escapeHtml(t.name)}">✕<span class="c-remove-label"> Remove</span></button>`}
       <span class="c-name"><span>${t.name}</span><span class="mana">${t.kind==='commander'?'⚜':'🌲'}</span></span>
       <span class="c-art">${t.ico}</span>
       ${kws?`<span class="c-kw">${kws}</span>`:''}
       ${t.effect?`<span class="c-effect">${t.effect}</span>`:''}
       <span class="c-pt">${t.p}/${t.t}</span>
-      ${t.attacking?'<div class="c-atk">⚔️</div><div class="c-tapped-label">TAPPED</div>':''}${t.summoningSick?'<div class="c-sick">💤</div>':''}</div>`;
+      ${t.attacking?`<div class="c-atk">⚔️</div>${isCreatureTapped(t)?'<div class="c-tapped-label">TAPPED</div>':''}`:''}${t.summoningSick?'<div class="c-sick">💤</div>':''}</div>`;
     }).join('');
 
   const viewLabel=`${viewIdx+2}/${totalViews}`;
@@ -534,8 +549,10 @@ function renderPlayerBoardView(state,board,totalViews){
     return `<div class="cbs-item cbs-cmdr-dmg"><span class="cbs-label">${src?src.ico:'⚜'} Commander damage from ${src?nm(src):'?'}</span><div class="cbs-adj"><button type="button" class="cbs-btn" data-cmdr-from="${oppId}" data-d="-1">−</button><span class="cbs-val ${dmg>=14?'warn':''}">${dmg}/21</span><button type="button" class="cbs-btn" data-cmdr-from="${oppId}" data-d="1">+</button></div></div>`;
   }).join('');
 
-  const playerCreatureCards=(p.tokens||[]).filter(token=>token.kind==="reanimated-creature");
-  const playerTokensHtml=playerCreatureCards.length?playerCreatureCards.map(token=>`<div class="card voltron-creature reanimated" title="Reanimated from ${escapeHtml(token.owner)}"><span class="c-name"><span>${token.name}</span><span class="mana">↩</span></span><span class="c-art">${token.ico}</span>${token.kws?.length?`<span class="c-kw">${token.kws.join(" · ")}</span>`:""}${token.effect?`<span class="c-effect">${token.effect}</span>`:""}<span class="c-pt">${token.p}/${token.t}</span>${token.summoningSick?'<div class="c-sick">💤</div>':''}</div>`).join(""):`<div class="empty-field">${plural(p.creatures,"creature")} on your battlefield</div>`;
+  const playerCreatureCards=trackedPlayerCreatures(p);
+  const untracked=untrackedPlayerCreatures(p);
+  const playerTokensHtml=(playerCreatureCards.length?playerCreatureCards.map(token=>`<div class="card voltron-creature ${token.kind==="reanimated-creature"?"reanimated":""} ${token.commander?"commander":""} ${isCreatureTapped(token)?"tapped":""}" title="${escapeHtml(token.kind==="reanimated-creature"?`Reanimated from ${token.owner}`:token.name)}"><span class="c-name"><span>${escapeHtml(token.name)}</span><span class="mana">${token.kind==="reanimated-creature"?"↩":token.commander?"⚜":""}</span></span><span class="c-art">${escapeHtml(token.ico)}</span>${token.kws?.length?`<span class="c-kw">${escapeHtml(token.kws.join(" · "))}</span>`:""}${token.effect?`<span class="c-effect">${escapeHtml(token.effect)}</span>`:""}<span class="c-pt">${token.p}/${token.t}</span>${token.summoningSick?'<div class="c-sick">💤</div>':''}<button type="button" class="c-dup" data-player-dup="${escapeHtml(token.uid)}" title="Duplicate" aria-label="Duplicate ${escapeHtml(token.name)}">⧉</button><button type="button" class="c-remove" data-player-rm="${escapeHtml(token.uid)}" title="Remove ${escapeHtml(token.name)}" aria-label="Remove ${escapeHtml(token.name)}">✕</button></div>`).join(""):"")
+    +(untracked||!playerCreatureCards.length?`<div class="empty-field">${plural(untracked,playerCreatureCards.length?"other creature":"creature")} on your battlefield</div>`:"");
 
   const pws=p.planeswalkers||[];
   const pwHtml=pws.map(pw=>`<div class="card commander pw-card" title="${escapeHtml(pw.name)} · Loyalty ${pw.loyalty}"><span class="c-name"><span>${escapeHtml(pw.name)}</span><span class="mana">⬡</span></span><span class="c-art">⬡</span><span class="c-pt">${pw.loyalty}</span><button type="button" class="c-remove" data-pw-remove="${pw.id}" title="Remove ${escapeHtml(pw.name)} from the battlefield" aria-label="Remove ${escapeHtml(pw.name)}">✕<span class="c-remove-label"> Remove</span></button><div class="pw-adj"><button type="button" class="cbs-btn" data-pw-loyalty="${pw.id}" data-d="-1">−</button><button type="button" class="cbs-btn" data-pw-loyalty="${pw.id}" data-d="1">+</button></div></div>`).join("");
@@ -549,14 +566,13 @@ function renderPlayerBoardView(state,board,totalViews){
       ${stat("life","Life",p.life,p.life<=10)}
       ${cmdrDmgHtml}
       ${stat("creatures","Creatures",p.creatures,false)}
-      ${stat("handSize","Hand",p.handSize||0,(p.handSize||0)>7)}
       ${stat("librarySize","Library",p.librarySize||0,(p.librarySize||0)<=5)}
       ${stat("poison","Poison",p.poison||0,(p.poison||0)>=7)}
       <div class="cbs-item"><span class="cbs-label">Planeswalkers</span><span class="cbs-val">⬡ ${pws.length}</span></div>
       <div class="cbs-item"><span class="cbs-label">Graveyard</span><button type="button" class="cbs-zone-btn" data-graveyard-owner="player">⚰ ${p.graveyardCount}</button></div>
       <div class="cbs-item"><span class="cbs-label">Exile</span><button type="button" class="cbs-zone-btn" data-exile-owner="player">✦ ${p.exileCount}</button></div>
     </div></div>
-    <div class="field-col"><div class="field-h"><span class="lbl">Your battlefield</span><button class="btn-ghost" data-pw-add type="button">+ Planeswalker</button></div><div class="tokens">${pwHtml}${playerTokensHtml}</div></div></div></div>`;
+    <div class="field-col"><div class="field-h"><span class="lbl">Your battlefield</span><button class="btn-ghost" data-creature-add type="button">+ Creature</button><button class="btn-ghost" data-pw-add type="button">+ Planeswalker</button></div><div class="tokens">${pwHtml}${playerTokensHtml}</div></div></div></div>`;
 
   document.getElementById('prevOppBtn').onclick=()=>{state.viewTarget=state.opponents.length-1;renderBoardView(state);};
   document.getElementById('nextOppBtn').onclick=()=>{state.viewTarget=0;renderBoardView(state);};
@@ -589,7 +605,7 @@ function tableAnimClass(anim,keys,value){
 function animAttrs(a){return a&&a.cls?{cls:a.cls,style:`--tt-delay:-${a.delay}ms;`}:{cls:"",style:""};}
 // Same card, same state → same stack. The commander never stacks.
 function tableCardSignature(card){
-  return card.kind==="commander"?`uid:${card.uid}`:JSON.stringify([card.name,card.ico,card.kind,card.p,card.t,card.baseP,card.baseT,(card.kws||[]).join(","),card.effect||"",!!card.isToken,!!card.attacking,!!card.tapped,!!card.summoningSick]);
+  return card.kind==="commander"||card.commander?`uid:${card.uid}`:JSON.stringify([card.name,card.ico,card.kind,card.p,card.t,card.baseP,card.baseT,(card.kws||[]).join(","),card.effect||"",!!card.isToken,!!card.attacking,!!card.tapped,!!card.summoningSick]);
 }
 function groupTableCards(cards){
   const groups=new Map();
@@ -597,7 +613,7 @@ function groupTableCards(cards){
   return [...groups.values()];
 }
 function tableCardHtml(card,opts={}){
-  const tapped=!!(card.attacking||card.tapped);
+  const tapped=isCreatureTapped(card);
   const commander=card.kind==="commander";
   const count=opts.count||1;
   const hasStats=card.p!=null&&card.t!=null;
@@ -624,10 +640,13 @@ function tableCardHtml(card,opts={}){
 // Battlefield creatures, stacked; one remove button per stack takes the last copy.
 function tableCreaturesHtml(anim,ownerId,cards,opts={}){
   return groupTableCards(cards).map(group=>{
-    const card=group[0];const tapped=!!(card.attacking||card.tapped);
+    const card=group[0];const tapped=isCreatureTapped(card);
     const anim_=tableAnimClass(anim,group.map(c=>`${ownerId}|${c.uid}`),tapped);
     const gear=card.kind==="commander"?(opts.gear||[]).map((g,i)=>({...g,anim:tableAnimClass(anim,[`${ownerId}|gear|${g.name}|${i}`],true)})):[];
-    return tableCardHtml({...card,uid:group[group.length-1].uid},{count:group.length,anim:anim_,gear,className:opts.className,removeOpp:opts.removeOpp});
+    const uid=group[group.length-1].uid;
+    // Your creatures: ⧉ duplicate and ✕ remove (one copy) on the card.
+    const extraHtml=opts.player?`<button type="button" class="tt-dup" data-player-dup="${escapeHtml(uid)}" title="Duplicate" aria-label="Duplicate ${escapeHtml(card.name)}">⧉</button><button type="button" class="tt-remove" data-player-rm="${escapeHtml(uid)}" title="${group.length>1?"Remove one from the battlefield":"Remove from the battlefield"}" aria-label="Remove ${group.length>1?"one ":""}${escapeHtml(card.name)}">✕</button>`:"";
+    return tableCardHtml({...card,uid},{count:group.length,anim:anim_,gear,className:[opts.className,card.kind==="reanimated-creature"?"reanimated":"",card.commander?"commander":""].filter(Boolean).join(" "),removeOpp:opts.removeOpp,extraHtml});
   }).join("");
 }
 // Non-creature permanents without uids (loose gear, utility): stack by name.
@@ -684,17 +703,18 @@ function tablePlayerSeatHtml(state,anim){
   const p=state.player;
   const pws=(p.planeswalkers||[]).map(pw=>tableCardHtml({name:pw.name,ico:"⬡"},{className:"pw",stat:`◆${pw.loyalty}`,pwId:pw.id,anim:tableAnimClass(anim,[`player|${pw.id}`],true),
     extraHtml:`<div class="tt-pw-adj"><button type="button" class="step-btn" data-pw-loyalty="${pw.id}" data-d="-1" aria-label="Decrease ${escapeHtml(pw.name)} loyalty">−</button><button type="button" class="step-btn" data-pw-loyalty="${pw.id}" data-d="1" aria-label="Increase ${escapeHtml(pw.name)} loyalty">+</button></div>`})).join("");
-  const reanimated=tableCreaturesHtml(anim,"player",(p.tokens||[]).filter(t=>t.kind==="reanimated-creature"),{className:"reanimated"});
+  const tracked=trackedPlayerCreatures(p).slice().sort((a,b)=>(b.commander?1:0)-(a.commander?1:0));
+  const yourCreatures=tableCreaturesHtml(anim,"player",tracked,{player:true});
   const cmdrDmg=state.opponents.filter(o=>(p.commanderDamageReceived[o.id]||0)>0).map(o=>{const v=p.commanderDamageReceived[o.id];return stepHtml(`data-cmdr-from="${o.id}"`,`commander damage from ${nm(o)}`,`${v}/21`,{className:"tt-chip",ico:o.ico,warn:v>=14});}).join("");
   return `<div class="tt-seat tt-you ${state.phase==="player"?"is-active":""}" style="--seat:var(--gold)">
     <div class="tt-seat-h"><button type="button" class="tt-seat-name" data-view-target="-1" title="Open your detail view">🗡️ You</button>
       ${stepHtml('data-player-stat="life"',"your life",p.life,{className:"tt-life",ico:"♥",warn:p.life<=10})}
       ${stepHtml('data-player-stat="poison"',"your poison counters",p.poison||0,{className:"tt-chip",ico:"☣",warn:(p.poison||0)>=7})}${cmdrDmg}
-      ${stepHtml('data-player-stat="handSize"',"cards in your hand",p.handSize||0,{className:"tt-chip",ico:"🃏"})}
       ${state.phase==="player"?'<span class="tt-chip tt-turn">Your turn</span>':""}
+      <button type="button" class="btn-ghost tt-add" data-creature-add>+ Creature</button>
       <button type="button" class="btn-ghost tt-add" data-pw-add>+ Planeswalker</button></div>
-    <div class="tt-zone tt-creatures">${pws}${reanimated}
-      ${tablePile(anim,"player|creatures","♟","Creatures (paper)",p.creatures||0,{stepData:'data-player-stat="creatures"',title:"Creatures on your real table"})}
+    <div class="tt-zone tt-creatures">${pws}${yourCreatures}
+      ${tablePile(anim,"player|creatures","♟",tracked.length?"Other creatures":"Creatures (paper)",untrackedPlayerCreatures(p),{stepData:'data-player-stat="creatures"',title:"Creatures on your real table that you have not added as cards"})}
       <span class="tt-spacer"></span>
       ${tablePileHtml("📚","Library",p.librarySize||0,{className:"facedown",stepData:'data-player-stat="librarySize"'})}
       ${tablePile(anim,"player|gy","⚰","Graveyard",p.graveyardCount||0,{attrs:'data-graveyard-owner="player"',title:"View graveyard"})}
@@ -782,7 +802,7 @@ function openInputDialog({title,bodyHtml,okLabel="OK",cancelLabel="Cancel",hideO
   overlay.classList.add('show');
   return document.getElementById('inputBody');
 }
-/* Acknowledge-only notice (OK). Escape/backdrop also acknowledge. */
+/* Acknowledge-only notice (OK). Escape also acknowledges. */
 function showNotice(title,html){
   return new Promise(res=>{
     inputResolver=res;
@@ -811,24 +831,87 @@ function askCount(title,html,def,min=0,max=999,okLabel="Confirm"){
 }
 
 /**
- * Combat choice for an attacker aimed at you: blocked (survives), dies in
- * combat, or removed by a spell. Returns "blocked" | "dies" | "removed" | null.
+ * "Declare blockers" popup for a CPU attack on you: lists only the attacking
+ * creatures. For each one pick Unblocked / Block / Block & kill / Destroy /
+ * Exile; for tramplers, your blocker's toughness. With tracked creatures, an
+ * optional Blocker picker fills in the toughness and whether it dies
+ * (resolveSingleBlock). `initial` maps uid → {choice,
+ * blockerDies, toughness, blockerUid}.
+ * Resolves with that map (edited), or null when cancelled.
  */
-function askCommanderCombatChoice(token){
-  const p=token.p||0;
+const BLOCK_CHOICES=[
+  {id:"none",ico:"⚔",label:"Unblocked"},
+  {id:"block",ico:"🛡️",label:"Block"},
+  {id:"kill",ico:"💀",label:"Block & kill"},
+  {id:"destroy",ico:"☠",label:"Destroy"},
+  {id:"exile",ico:"✦",label:"Exile"}
+];
+function askCpuAttackBlocks(opp,result,attackers,initial,previewFn){
+  const picks=new Map(attackers.map(t=>[t.uid,Object.assign({choice:"none",blockerDies:false,toughness:2,blockerUid:null},initial.get(t.uid)||{})]));
+  const pw=cpuAttackPlaneswalker(result);
+  const yours=trackedPlayerCreatures(gameState.player).filter(canBlockCreature);
+  const yourCreature=uid=>yours.find(c=>c.uid===uid)||null;
+  // Identical copies get a number so each blocker is distinguishable.
+  const blockerLabel=c=>{
+    const same=yours.filter(o=>o.name===c.name&&o.p===c.p&&o.t===c.t);
+    return `${c.name} ${c.p}/${c.t}${same.length>1?` #${same.indexOf(c)+1}`:""}`;
+  };
+  const canBlockAttacker=(blocker,attacker)=>!hasKeyword(attacker,"Flying")||hasKeyword(blocker,"Flying")||hasKeyword(blocker,"Reach");
+  // Picking your blocker works out the block: who dies, and how much tramples over.
+  const applyBlocker=(attacker,pick)=>{
+    const blocker=yourCreature(pick.blockerUid);
+    if(!blocker){pick.blockerUid=null;return;}
+    const outcome=resolveSingleBlock(attacker,blocker);
+    pick.choice=outcome.attackerDies?"kill":"block";
+    pick.blockerDies=outcome.blockerDies;
+    pick.toughness=blocker.t||0;
+  };
   return new Promise(res=>{
     inputResolver=res;
-    openInputDialog({title:`${token.name} (${p}/${token.t||0})`,hideOk:true,bodyHtml:`<div class="combat-choice-body">
-      ${cardReferenceListHtml([token],"modal-card-list")}
-      <div class="combat-choice-btns">
-        <button type="button" class="combat-choice-btn choice-blocked" id="choiceBlocked"><span class="choice-ico">🛡️</span><span class="choice-label">Blocked</span><span class="choice-desc">${hasKeyword(token,"Trample")?"Trample damage may still get through":`Stops ${p} damage · creature survives`}</span></button>
-        <button type="button" class="combat-choice-btn choice-dies" id="choiceDies"><span class="choice-ico">💀</span><span class="choice-label">Dies in combat</span><span class="choice-desc">Your blocker destroys it</span></button>
-        <button type="button" class="combat-choice-btn choice-removed" id="choiceRemoved"><span class="choice-ico">✦</span><span class="choice-label">Removed by a spell</span><span class="choice-desc">Destroyed or exiled before damage</span></button>
-      </div></div>`});
+    const body=openInputDialog({title:`${opp.ico} ${nm(opp)} attacks ${pw?`⬡ ${pw.name}`:"you"}`,okLabel:"Confirm blocks",cancelLabel:"Back",bodyHtml:""});
+    const render=()=>{
+      const rows=attackers.map(t=>{
+        const pick=picks.get(t.uid);
+        const blocked=pick.choice==="block"||pick.choice==="kill";
+        const choices=BLOCK_CHOICES.filter(c=>!(t.kind==="commander"&&c.id==="exile")).map(c=>{
+          const label=t.kind==="commander"&&c.id==="destroy"?"Remove":c.label;
+          return `<button type="button" class="block-choice choice-${c.id}${pick.choice===c.id?" active":""}" data-block-uid="${escapeHtml(t.uid)}" data-block-choice="${c.id}" aria-pressed="${pick.choice===c.id}"><span aria-hidden="true">${c.ico}</span> ${label}</button>`;
+        }).join("");
+        const taken=new Set([...picks.entries()].filter(([uid,p])=>uid!==t.uid&&p.blockerUid).map(([,p])=>p.blockerUid));
+        const options=yours.filter(c=>!taken.has(c.uid)&&canBlockAttacker(c,t));
+        const blockerSelect=options.length||pick.blockerUid?`<label class="block-blocker">Blocker<select data-blocker-for="${escapeHtml(t.uid)}">
+            <option value="">${blocked?"A creature not added as a card":"Choose…"}</option>
+            ${options.map(c=>`<option value="${escapeHtml(c.uid)}" ${pick.blockerUid===c.uid?"selected":""}>${escapeHtml(blockerLabel(c))}</option>`).join("")}</select></label>`:"";
+        const extra=blocked||blockerSelect?`<div class="block-row-extra">${blockerSelect}
+            ${blocked&&!pick.blockerUid&&hasKeyword(t,"Trample")?`<div class="inline-stepper block-toughness" data-toughness-uid="${escapeHtml(t.uid)}"><label>Blocker toughness (trample)</label><button type="button" data-step-delta="-1" aria-label="Decrease blocker toughness">−</button><input type="number" min="0" max="99" value="${pick.toughness}" aria-label="Blocker toughness"><button type="button" data-step-delta="1" aria-label="Increase blocker toughness">+</button></div>`:""}
+          </div>`:"";
+        return `<div class="block-row is-${pick.choice}">
+          <div class="block-row-card">${cardReferenceHtml(t)}<span class="block-row-pt">${(t.p||0)*combatStrikeCount(t)} dmg</span></div>
+          <div class="block-choices" role="group" aria-label="${escapeHtml(t.name)}">${choices}</div>${extra}</div>`;
+      }).join("");
+      body.innerHTML=`<div class="block-dialog"><p class="confirm-msg">Choose what happens to each attacker. Unblocked attackers deal their damage.</p>
+        <div class="block-rows">${rows}</div><div class="block-summary">${escapeHtml(previewFn(picks))}</div></div>`;
+      body.querySelectorAll('[data-block-choice]').forEach(btn=>{btn.onclick=()=>{
+        const pick=picks.get(btn.dataset.blockUid);pick.choice=btn.dataset.blockChoice;
+        if(pick.choice!=="block"&&pick.choice!=="kill")pick.blockerUid=null;
+        render();
+      };});
+      body.querySelectorAll('[data-blocker-for]').forEach(sel=>{sel.onchange=()=>{
+        const attacker=attackers.find(a=>a.uid===sel.dataset.blockerFor);const pick=picks.get(sel.dataset.blockerFor);
+        pick.blockerUid=sel.value||null;
+        if(pick.blockerUid)applyBlocker(attacker,pick);else{pick.blockerDies=false;if(pick.choice==="none")pick.choice="block";}
+        render();
+      };});
+      body.querySelectorAll('[data-toughness-uid]').forEach(stepper=>{
+        const pick=picks.get(stepper.dataset.toughnessUid);const inp=stepper.querySelector('input');
+        const set=v=>{pick.toughness=Math.max(0,Math.min(99,isNaN(v)?0:v));inp.value=pick.toughness;body.querySelector('.block-summary').textContent=previewFn(picks);};
+        stepper.querySelectorAll('[data-step-delta]').forEach(b=>{b.onclick=()=>set((parseInt(inp.value)||0)+parseInt(b.dataset.stepDelta));});
+        inp.onchange=()=>set(parseInt(inp.value));
+      });
+    };
+    render();
+    document.getElementById('inputOk').onclick=()=>{closeInput();res(picks);};
     document.getElementById('inputCancel').onclick=()=>{closeInput();res(null);};
-    document.getElementById('choiceBlocked').onclick=()=>{closeInput();res("blocked");};
-    document.getElementById('choiceDies').onclick=()=>{closeInput();res("dies");};
-    document.getElementById('choiceRemoved').onclick=()=>{closeInput();res("removed");};
   });
 }
 /** Removal destination popup. Returns "graveyard" | "exile" | null. */
@@ -856,6 +939,59 @@ function askPlaneswalkerName(){
     document.getElementById('inputCancel').onclick=()=>{closeInput();res(null);};
     setTimeout(()=>document.getElementById('pwNameInput')?.focus(),60);
   });
+}
+/**
+ * "Add creature" popup: name, P/T, keywords, commander / token, and how many
+ * copies to put onto your battlefield. Resolves {spec, count} or null.
+ */
+function askPlayerCreature(){
+  const p=gameState.player;
+  const canCommander=!playerCommanderCreature(p);
+  const spec={name:"",p:2,t:2,kws:[],commander:false,isToken:false};
+  let count=1;
+  return new Promise(res=>{
+    inputResolver=res;
+    const num=(id,label,value)=>`<div class="inline-stepper" data-num="${id}"><label>${label}</label><button type="button" data-step-delta="-1" aria-label="Decrease ${label}">−</button><input type="number" min="0" max="99" value="${value}" aria-label="${label}"><button type="button" data-step-delta="1" aria-label="Increase ${label}">+</button></div>`;
+    const body=openInputDialog({title:"Add creature to your battlefield",okLabel:"Add",bodyHtml:`<div class="creature-dialog">
+      <label class="cmd-text-field">Name<input type="text" id="creatureName" placeholder="e.g. Llanowar Elves" maxlength="60"></label>
+      <div class="creature-dialog-row">${num("p","Power",spec.p)}${num("t","Toughness",spec.t)}${num("count","Copies",count)}</div>
+      <div class="kw-chips">${PLAYER_CREATURE_KEYWORDS.map(kw=>`<button type="button" class="kw-chip" data-kw="${kw}" aria-pressed="false">${kw}</button>`).join("")}</div>
+      <div class="creature-dialog-row">${canCommander?`<label class="block-check"><input type="checkbox" id="creatureCommander"> Your commander</label>`:""}<label class="block-check"><input type="checkbox" id="creatureToken"> Token</label></div>
+      </div>`});
+    body.querySelectorAll('[data-num]').forEach(stepper=>{
+      const field=stepper.dataset.num;const inp=stepper.querySelector('input');
+      const min=field==="count"?1:0;
+      const set=v=>{v=Math.max(min,Math.min(99,isNaN(v)?min:v));inp.value=v;if(field==="count")count=v;else spec[field]=v;};
+      stepper.querySelectorAll('[data-step-delta]').forEach(b=>{b.onclick=()=>set((parseInt(inp.value,10)||0)+parseInt(b.dataset.stepDelta,10));});
+      inp.onchange=()=>set(parseInt(inp.value,10));
+    });
+    body.querySelectorAll('.kw-chip').forEach(chip=>{chip.onclick=()=>{
+      const kw=chip.dataset.kw;const on=!spec.kws.includes(kw);
+      spec.kws=on?[...spec.kws,kw]:spec.kws.filter(k=>k!==kw);
+      chip.classList.toggle('active',on);chip.setAttribute('aria-pressed',on);
+    };});
+    const nameInput=document.getElementById('creatureName');
+    const done=()=>{
+      spec.name=nameInput.value.trim();
+      spec.commander=!!document.getElementById('creatureCommander')?.checked;
+      spec.isToken=!!document.getElementById('creatureToken')?.checked;
+      if(spec.commander)count=1;
+      closeInput();res({spec,count});
+    };
+    nameInput.onkeydown=e=>{if(e.key==="Enter"){e.preventDefault();done();}};
+    document.getElementById('inputOk').onclick=done;
+    document.getElementById('inputCancel').onclick=()=>{closeInput();res(null);};
+    setTimeout(()=>nameInput.focus(),60);
+  });
+}
+/* Add-creature flow shared by the board and the main phase. */
+async function addPlayerCreatureFlow(onDone){
+  const picked=await askPlayerCreature();
+  if(!picked)return;
+  cmdSnapshot();
+  addPlayerCreatures(gameState,picked.spec,picked.count);
+  saveState();renderBoardView(gameState);renderLifeHud(gameState);
+  if(onDone)onDone();else refreshActivePanel();
 }
 function askPlaneswalkerLoyalty(){return askCount("Starting Loyalty","",4,1,99,"Add");}
 
@@ -1107,6 +1243,11 @@ function beginCpuTurn(opp){
   responseDraft=null;commanderEffectDraft=null;
   if(isOpponentDead(opp)){finishCpuTurn(opp,false);return;}
   saveState();
+  // Nothing to counter or answer (land, draw…): go straight on. Its actions still show in
+  // the combat window and in your turn recap.
+  const result=gameState.activeResult;
+  // Deferred a tick: this can run inside the previous window's continue (transitioning).
+  if(!counterableCpuActions(result).length&&!pendingPlayerRemovalActions(result).length){const seq=++windowSeq;setTimeout(()=>continueCpuWindow(seq),0);return;}
   showCpuWindow();
 }
 function logCpuActions(opp,actions){
@@ -1225,6 +1366,80 @@ function showCpuWindow(){
     return;
   }
   renderCpuWindowForm();
+  // An attack on you opens the blockers popup once per window.
+  const draft=responseDraft;
+  if(cpuAttacksPlayer(result)&&!draft.blocksPrompted){draft.blocksPrompted=true;openBlockersDialog(opp,result);}
+}
+function cpuAttacksPlayer(result){return !!result&&result.stage==="combat"&&result.target==="player"&&result.attackPower>0;}
+/* The blockers popup's picks, read from / written to the response draft. */
+function blockPicksFromDraft(draft,attackers){
+  const picks=new Map();
+  attackers.forEach(t=>{
+    const removal=draft.removals.get(t.uid),block=draft.blocks.get(t.uid);
+    if(removal)picks.set(t.uid,{choice:removal.destination==="exile"?"exile":"destroy"});
+    else if(block)picks.set(t.uid,{choice:draft.combatDeaths.has(t.uid)?"kill":"block",blockerDies:!!block.blockerDies,toughness:block.blockerToughness??2,blockerUid:block.blockerUid||null});
+    else if(draft.combatDeaths.has(t.uid))picks.set(t.uid,{choice:"kill"});
+  });
+  return picks;
+}
+function blockEntry(token,uid,pick){
+  return {uid,blockerToughness:token&&hasKeyword(token,"Trample")?pick.toughness:null,blockerDies:!!pick.blockerDies,blockerUid:pick.blockerUid||null};
+}
+function responseWithPicks(opp,result,picks){
+  const r=Object.assign(buildCpuResponse(opp,result),{damageToPlayer:null,commanderDamageToPlayer:null,damageToPW:null});
+  const uids=new Set(picks.keys());
+  r.removals=r.removals.filter(x=>!uids.has(x.uid));
+  r.blocks=r.blocks.filter(b=>!uids.has(b.uid));
+  r.combatDeaths=r.combatDeaths.filter(uid=>!uids.has(uid));
+  picks.forEach((pick,uid)=>{
+    const token=findTokenByUid(opp,uid);
+    if(pick.choice==="destroy"||pick.choice==="exile")r.removals.push({ownerId:opp.id,uid,destination:pick.choice==="exile"?"exile":"graveyard",checked:true});
+    if(pick.choice==="block"||pick.choice==="kill")r.blocks.push(blockEntry(token,uid,pick));
+    if(pick.choice==="kill")r.combatDeaths.push(uid);
+  });
+  return r;
+}
+function blockPreviewText(opp,result,picks){
+  const attack=previewCpuResponse(opp,result,responseWithPicks(opp,result,picks)).attack;
+  if(!attack)return "";
+  const parts=[];
+  if(attack.pwDamage)parts.push(`⬡ ${attack.planeswalker?attack.planeswalker.name:"Planeswalker"} takes ${attack.pwDamage}`);
+  if(attack.playerDamage||!attack.pwDamage)parts.push(`You take ${attack.playerDamage}${attack.commanderDamage?` (${attack.commanderDamage} commander)`:""}`);
+  if(attack.prevented)parts.push(`${attack.prevented} prevented`);
+  return parts.join(" · ");
+}
+async function openBlockersDialog(opp,result){
+  const seq=windowSeq;
+  const draft=responseDraft;
+  const attackers=opp.tokens.filter(t=>t.attacking);
+  if(!draft||!attackers.length)return;
+  const picks=await askCpuAttackBlocks(opp,result,attackers,blockPicksFromDraft(draft,attackers),p=>blockPreviewText(opp,result,p));
+  if(!picks||seq!==windowSeq||draft!==responseDraft)return;
+  const answered=[];
+  let snapshotTaken=false;
+  picks.forEach((pick,uid)=>{
+    const prior=draft.removals.get(uid);
+    draft.blocks.delete(uid);draft.combatDeaths.delete(uid);
+    if(pick.choice==="destroy"||pick.choice==="exile"){
+      const destination=pick.choice==="exile"?"exile":"graveyard";
+      if(prior){prior.destination=destination;return;}
+      // The CPU may answer your removal (protection spell) before it resolves.
+      if(!snapshotTaken){cmdSnapshot();snapshotTaken=true;}
+      const response=cpuProtectAgainstRemoval(opp,uid);
+      if(response){answered.push(response.label);return;}
+      draft.removals.set(uid,{ownerId:opp.id,uid,destination,checked:true});
+      return;
+    }
+    draft.removals.delete(uid);
+    const token=findTokenByUid(opp,uid);
+    if(pick.choice==="block"||pick.choice==="kill")draft.blocks.set(uid,blockEntry(token,uid,pick));
+    if(pick.choice==="kill")draft.combatDeaths.add(uid);
+  });
+  // Tracked blockers that die are removed by uid; other deaths go in "Your creatures that died".
+  draft.overrides={};
+  if(snapshotTaken)saveState();
+  renderBoardView(gameState);renderLifeHud(gameState);renderCpuWindowForm();
+  if(answered.length)await showNotice("Removal answered",`<strong>${answered.map(escapeHtml).join("<br>")}</strong>.<br><br>Your removal has no effect.`);
 }
 async function runPlayerRemovalPrompts(opp,result,pending,seq){
   for(const entry of pending){
@@ -1355,13 +1570,19 @@ function renderCpuWindowForm(){
       `<div class="counter-chips">${counterables.map(({action,key})=>`<button type="button" class="counter-chip${draft.counters.has(key)?" active":""}" data-counter-key="${escapeHtml(key)}" aria-pressed="${draft.counters.has(key)}">${escapeHtml(action.label)}</button>`).join("")}</div>`,
       "response-counter");
   }
-  let removeBody=ownerGroupHtml(opp,opp.tokens,draft,defender?"attacker":"",attackerUids);
-  if(defender&&!isOpponentDead(defender))removeBody+=ownerGroupHtml(defender,defender.tokens,draft,"defender",attackerUids);
-  if(removeBody){
-    const hint=attacksPlayer?"Select an attacker to mark it blocked, dead, or removed. Select any other creature you removed."
-      :defender?`${oppName} is attacking ${nm(defender)}. Select any creature you removed before combat damage.`
-      :"Select any creature you removed at instant speed.";
-    html+=responseStepHtml(stepNo++,"remove",attacksPlayer?"Block or remove creatures":"Remove creatures",hint,removeBody,"precombat-removal");
+  if(attacksPlayer){
+    const attackers=opp.tokens.filter(t=>t.attacking);
+    const body=`<div class="kill-select">${attackers.map(t=>tokenChoiceHtml(opp,t,draft,true)).join("")}</div>
+      <div class="attack-builder-actions"><button type="button" class="target-btn" id="declareBlockersBtn">🛡 Declare blockers</button></div>`;
+    html+=responseStepHtml(stepNo++,"remove","Block or remove attackers","Select an attacker, or open Declare blockers, to block it, kill it, or remove it.",body,"precombat-removal");
+  }else{
+    let removeBody=ownerGroupHtml(opp,opp.tokens,draft,defender?"attacker":"",attackerUids);
+    if(defender&&!isOpponentDead(defender))removeBody+=ownerGroupHtml(defender,defender.tokens,draft,"defender",attackerUids);
+    if(removeBody){
+      const hint=defender?`${oppName} is attacking ${nm(defender)}. Select any creature you removed before combat damage.`
+        :"Select any creature you removed at instant speed.";
+      html+=responseStepHtml(stepNo++,"remove","Remove creatures",hint,removeBody,"precombat-removal");
+    }
   }
   if(attacksPlayer){
     const raw=computeCpuAttackOnPlayer(opp,result,Object.assign(buildCpuResponse(opp,result),{damageToPlayer:null,commanderDamageToPlayer:null,damageToPW:null}));
@@ -1380,17 +1601,22 @@ function renderCpuWindowForm(){
   }
   if(stepNo===1)html+=`<div class="context-summary"><span class="context-summary-icon">✓</span><div><strong>No response needed</strong><span>${oppName} made no plays you can respond to.</span></div></div>`;
 
-  html+=`<div class="context-section response-extras"><div class="context-section-title">Your instant-speed responses</div>
+  // Rarely needed, so folded away; opens by itself once something is entered.
+  const extrasUsed=draft.flashCreatures||draft.lifeGained||draft.instantDamage;
+  html+=`<details class="context-disclosure response-extras"${draft.extrasOpen||extrasUsed?" open":""}><summary><span>Instant-speed responses</span><small>${extrasUsed?"Set":"Optional"}</small></summary><div class="context-disclosure-body">
     <div class="commander-player-actions">
       ${stepperHtml("flashCreatures","Creatures you flashed in",draft.flashCreatures)}
       ${stepperHtml("lifeGained","Life you gained",draft.lifeGained)}
       ${stepperHtml("instantDamage","Damage you dealt",draft.instantDamage)}
-      ${instantTargetsHtml(draft)}
-    </div></div>`;
+      ${draft.instantDamage>0?instantTargetsHtml(draft):""}
+    </div></div></details>`;
   html+='<div id="cpuResponsePlayerAction"></div></div>';
   panel.innerHTML=html;
 
-  wireDraftSteppers(panel.querySelector('.response-extras'),draft);
+  const extras=panel.querySelector('.response-extras');
+  extras.addEventListener('toggle',()=>{draft.extrasOpen=extras.open;});
+  // The damage target only appears once you deal damage.
+  wireDraftSteppers(extras,draft,field=>{if(field==="instantDamage"&&(draft.instantDamage>0)!==!!extras.querySelector('.instant-target-row'))renderCpuWindowForm();});
   const damageStep=panel.querySelector('.response-step[data-step="damage"]');
   if(damageStep){
     damageStep.querySelectorAll('.inline-stepper[data-field]').forEach(stepper=>{
@@ -1407,8 +1633,9 @@ function renderCpuWindowForm(){
   panel.querySelectorAll('[data-instant-target]').forEach(btn=>{btn.onclick=()=>{draft.instantTarget=btn.dataset.instantTarget;renderCpuWindowForm();};});
   panel.querySelectorAll('[data-counter-key]').forEach(chip=>{chip.onclick=()=>toggleCounter(chip.dataset.counterKey);});
   panel.querySelectorAll('.kill-btn[data-uid]').forEach(btn=>{
-    btn.onclick=()=>selectResponseToken(oppById(btn.dataset.owner),btn.dataset.uid,attacksPlayer&&attackerUids.has(btn.dataset.uid));
+    btn.onclick=()=>attacksPlayer?openBlockersDialog(opp,result):selectResponseToken(oppById(btn.dataset.owner),btn.dataset.uid);
   });
+  panel.querySelector('#declareBlockersBtn')?.addEventListener('click',()=>openBlockersDialog(opp,result));
   renderPlayerActionPanel(panel.querySelector('#cpuResponsePlayerAction'),{
     contextKey:`cpu:${responseDraft.key}`,
     help:"Resolve an instant-speed action, then continue the opponent's turn.",
@@ -1420,7 +1647,7 @@ function renderCpuWindowForm(){
   stepStatusFn=()=>{
     const r=buildCpuResponse(opp,result);
     setStepStatus(panel,"counter",r.counters.length?`${r.counters.length} countered`:"",r.counters.length>0);
-    const removed=r.removals.length+r.combatDeaths.length;
+    const removed=r.removals.length+r.combatDeaths.filter(uid=>!r.blocks.some(b=>b.uid===uid)).length;
     setStepStatus(panel,"remove",joinPreview([removed&&`${removed} removed`,r.blocks.length&&`${r.blocks.length} blocked`]),removed+r.blocks.length>0);
     if(attacksPlayer){
       const preview=previewCpuResponse(opp,result,r).attack;
@@ -1445,8 +1672,8 @@ function cpuWindowPreviewText(opp,result){
   if(p.instantDamage){const t=r.instantDamage[0];parts.push(`Deal ${p.instantDamage} to ${t.targetId==="player"?"you":getTargetName(gameState,t.targetId)}`);}
   return joinPreview(parts);
 }
-/* Select / deselect a creature in the response form. */
-async function selectResponseToken(owner,uid,isAttackerOnYou){
+/* Select / deselect a creature to remove in the response form (attacks on you use openBlockersDialog). */
+async function selectResponseToken(owner,uid){
   if(!owner||!responseDraft)return;
   const draft=responseDraft;
   const token=findTokenByUid(owner,uid);
@@ -1455,30 +1682,17 @@ async function selectResponseToken(owner,uid,isAttackerOnYou){
     draft.removals.delete(uid);draft.blocks.delete(uid);draft.combatDeaths.delete(uid);
     draft.overrides={};renderCpuWindowForm();return;
   }
-  let choice="removed";
-  if(isAttackerOnYou){choice=await askCommanderCombatChoice(token);if(!choice)return;}
-  if(choice==="blocked"){
-    let blockerToughness=null;
-    if(hasKeyword(token,"Trample")){
-      blockerToughness=await askCount(`Blocking ${nm(token)}`,`<strong>${escapeHtml(token.name)}</strong> has trample (${token.p} power). Enter your blocker's toughness; excess damage tramples over to you.`,2,0,99);
-      if(blockerToughness==null)return;
-    }
-    draft.blocks.set(uid,{uid,blockerToughness});
-  }else if(choice==="dies"){
-    draft.combatDeaths.add(uid);
-  }else{
-    const destination=token.kind==="commander"?"graveyard":await askCommanderRemovalDestination(token);
-    if(!destination)return;
-    cmdSnapshot();
-    const response=cpuProtectAgainstRemoval(owner,uid);
-    saveState();
-    if(response){
-      renderBoardView(gameState);renderLifeHud(gameState);renderCpuWindowForm();
-      await showNotice("Removal answered",`<strong>${escapeHtml(response.label)}</strong>.<br><br>Your removal has no effect.`);
-      return;
-    }
-    draft.removals.set(uid,{ownerId:owner.id,uid,destination,checked:true});
+  const destination=token.kind==="commander"?"graveyard":await askCommanderRemovalDestination(token);
+  if(!destination)return;
+  cmdSnapshot();
+  const response=cpuProtectAgainstRemoval(owner,uid);
+  saveState();
+  if(response){
+    renderBoardView(gameState);renderLifeHud(gameState);renderCpuWindowForm();
+    await showNotice("Removal answered",`<strong>${escapeHtml(response.label)}</strong>.<br><br>Your removal has no effect.`);
+    return;
   }
+  draft.removals.set(uid,{ownerId:owner.id,uid,destination,checked:true});
   draft.overrides={};
   renderCpuWindowForm();
 }
@@ -1695,21 +1909,27 @@ function wireBattlefieldRulesPanel(panel,rerender){
    PLAYER PHASE — Draw → Main Phase → Combat → Main Phase 2 / End
    gameState.playerStep is saved after every step.
    ===================================================================== */
-let playerDraft=null;   // {key, creaturesPlayed, cardsPlayed, lifeGained}
+let playerDraft=null;   // {key, creaturesPlayed, lifeGained}
 let attackDraft=null;   // {key, mode:"builder"|"review"|"manual", rows, outcome, manual}
 function playerStepDraft(){
   const key=`${gameState.turn}:${gameState.playerStep}`;
-  if(!playerDraft||playerDraft.key!==key)playerDraft={key,creaturesPlayed:0,cardsPlayed:0,lifeGained:0};
+  if(!playerDraft||playerDraft.key!==key)playerDraft={key,creaturesPlayed:0,lifeGained:0};
   return playerDraft;
 }
 
 function startPlayerPhase(){
   gameState.phase="player";
-  gameState.playerStep="draw";
   gameState.activeOppId=null;gameState.activeResult=null;gameState.responseStage=null;
   playerDraft=null;attackDraft=null;commanderEffectDraft=null;
+  autoDrawStep();
   saveState();
   showPlayerStep();
+}
+/* Untap + draw happen automatically; Main Phase shows what you drew (gameState.turnDraw). */
+function autoDrawStep(){
+  const drawn=playerDrawStep(gameState);
+  gameState.turnDraw={turn:gameState.turn,skipped:!!drawn.skipped,empty:!!drawn.empty};
+  gameState.playerStep="main1";
 }
 function showPlayerStep(){
   windowSeq++;
@@ -1725,7 +1945,7 @@ function renderPlayerStepPanel(){
     case "main1": showMainStep(); break;
     case "combat": showCombatStep(); break;
     case "end": showMainTwoStep(); break;
-    default: showDrawStep();
+    default: autoDrawStep();saveState();showMainStep(); // saves from before the automatic draw
   }
 }
 function setPlayerStepHeader(stepLabel,instructions,responseTitle){
@@ -1751,52 +1971,47 @@ function goToPlayerStep(next,apply){
   showPlayerStep();
 }
 
-/* --- DRAW STEP --- */
-function showDrawStep(){
+/* --- START OF TURN: recap + the automatic draw, shown above Main Phase 1 --- */
+function turnStartHtml(){
+  const d=gameState.turnDraw;
+  if(!d||d.turn!==gameState.turn)return "";
   const p=gameState.player;
-  const skip=playerSkipsFirstDraw(gameState);
-  setPlayerStepHeader("Draw Step",skip?"Untap and resolve upkeep triggers. You skip your first draw.":"Untap your permanents, resolve upkeep triggers, then draw a card.","Upkeep & Draw");
-  const panel=document.getElementById('respGrid');
-  const recapHtml=recapEnabled()?buildRecapHtml():"";
-  panel.innerHTML=`<div class="context-form commander-form">${recapHtml}
-    <div class="context-summary draw-summary"><span class="context-summary-icon">🃏</span><div><strong>${skip?"No draw this turn":"Draw for the turn"}</strong><span>${skip?"The first player in a two-player game skips the first draw.":`Hand ${p.handSize||0} → ${(p.handSize||0)+1} · Library ${p.librarySize||0} → ${Math.max(0,(p.librarySize||0)-1)}`}</span></div></div>
-  </div>`;
-  const openLogBtn=panel.querySelector('#recapOpenLog');
-  if(openLogBtn&&typeof openLog==="function")openLogBtn.onclick=openLog;
-  setConfirmButton(skip?"Continue to Main Phase ▸":"I Drew a Card ▸","",()=>goToPlayerStep("main1",()=>playerDrawStep(gameState)),true);
+  const drawText=d.skipped?"You skip your first draw (first player in a two-player game).":d.empty?"Your library is empty. You could not draw.":`Untap and draw for the turn. Library ${p.librarySize||0}.`;
+  return `${recapEnabled()?buildRecapHtml():""}<div class="context-summary draw-summary"><span class="context-summary-icon">🃏</span><div><strong>${d.skipped?"No draw this turn":"You drew a card"}</strong><span>${drawText}</span></div></div>`;
 }
 
 /* --- MAIN PHASES --- */
-function mainStepPanelHtml(draft,extraHtml){
-  return `<div class="context-form commander-form"><div class="context-section"><div class="commander-player-actions">
-    ${stepperHtml("creaturesPlayed","Creatures you played",draft.creaturesPlayed)}
-    ${stepperHtml("cardsPlayed","Cards played from hand",draft.cardsPlayed,gameState.player.handSize||0)}
+function mainStepPanelHtml(draft,extraHtml,topHtml){
+  return `<div class="context-form commander-form">${topHtml||""}<div class="context-section"><div class="attack-builder-actions"><button type="button" class="target-btn" id="mainAddCreatureBtn">+ Creature you played</button></div><div class="commander-player-actions">
     ${stepperHtml("lifeGained","Life you gained",draft.lifeGained)}
   </div>${extraHtml||""}</div>${buildBattlefieldRulesPanel()}<div id="mainPlayerAction"></div></div>`;
 }
 function mainStepPreview(draft){
-  return joinPreview([draft.creaturesPlayed>0&&`+${plural(draft.creaturesPlayed,"creature")}`,draft.cardsPlayed>0&&`−${plural(draft.cardsPlayed,"card")} in hand`,draft.lifeGained>0&&`+${draft.lifeGained} life`]);
+  return joinPreview([draft.creaturesPlayed>0&&`+${plural(draft.creaturesPlayed,"creature")}`,draft.lifeGained>0&&`+${draft.lifeGained} life`]);
 }
-function renderMainPanel(rerender,extraHtml){
+function renderMainPanel(rerender,extraHtml,topHtml){
   const draft=playerStepDraft();
   const panel=document.getElementById('respGrid');
-  panel.innerHTML=mainStepPanelHtml(draft,extraHtml);
+  panel.innerHTML=mainStepPanelHtml(draft,extraHtml,topHtml);
   wireDraftSteppers(panel.querySelector('.commander-player-actions'),draft);
   wireBattlefieldRulesPanel(panel,rerender);
+  panel.querySelector('#mainAddCreatureBtn').onclick=()=>addPlayerCreatureFlow(rerender);
   renderPlayerActionPanel(panel.querySelector('#mainPlayerAction'),{contextKey:`player:${draft.key}`,
     help:"All resolves to each target’s available amount. Noncreature permanents you control remain a table action.",onResolved:rerender});
   return draft;
 }
 function showMainStep(){
   setPlayerStepHeader("Main Phase","Play lands, cast spells, and record what changed.","Your Actions");
-  const draft=renderMainPanel(showMainStep);
-  setConfirmButton("Go to Combat ▸","",()=>goToPlayerStep("combat",()=>applyPlayerTurnInputs(gameState,draft)),true,()=>mainStepPreview(draft));
+  const draft=renderMainPanel(showMainStep,"",turnStartHtml());
+  const openLogBtn=document.getElementById('recapOpenLog');
+  if(openLogBtn&&typeof openLog==="function")openLogBtn.onclick=openLog;
+  // With no creatures there is nothing to attack with: end the turn from here.
+  if(!(gameState.player.creatures>0))setConfirmButton("End Turn ▸","",()=>endPlayerTurn(()=>applyPlayerTurnInputs(gameState,draft)),false,()=>mainStepPreview(draft));
+  else setConfirmButton("Go to Combat ▸","",()=>goToPlayerStep("combat",()=>applyPlayerTurnInputs(gameState,draft)),true,()=>mainStepPreview(draft));
 }
 function showMainTwoStep(){
   setPlayerStepHeader("Main Phase 2","Cast spells, record what changed, then end your turn.","Your Actions");
-  const hand=gameState.player.handSize||0;
-  const reminder=hand>7?`<p class="cmd-hand-reminder">You have ${plural(hand,"card")} in hand. Discard to 7 at the end of your turn.</p>`:"";
-  const draft=renderMainPanel(showMainTwoStep,reminder);
+  const draft=renderMainPanel(showMainTwoStep);
   setConfirmButton("End Turn ▸","",()=>endPlayerTurn(()=>applyPlayerTurnInputs(gameState,draft,"after combat")),false,()=>mainStepPreview(draft));
 }
 
@@ -1817,11 +2032,6 @@ async function endPlayerTurn(apply){
   try{
     cmdSnapshot();
     if(apply)apply();
-    const hand=gameState.player.handSize||0;
-    if(hand>7){
-      const discards=await askCount("Discard to hand size",`You have ${plural(hand,"card")} in hand. Select how many you discarded.`,hand-7,0,hand);
-      if(discards)playerDiscard(gameState,discards,"to hand size");
-    }
     const end=checkCommanderBattleEnd(gameState);
     if(end.over){saveState();endCommanderGame(end.won,end.reason);return;}
     markRecapStart();
@@ -1847,15 +2057,15 @@ function defaultAttackTarget(){
 function attackerRowHtml(row,i,alive){
   const kwChips=PLAYER_ATTACK_KEYWORDS.map(kw=>{const on=row.kws.includes(kw);return `<button type="button" class="kw-chip${on?" active":""}" data-row="${i}" data-kw="${kw}" aria-pressed="${on}">${kw}</button>`;}).join("");
   return `<div class="attack-row${row.commander?" is-commander":""}" data-row="${i}">
-    <div class="attack-row-h"><strong>${row.commander?"⚜ Your commander":`Attacker ${i+1}`}</strong>
-      <label class="attack-cmdr-toggle"><input type="checkbox" data-row-cmdr="${i}" ${row.commander?"checked":""}> Commander</label>
+    <div class="attack-row-h"><strong>${row.commander?"⚜ ":""}${row.name?escapeHtml(row.name):row.commander?"Your commander":`Attacker ${i+1}`}</strong>
+      ${row.uid?(row.kws.length?`<small class="attack-row-kws">${escapeHtml(row.kws.join(" · "))}</small>`:""):`<label class="attack-cmdr-toggle"><input type="checkbox" data-row-cmdr="${i}" ${row.commander?"checked":""}> Commander</label>`}
       <button type="button" class="btn-quiet attack-row-remove" data-row-remove="${i}" aria-label="Remove attacker ${i+1}">✕</button></div>
     <div class="attack-row-b">
       <div class="inline-stepper" data-row-field="p" data-row-index="${i}"><label>Power</label><button type="button" data-row-delta="-1" aria-label="Decrease power">−</button><input type="number" min="0" max="99" value="${row.p}" aria-label="Power"><button type="button" data-row-delta="1" aria-label="Increase power">+</button></div>
       <div class="inline-stepper" data-row-field="t" data-row-index="${i}"><label>Toughness</label><button type="button" data-row-delta="-1" aria-label="Decrease toughness">−</button><input type="number" min="0" max="99" value="${row.t}" aria-label="Toughness"><button type="button" data-row-delta="1" aria-label="Increase toughness">+</button></div>
       <label class="attack-target">Target<select data-row-target="${i}">${alive.map(o=>`<option value="${o.id}" ${row.targetId===o.id?"selected":""}>${o.ico} ${nm(o)} (${o.life})</option>`).join("")}</select></label>
     </div>
-    <div class="kw-chips">${kwChips}</div>
+    ${row.uid?"":`<div class="kw-chips">${kwChips}</div>`}
   </div>`;
 }
 function showCombatStep(){
@@ -1866,18 +2076,35 @@ function showCombatStep(){
   if(draft.mode==="manual"){renderManualCombat(panel,alive);return;}
   if(draft.mode==="review"&&draft.outcome){renderAttackReview(panel,draft);return;}
   const p=gameState.player;
+  // Your tracked creatures attack with one click; rows for removed cards drop out.
+  const tracked=trackedPlayerCreatures(p);
+  draft.rows=draft.rows.filter(r=>!r.uid||tracked.some(t=>t.uid===r.uid));
+  // Summoning sickness is yours to track: any untapped creature can be sent.
+  const canAttack=t=>!isCreatureTapped(t);
+  const picker=tracked.length?`<div class="attack-picker">${tracked.map(t=>{
+      const on=draft.rows.some(r=>r.uid===t.uid);const ready=canAttack(t);
+      return `<button type="button" class="kill-btn card-choice${on?" selected":""}${ready?"":" is-tapped"}" data-attack-uid="${escapeHtml(t.uid)}" aria-pressed="${on}" ${ready?"":"disabled"} title="${ready?(on?"Remove from attack":"Attack with this creature"):"Tapped"}"><span class="kill-btn-status">${on?"⚔":ready?"⬡":"↷"}</span>${cardReferenceHtml(t)}</button>`;
+    }).join("")}</div>`:"";
+  const readyCount=tracked.filter(canAttack).length;
   const rowsHtml=draft.rows.map((row,i)=>attackerRowHtml(row,i,alive)).join("");
   panel.innerHTML=`<div class="context-form commander-form">
     <section class="resolution-step response-step attack-builder" data-step="attackers">
       <div class="resolution-step-h"><span>1</span><strong>Declare attackers</strong><em class="step-status">${draft.rows.length?plural(draft.rows.length,"attacker"):"None"}</em></div>
-      <p class="step-hint">Add a row for each attacking creature. You control ${plural(p.creatures,"creature")}. CPU creatures that attacked on their last turn are still tapped and cannot block.</p>
-      <div class="resolution-step-b">${rowsHtml||'<div class="empty-field">No attackers declared.</div>'}
+      <p class="step-hint">${tracked.length?"Select your creatures to attack, or add a row for an attacker you have not added as a card.":"Add a row for each attacking creature, or add your creatures as cards (+ Creature) to attack with one click."} You control ${plural(p.creatures,"creature")}. CPU creatures that attacked on their last turn are still tapped and cannot block, unless they have vigilance.</p>
+      <div class="resolution-step-b">${picker}${readyCount>1?`<div class="attack-builder-actions"><button type="button" class="target-btn" id="attackAllBtn">⚔ All ready creatures (${readyCount})</button></div>`:""}${rowsHtml||'<div class="empty-field">No attackers declared.</div>'}
         <div class="attack-builder-actions"><button type="button" class="target-btn" id="addAttackerBtn">+ Attacker</button>${draft.rows.some(r=>r.commander)?"":`<button type="button" class="target-btn" id="addCommanderBtn">+ Commander</button>`}<button type="button" class="btn-quiet" id="manualCombatBtn">Enter results manually</button></div>
       </div>
     </section>
     <div id="combatPlayerAction"></div></div>`;
   const rerender=()=>showCombatStep();
   const addRow=commander=>{draft.rows.push({p:commander?4:2,t:commander?4:2,kws:[],targetId:defaultAttackTarget(),commander:!!commander});rerender();};
+  const addTracked=t=>draft.rows.push({uid:t.uid,name:t.name,p:t.p,t:t.t,kws:(t.kws||[]).slice(),targetId:defaultAttackTarget(),commander:!!t.commander});
+  panel.querySelectorAll('[data-attack-uid]').forEach(btn=>{btn.onclick=()=>{
+    const uid=btn.dataset.attackUid;const i=draft.rows.findIndex(r=>r.uid===uid);
+    if(i>=0)draft.rows.splice(i,1);else{const t=tracked.find(x=>x.uid===uid);if(t)addTracked(t);}
+    rerender();
+  };});
+  panel.querySelector('#attackAllBtn')?.addEventListener('click',()=>{tracked.filter(canAttack).forEach(t=>{if(!draft.rows.some(r=>r.uid===t.uid))addTracked(t);});rerender();});
   panel.querySelector('#addAttackerBtn').onclick=()=>addRow(false);
   panel.querySelector('#addCommanderBtn')?.addEventListener('click',()=>addRow(true));
   panel.querySelector('#manualCombatBtn').onclick=()=>{draft.mode="manual";rerender();};
@@ -1906,11 +2133,14 @@ function showCombatStep(){
       draft.mode="review";rerender();
     },true,()=>`${plural(validRows.length,"attacker")} · ${validRows.reduce((s,r)=>s+(parseInt(r.p)||0)*(r.kws.includes("Double Strike")?2:1),0)} power`);
   }else{
-    setConfirmButton("Skip Combat ▸","",()=>goToPlayerStep("end",null),true);
+    // No attack: Main Phase 2 would repeat Main Phase 1, so this ends the turn.
+    setConfirmButton("No Attack · End Turn ▸","",()=>endPlayerTurn(null),false);
   }
 }
 function renderAttackReview(panel,draft){
   const outcome=draft.outcome;
+  const deadNames=(outcome.deadUids||[]).map(uid=>(gameState.player.tokens||[]).find(t=>t.uid===uid)).filter(Boolean).map(t=>t.name);
+  const deaths=outcome.playerDeaths+deadNames.length;
   const rowsByOpp=outcome.perOpp.map(entry=>{
     const opp=oppById(entry.oppId);
     const killed=entry.kills.map(uid=>findTokenByUid(opp,uid)).filter(Boolean);
@@ -1927,7 +2157,7 @@ function renderAttackReview(panel,draft){
       <p class="step-hint">Blocks are the CPUs' choices. Confirm, or adjust the attackers.</p>
       <div class="resolution-step-b">${rowsByOpp||'<div class="empty-field">No attackers reached an opponent.</div>'}
         <div class="context-section"><ul class="attack-outcome">
-          <li>${outcome.playerDeaths?`💀 ${plural(outcome.playerDeaths,"creature")} you control ${outcome.playerDeaths===1?"dies":"die"}`:"Your attackers survive."}</li>
+          <li>${deaths?`💀 ${deadNames.length?escapeHtml(deadNames.join(", "))+(outcome.playerDeaths?` and ${plural(outcome.playerDeaths,"other creature")}`:""):plural(outcome.playerDeaths,"creature")+" you control"} ${deaths===1?"dies":"die"}`:"Your attackers survive."}</li>
           ${outcome.lifeGained?`<li>♥ You gain ${outcome.lifeGained} life (lifelink)</li>`:""}
         </ul></div>
         <div class="attack-builder-actions"><button type="button" class="target-btn" id="editAttackersBtn">Edit attackers</button><button type="button" class="btn-quiet" id="manualCombatBtn">Enter results manually</button></div>
@@ -1937,7 +2167,7 @@ function renderAttackReview(panel,draft){
   const dealt=outcome.perOpp.reduce((s,e)=>s+e.damage,0);
   const kills=outcome.perOpp.reduce((s,e)=>s+e.kills.length,0);
   setConfirmButton("Confirm Combat ▸","",()=>goToPlayerStep("end",applyCombatDraft),true,
-    ()=>joinPreview([`Deal ${dealt}`,kills&&`Destroy ${kills}`,outcome.playerDeaths&&`Lose ${plural(outcome.playerDeaths,"creature")}`,outcome.lifeGained&&`+${outcome.lifeGained} life`]));
+    ()=>joinPreview([`Deal ${dealt}`,kills&&`Destroy ${kills}`,deaths&&`Lose ${plural(deaths,"creature")}`,outcome.lifeGained&&`+${outcome.lifeGained} life`]));
 }
 function manualCombatResults(alive){
   const m=attackDraft.manual;
@@ -2141,11 +2371,11 @@ if(newGameSettingsBtn)newGameSettingsBtn.onclick=async()=>{
   if(ok)restart();
 };
 
-// Turn Recap setting (commander mode only). Re-renders the draw step if you're on it.
+// Turn Recap setting (commander mode only). Re-renders Main Phase 1 if you're on it.
 const recapToggle=document.getElementById('recapToggle');
 if(recapToggle)recapToggle.onchange=()=>{
   setRecapEnabled(recapToggle.checked);
-  if(gameState&&gameState.phase==="player"&&gameState.playerStep==="draw")showDrawStep();
+  if(gameState&&gameState.phase==="player"&&gameState.playerStep==="main1")showMainStep();
 };
 updateRecapToggle();
 
