@@ -59,7 +59,8 @@ function openSettings(){
   if(typeof window.renderOpponentSettingsSummary==="function")window.renderOpponentSettingsSummary();
   settingsReturnFocus=document.getElementById('menuBtn');
   document.getElementById('settingsOverlay').classList.add('show');
-  setTimeout(()=>document.getElementById('settingsClose').focus(),40);
+  // Focus the panel, not the × button, so Space doesn't close Settings (Escape still does).
+  setTimeout(()=>document.querySelector('#settingsOverlay .settings-modal').focus(),40);
 }
 function closeSettings(){
   const overlay=document.getElementById('settingsOverlay');
@@ -132,6 +133,9 @@ function wire(){
   // Settings dialog (Restart game / New game are bound in commander-ui.js for both modes)
   document.getElementById('menuBtn').onclick=openSettings;
   document.getElementById('settingsClose').onclick=closeSettings;
+  // Space never closes Settings, even with the × focused; Enter, Escape and clicks do.
+  document.getElementById('settingsClose').addEventListener('keydown',e=>{if(e.key===" "){e.preventDefault();}});
+  document.getElementById('settingsClose').addEventListener('keyup',e=>{if(e.key===" ")e.preventDefault();});
   document.getElementById('rulesBtn').onclick=showModeRules;
   document.getElementById('graveyardBtn').onclick=showEnemyGraveyard;
   document.getElementById('exileBtn').onclick=showEnemyExile;

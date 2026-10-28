@@ -1158,6 +1158,7 @@ function clearConfirmBar(){
 
 /* previewFn(): short outcome text ("Take 7", "Deal 5 · Remove 1") on the confirm button. */
 let confirmPreviewFn=null;
+let confirmBarKey="",confirmBarReadyAt=0;
 let stepStatusFn=null;
 function setConfirmButton(text,className,onclick,showEndTurn,previewFn){
   const bar=ensureConfirmBar();
@@ -1170,8 +1171,15 @@ function setConfirmButton(text,className,onclick,showEndTurn,previewFn){
       <button type="button" class="cmd-icon-btn" id="cmdRulesBtn" title="Battlefield rules: your ongoing effects that restrict the CPUs" aria-label="Battlefield rules${rules?`, ${rules} active`:""}">🛡<span class="cmd-icon-lbl">Rules</span>${rules?`<span class="cmd-icon-badge">${rules}</span>`:""}</button></span>`;
   }
   bar.innerHTML=html;
-  document.getElementById('cmdConfirmBtn').onclick=onclick;
-  if(showEndTurn)document.getElementById('cmdEndTurnBtn').onclick=()=>endTurnFromCurrentStep();
+  // The bar's buttons move between screens (End Turn can land where Continue was), so a
+  // double-click or a fast second click would hit the new button. Ignore clicks briefly.
+  // Only a new screen restarts the pause; redraws of the same screen (stepper edits) don't.
+  const barKey=`${windowSeq}|${text}|${showEndTurn?1:0}`;
+  if(barKey!==confirmBarKey){confirmBarKey=barKey;confirmBarReadyAt=performance.now()+450;}
+  const readyAt=confirmBarReadyAt;
+  const guarded=fn=>event=>{if(performance.now()<readyAt){event.preventDefault();return;}fn(event);};
+  document.getElementById('cmdConfirmBtn').onclick=guarded(onclick);
+  if(showEndTurn)document.getElementById('cmdEndTurnBtn').onclick=guarded(()=>endTurnFromCurrentStep());
   document.getElementById('cmdPlayerActionBtn')?.addEventListener('click',openPlayerActionPopup);
   document.getElementById('cmdRulesBtn')?.addEventListener('click',openBattlefieldRulesPopup);
   confirmPreviewFn=previewFn||null;
@@ -1285,12 +1293,10 @@ function recapPopupHtml(){
   const lines=gameState.log.filter(e=>e.seq>recap.seq).reverse().map(e=>e.msg)
     .filter(m=>/^⚔/.test(m)||gameState.opponents.some(o=>m.startsWith(`${o.ico} `)));
   html+=section("What happened",lines.length?`<ul class="recap-lines">${lines.map(m=>`<li>${m}</li>`).join("")}</ul>`:`<p class="recap-quiet">The opponents made no notable plays.</p>`);
-  return `<div class="recap-popup">${html}<p class="recap-foot"><button type="button" class="btn-quiet" id="recapPopupLog">Full log</button> · Turn this popup off in Settings → Gameplay.</p></div>`;
+  return `<div class="recap-popup">${html}</div>`;
 }
 function showRecapPopup(){
   openInfoModal(`📜 Since your last turn · Round ${gameState.turn}`,recapPopupHtml());
-  const logBtn=document.getElementById('recapPopupLog');
-  if(logBtn)logBtn.onclick=()=>{closeInfoModal();if(typeof openLog==="function")openLog();};
 }
 function buildRecapHtml(){
   const recap=gameState.recap;
@@ -2107,7 +2113,7 @@ function showDrawStep(){
   const openLogBtn=panel.querySelector('#recapOpenLog');
   if(openLogBtn&&typeof openLog==="function")openLogBtn.onclick=openLog;
   panel.querySelector('#recapPopupBtn')?.addEventListener('click',showRecapPopup);
-  setConfirmButton(skip?"Continue to Main Phase ▸":"Draw a Card ▸","",()=>goToPlayerStep("main1",()=>playerDrawStep(gameState)),true);
+  setConfirmButton(skip?"Continue to Main Phase ▸":"Draw a Card ▸","",()=>goToPlayerStep("main1",()=>playerDrawStep(gameState)),false);
 }
 
 /* --- MAIN PHASES --- */
@@ -2140,9 +2146,15 @@ function showMainTwoStep(){
 
 /* --- END OF TURN --- */
 /* End Turn from any step applies that step's entries first. */
-function endTurnFromCurrentStep(){
+async function endTurnFromCurrentStep(){
   const step=gameState.playerStep;
   const draft=playerDraft;
+  // Ending before combat with creatures that could attack is usually a misclick: ask.
+  const couldAttack=gameState.player.creatures>0&&trackedPlayerCreatures(gameState.player).filter(t=>!isCreatureTapped(t)).length+untrackedPlayerCreatures(gameState.player)>0;
+  if((step==="draw"||step==="main1")&&couldAttack){
+    if(!await askConfirm("End your turn?","You haven't gone to combat yet. Ending now skips your attack this turn.","End Turn","Keep playing"))return;
+    if(gameState.phase!=="player"||gameState.playerStep!==step)return;
+  }
   endPlayerTurn(()=>{
     if(step==="draw")playerDrawStep(gameState);
     else if((step==="main1"||step==="end")&&draft)applyPlayerTurnInputs(gameState,draft,step==="end"?"after combat":"");

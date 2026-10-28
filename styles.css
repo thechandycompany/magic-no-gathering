@@ -1487,7 +1487,6 @@ button.tt-pile{cursor:pointer;} button.tt-pile:hover{border-color:var(--gold);}
 .recap-popup{display:flex; flex-direction:column; gap:12px;}
 .recap-section h4{margin:0 0 6px; font-family:var(--serif); font-size:13px; color:var(--gold); letter-spacing:.4px;}
 .recap-section .recap-lines{font-size:13px;}
-.recap-foot{margin:4px 0 0; font-size:11.5px; color:var(--muted);}
 
 /* Input dialogs (confirm, counts, blockers) open above other popups such as Player Action. */
 #inputOverlay{z-index:60;}
@@ -1551,3 +1550,6 @@ button.tt-pile{cursor:pointer;} button.tt-pile:hover{border-color:var(--gold);}
 .tt-chip.tt-turn{background:var(--seat); border-color:var(--seat); color:var(--bg); font-weight:800; letter-spacing:.3px;}
 .tt-seat.is-active .tt-seat-name{color:var(--seat); text-shadow:0 0 10px color-mix(in srgb,var(--seat) 50%,transparent);}
 @media (prefers-reduced-motion:reduce){.tt-seat.is-active{animation:none;}}
+/* End Turn sits apart from the main button so the two are not mistaken for each other. */
+.cmd-end-turn-btn{margin-left:18px;}
+.settings-modal:focus{outline:none;}
