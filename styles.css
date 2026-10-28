@@ -1467,3 +1467,87 @@ button.tt-pile{cursor:pointer;} button.tt-pile:hover{border-color:var(--gold);}
 .card:not(.card-reference) .c-name span:first-child{white-space:normal; display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; line-height:1.1;}
 /* Long confirm previews ("Block 1 · Take 7 (7 commander)") wrap on small screens instead of overflowing. */
 @media(max-width:760px){.cmd-preview{white-space:normal; text-align:center;}}
+
+/* ===== Ko-fi button: its own line under the project links ===== */
+.project-links .kofi-btn{flex-basis:100%; display:flex; justify-content:center; margin-top:8px; border-bottom:0;}
+.settings-about .project-links .kofi-btn{justify-content:flex-start;}
+.project-links .kofi-btn img{display:block; height:36px; width:auto; border-radius:8px; transition:transform .12s, box-shadow .12s;}
+.project-links .kofi-btn:hover img,.project-links .kofi-btn:focus-visible img{transform:translateY(-1px); box-shadow:0 4px 12px rgba(0,0,0,.35);}
+.project-links .kofi-btn:focus-visible{outline:2px solid var(--gold); outline-offset:3px; border-radius:8px;}
+
+/* ===== Settings: Restart game / New game ===== */
+.settings-game-btns{display:grid; grid-template-columns:1fr 1fr; gap:8px;}
+.settings-game-btn{display:flex; flex-direction:column; align-items:flex-start; gap:3px; padding:12px 14px; border-radius:var(--radius-sm); border:1px solid var(--gold-dim); background:color-mix(in srgb,var(--gold) 10%,var(--panel2)); color:var(--ink); font-family:var(--font); text-align:left; cursor:pointer;}
+.settings-game-btn strong{font-size:15px; font-weight:800; color:var(--ink);}
+.settings-game-btn span{font-size:11.5px; color:var(--muted);}
+.settings-game-btn:hover,.settings-game-btn:focus-visible{border-color:var(--gold); background:color-mix(in srgb,var(--gold) 18%,var(--panel2)); outline:none;}
+@media(max-width:430px){.settings-game-btns{grid-template-columns:1fr;}}
+
+/* ===== "Since your last turn" popup ===== */
+.recap-popup{display:flex; flex-direction:column; gap:12px;}
+.recap-section h4{margin:0 0 6px; font-family:var(--serif); font-size:13px; color:var(--gold); letter-spacing:.4px;}
+.recap-section .recap-lines{font-size:13px;}
+.recap-foot{margin:4px 0 0; font-size:11.5px; color:var(--muted);}
+
+/* Input dialogs (confirm, counts, blockers) open above other popups such as Player Action. */
+#inputOverlay{z-index:60;}
+
+/* ===== Bottom bar: Player Action / Battlefield Rules icons ===== */
+.cmd-icon-group{display:inline-flex; gap:6px;}
+.cmd-icon-btn{position:relative; display:inline-flex; flex-direction:column; align-items:center; justify-content:center; gap:1px; width:54px; height:46px; padding:0; border-radius:var(--radius-sm); border:1px solid var(--border-lt); background:var(--panel2); color:var(--ink); font-size:17px; cursor:pointer; transition:border-color .12s, transform .12s;}
+.cmd-icon-btn:hover,.cmd-icon-btn:focus-visible{border-color:var(--gold); transform:translateY(-1px); outline:none;}
+.cmd-icon-lbl{font-size:9px; color:var(--ink2); letter-spacing:.4px; text-transform:uppercase;}
+.cmd-icon-badge{position:absolute; top:-6px; right:-6px; min-width:16px; height:16px; padding:0 4px; border-radius:999px; background:var(--gold); color:var(--bg); font-size:10px; font-weight:800; line-height:16px;}
+@media(max-width:560px){.cmd-confirm-bar{flex-wrap:wrap; gap:8px;} .cmd-icon-btn{width:46px;}}
+/* The two panels shown inside popups: always open, no disclosure header. */
+.modal-panel .player-action-disclosure>summary,.modal-panel .rules-disclosure>summary{display:none;}
+.modal-panel .player-action-disclosure,.modal-panel .rules-disclosure{border:0; background:transparent;}
+.modal-panel .context-disclosure-body{padding:0;}
+
+/* ===== Declaring attacks on the table ===== */
+.tt-attack-target{cursor:pointer; transition:box-shadow .15s, border-color .15s;}
+.tt-attack-target:hover{box-shadow:0 0 0 2px color-mix(in srgb,var(--seat) 60%,transparent);}
+.tt-attack-target.is-target{box-shadow:0 0 0 3px var(--seat),0 0 22px color-mix(in srgb,var(--seat) 45%,transparent);}
+.tt-target-chip{border-color:var(--seat)!important; color:var(--ink)!important; font-weight:700;}
+.tt-incoming{border-color:var(--blood-lt)!important; color:var(--danger-ink)!important; font-weight:700;}
+.tt-attackable{cursor:pointer;}
+.tt-attackable .tt-card,.card.tt-attackable{box-shadow:0 0 0 2px color-mix(in srgb,var(--gold) 45%,transparent);}
+.tt-attackable:hover .tt-card,.card.tt-attackable:hover{transform:translateY(-3px); box-shadow:0 0 0 2px var(--gold),0 6px 16px rgba(0,0,0,.4);}
+.tt-attackable.is-attacking-target .tt-card,.card.tt-attackable.is-attacking-target{transform:translateY(-8px); box-shadow:0 0 0 3px var(--blood-lt),0 8px 18px color-mix(in srgb,var(--blood-lt) 40%,transparent);}
+.tt-cant-attack{opacity:.55;}
+.tt-attack-badge{position:absolute; z-index:5; top:-10px; left:50%; transform:translateX(-50%); padding:1px 7px; border-radius:999px; background:var(--blood); border:1px solid var(--blood-lt); color:#fff; font-size:11px; font-weight:700; white-space:nowrap; pointer-events:none;}
+.tt-attackable-pile{cursor:pointer; border-color:var(--gold)!important; font-family:var(--font);}
+.tt-attackable-pile:hover{transform:translateY(-2px);}
+.tt-blockable{cursor:pointer;}
+.tt-blockable .tt-card{box-shadow:0 0 0 2px var(--blood-lt),0 0 14px color-mix(in srgb,var(--blood-lt) 40%,transparent);}
+.atk-targets{display:flex; flex-wrap:wrap; gap:6px; margin-bottom:8px;}
+.atk-target-chip{border-left:3px solid var(--seat)!important;}
+.atk-target-chip.active{border-color:var(--seat)!important; background:color-mix(in srgb,var(--seat) 20%,var(--panel2))!important; font-weight:700;}
+.atk-target-chip small{color:var(--muted); margin-left:4px;}
+.atk-summary-row{display:flex; flex-wrap:wrap; align-items:center; gap:6px 10px; padding:6px 9px; margin-bottom:6px; border-left:3px solid var(--border); border-radius:var(--radius-sm); background:var(--panel2);}
+.atk-summary-power{font-size:12px; color:var(--danger-ink); font-weight:700;}
+.atk-summary-chips{display:flex; flex-wrap:wrap; gap:4px; flex-basis:100%;}
+.atk-chip{display:inline-flex; align-items:center; gap:4px; padding:2px 4px 2px 8px; border-radius:999px; border:1px solid var(--border-lt); font-size:12px;}
+.atk-chip small{color:var(--muted);}
+.atk-chip button{border:0; background:transparent; color:var(--muted); cursor:pointer; font-size:11px; padding:0 4px;}
+.atk-chip button:hover{color:var(--danger-ink);}
+.start-opponents{list-style:none; margin:0 0 8px; padding:0; display:flex; flex-direction:column; gap:6px;}
+.start-opponents li{display:flex; justify-content:space-between; gap:10px; padding:8px 10px; border-left:3px solid var(--border); border-radius:var(--radius-sm); background:var(--panel2);}
+.start-opponents small{color:var(--muted);}
+.tt-attack-badge{top:auto; bottom:-11px;}
+
+/* ===== Whose turn: the active seat lights up, the rest step back ===== */
+.tt-seat{transition:opacity .2s, box-shadow .2s, border-color .2s, background .2s;}
+.tt-seat.is-active{border:3px solid var(--seat); border-style:solid;
+  background:linear-gradient(180deg,color-mix(in srgb,var(--seat) 16%,transparent),color-mix(in srgb,var(--seat) 5%,transparent));
+  box-shadow:0 0 0 2px color-mix(in srgb,var(--seat) 45%,transparent),0 0 28px color-mix(in srgb,var(--seat) 55%,transparent);
+  animation:tt-turn-pulse 2.4s ease-in-out infinite;}
+@keyframes tt-turn-pulse{
+  0%,100%{box-shadow:0 0 0 2px color-mix(in srgb,var(--seat) 45%,transparent),0 0 18px color-mix(in srgb,var(--seat) 35%,transparent);}
+  50%{box-shadow:0 0 0 3px color-mix(in srgb,var(--seat) 70%,transparent),0 0 34px color-mix(in srgb,var(--seat) 65%,transparent);}
+}
+.tt-table:has(.tt-seat.is-active) .tt-seat:not(.is-active):not(.tt-attack-target){opacity:.72;}
+.tt-table:has(.tt-seat.is-active) .tt-seat:not(.is-active):hover{opacity:1;}
+.tt-chip.tt-turn{background:var(--seat); border-color:var(--seat); color:var(--bg); font-weight:800; letter-spacing:.3px;}
+.tt-seat.is-active .tt-seat-name{color:var(--seat); text-shadow:0 0 10px color-mix(in srgb,var(--seat) 50%,transparent);}
+@media (prefers-reduced-motion:reduce){.tt-seat.is-active{animation:none;}}

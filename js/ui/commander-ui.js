@@ -354,6 +354,7 @@ function wireBoardControls(board,state){
     if(mode==="single"&&state.viewMode!=="single"){const active=oppById(state.activeOppId);state.viewTarget=active&&state.phase==="cpu"?active.index:-1;}
     state.viewMode=mode;renderBoardView(state);};});
   board.querySelectorAll('[data-view-target]').forEach(el=>{el.onclick=event=>{if(event.target.closest('button:not([data-view-target]),[data-graveyard-owner],[data-exile-owner],input'))return;
+    if(boardAttackMode()&&el.closest('[data-attack-target]'))return;
     state.viewMode="single";state.viewTarget=parseInt(el.dataset.viewTarget,10);renderBoardView(state);};});
   board.querySelectorAll('[data-opp-stat]').forEach(btn=>{btn.onclick=event=>{event.stopPropagation();
     const opp=oppById(btn.dataset.oppId);if(!opp)return;
@@ -364,6 +365,22 @@ function wireBoardControls(board,state){
     const min=key==="creatures"?trackedPlayerCreatures(state.player).length:0;
     state.player[key]=Math.max(min,(state.player[key]||0)+parseInt(btn.dataset.d,10));refreshBoard(state);
     if(key==="creatures")refreshActivePanel();};});
+  if(boardAttackMode()){
+    board.querySelectorAll('[data-attack-target]').forEach(seat=>{seat.addEventListener('click',event=>{
+      if(event.target.closest('button:not(.tt-seat-name),input,[data-graveyard-owner],[data-exile-owner]'))return;
+      setAttackTarget(seat.dataset.attackTarget);
+    });});
+    board.querySelectorAll('[data-attack-uid]').forEach(slot=>{slot.addEventListener('click',event=>{
+      if(event.target.closest('button'))return;
+      toggleBoardAttacker(slot.dataset.attackUid);
+    });});
+    board.querySelector('[data-attack-paper]')?.addEventListener('click',event=>{event.stopPropagation();addPaperAttacker();});
+  }
+  board.querySelectorAll('[data-block-open]').forEach(slot=>{slot.addEventListener('click',event=>{
+    if(event.target.closest('button'))return;
+    const opp=oppById(gameState.activeOppId);
+    if(opp&&gameState.activeResult)openBlockersDialog(opp,gameState.activeResult);
+  });});
   board.querySelectorAll('[data-creature-add]').forEach(btn=>{btn.onclick=event=>{event.stopPropagation();addPlayerCreatureFlow();};});
   board.querySelectorAll('[data-player-dup]').forEach(btn=>{btn.onclick=async event=>{event.stopPropagation();
     const token=(state.player.tokens||[]).find(t=>t.uid===btn.dataset.playerDup);if(!token)return;
@@ -551,7 +568,14 @@ function renderPlayerBoardView(state,board,totalViews){
 
   const playerCreatureCards=trackedPlayerCreatures(p);
   const untracked=untrackedPlayerCreatures(p);
-  const playerTokensHtml=(playerCreatureCards.length?playerCreatureCards.map(token=>`<div class="card voltron-creature ${token.kind==="reanimated-creature"?"reanimated":""} ${token.commander?"commander":""} ${isCreatureTapped(token)?"tapped":""}" title="${escapeHtml(token.kind==="reanimated-creature"?`Reanimated from ${token.owner}`:token.name)}"><span class="c-name"><span>${escapeHtml(token.name)}</span><span class="mana">${token.kind==="reanimated-creature"?"↩":token.commander?"⚜":""}</span></span><span class="c-art">${escapeHtml(token.ico)}</span>${token.kws?.length?`<span class="c-kw">${escapeHtml(token.kws.join(" · "))}</span>`:""}${token.effect?`<span class="c-effect">${escapeHtml(token.effect)}</span>`:""}<span class="c-pt">${token.p}/${token.t}</span>${token.summoningSick?'<div class="c-sick">💤</div>':''}<button type="button" class="c-dup" data-player-dup="${escapeHtml(token.uid)}" title="Duplicate" aria-label="Duplicate ${escapeHtml(token.name)}">⧉</button><button type="button" class="c-remove" data-player-rm="${escapeHtml(token.uid)}" title="Remove ${escapeHtml(token.name)}" aria-label="Remove ${escapeHtml(token.name)}">✕</button></div>`).join(""):"")
+  const attackDraftNow=boardAttackMode()?ensureAttackDraft():null;
+  const attackAttrs=token=>{
+    if(!attackDraftNow||isCreatureTapped(token))return "";
+    const row=attackDraftNow.rows.find(r=>r.uid===token.uid);
+    return ` data-attack-uid="${escapeHtml(token.uid)}" role="button" aria-pressed="${!!row}"`;
+  };
+  const attackClass=token=>attackDraftNow&&!isCreatureTapped(token)?(attackDraftNow.rows.some(r=>r.uid===token.uid)?" tt-attackable is-attacking-target":" tt-attackable"):"";
+  const playerTokensHtml=(playerCreatureCards.length?playerCreatureCards.map(token=>`<div class="card voltron-creature ${token.kind==="reanimated-creature"?"reanimated":""} ${token.commander?"commander":""} ${isCreatureTapped(token)?"tapped":""}${attackClass(token)}"${attackAttrs(token)} title="${escapeHtml(token.kind==="reanimated-creature"?`Reanimated from ${token.owner}`:token.name)}"><span class="c-name"><span>${escapeHtml(token.name)}</span><span class="mana">${token.kind==="reanimated-creature"?"↩":token.commander?"⚜":""}</span></span><span class="c-art">${escapeHtml(token.ico)}</span>${token.kws?.length?`<span class="c-kw">${escapeHtml(token.kws.join(" · "))}</span>`:""}${token.effect?`<span class="c-effect">${escapeHtml(token.effect)}</span>`:""}<span class="c-pt">${token.p}/${token.t}</span>${token.summoningSick?'<div class="c-sick">💤</div>':''}<button type="button" class="c-dup" data-player-dup="${escapeHtml(token.uid)}" title="Duplicate" aria-label="Duplicate ${escapeHtml(token.name)}">⧉</button><button type="button" class="c-remove" data-player-rm="${escapeHtml(token.uid)}" title="Remove ${escapeHtml(token.name)}" aria-label="Remove ${escapeHtml(token.name)}">✕</button></div>`).join(""):"")
     +(untracked||!playerCreatureCards.length?`<div class="empty-field">${plural(untracked,playerCreatureCards.length?"other creature":"creature")} on your battlefield</div>`:"");
 
   const pws=p.planeswalkers||[];
@@ -629,7 +653,7 @@ function tableCardHtml(card,opts={}){
   const removeTarget=opts.permKey?`data-perm-key="${escapeHtml(opts.permKey)}" data-perm-name="${escapeHtml(card.name)}" data-perm-ico="${escapeHtml(card.ico||"✦")}"`:opts.pwId?`data-pw-remove="${escapeHtml(opts.pwId)}"`:`data-rm-uid="${escapeHtml(card.uid)}"`;
   const removeHtml=opts.removeOpp||opts.pwId?`<button type="button" class="tt-remove" data-opp="${escapeHtml(opts.removeOpp||"")}" ${removeTarget} title="${commander?"Return to the command zone":count>1?"Remove one from the battlefield":"Remove from the battlefield"}" aria-label="Remove ${count>1?"one ":""}${escapeHtml(card.name)}">✕</button>`:"";
   const a=animAttrs(opts.anim);
-  return `<div class="tt-slot ${tapped?"is-tapped":""} ${a.cls}" style="--gear:${gear.length};${a.style}">${gearHtml}${count>1?`<span class="tt-count">×${count}</span>`:""}<div class="${classes}" data-peek="${peekIndex}" tabindex="0" aria-label="${escapeHtml(tooltip)}">
+  return `<div class="tt-slot ${tapped?"is-tapped":""} ${a.cls} ${opts.slotClass||""}" ${opts.slotAttrs||""} style="--gear:${gear.length};${a.style}">${gearHtml}${count>1?`<span class="tt-count">×${count}</span>`:""}<div class="${classes}" data-peek="${peekIndex}" tabindex="0" aria-label="${escapeHtml(tooltip)}">
     <span class="tt-name">${escapeHtml(card.name)}</span>
     <span class="tt-art">${escapeHtml(card.ico||"🃏")}</span>
     ${kws.length?`<span class="tt-kw">${escapeHtml(kws.join(" · "))}</span>`:""}
@@ -639,14 +663,26 @@ function tableCardHtml(card,opts={}){
 }
 // Battlefield creatures, stacked; one remove button per stack takes the last copy.
 function tableCreaturesHtml(anim,ownerId,cards,opts={}){
-  return groupTableCards(cards).map(group=>{
+  // Declaring attacks: every copy gets its own slot so each one can be sent separately.
+  const groups=opts.attack?cards.map(c=>[c]):groupTableCards(cards);
+  return groups.map(group=>{
     const card=group[0];const tapped=isCreatureTapped(card);
     const anim_=tableAnimClass(anim,group.map(c=>`${ownerId}|${c.uid}`),tapped);
     const gear=card.kind==="commander"?(opts.gear||[]).map((g,i)=>({...g,anim:tableAnimClass(anim,[`${ownerId}|gear|${g.name}|${i}`],true)})):[];
     const uid=group[group.length-1].uid;
     // Your creatures: ⧉ duplicate and ✕ remove (one copy) on the card.
     const extraHtml=opts.player?`<button type="button" class="tt-dup" data-player-dup="${escapeHtml(uid)}" title="Duplicate" aria-label="Duplicate ${escapeHtml(card.name)}">⧉</button><button type="button" class="tt-remove" data-player-rm="${escapeHtml(uid)}" title="${group.length>1?"Remove one from the battlefield":"Remove from the battlefield"}" aria-label="Remove ${group.length>1?"one ":""}${escapeHtml(card.name)}">✕</button>`:"";
-    return tableCardHtml({...card,uid},{count:group.length,anim:anim_,gear,className:[opts.className,card.kind==="reanimated-creature"?"reanimated":"",card.commander?"commander":""].filter(Boolean).join(" "),removeOpp:opts.removeOpp,extraHtml});
+    let slotAttrs="",slotClass="",badge="";
+    if(opts.attack){
+      const row=opts.attack.rows.find(r=>r.uid===card.uid);
+      const target=row?oppById(row.targetId):null;
+      slotAttrs=`data-attack-uid="${escapeHtml(card.uid)}" role="button" aria-pressed="${!!row}"`;
+      slotClass=isCreatureTapped(card)?"tt-cant-attack":`tt-attackable${row?" is-attacking-target":""}`;
+      if(target)badge=`<span class="tt-attack-badge" title="Attacking ${escapeHtml(nm(target))}">⚔ ${target.ico}</span>`;
+    }else if(opts.blockOpen&&card.attacking){
+      slotAttrs=`data-block-open="1" role="button" title="Attacking you: click to declare blockers"`;slotClass="tt-blockable";
+    }
+    return tableCardHtml({...card,uid},{count:group.length,anim:anim_,gear,className:[opts.className,card.kind==="reanimated-creature"?"reanimated":"",card.commander?"commander":""].filter(Boolean).join(" "),removeOpp:opts.removeOpp,extraHtml:badge+extraHtml,slotAttrs,slotClass});
   }).join("");
 }
 // Non-creature permanents without uids (loose gear, utility): stack by name.
@@ -674,20 +710,25 @@ function tableOpponentSeatHtml(state,opp,anim){
   const cd=state.player.commanderDamageReceived[opp.id]||0;
   const commander=commanderOnField(opp);
   const creatures=opp.tokens.slice().sort((a,b)=>(b.kind==="commander")-(a.kind==="commander"));
-  const creaturesHtml=creatures.length?tableCreaturesHtml(anim,opp.id,creatures,{gear:opp.attachedGear||[],removeOpp:dead?null:opp.id}):'<span class="tt-empty">No creatures</span>';
+  const blockOpen=state.phase==="cpu"&&active&&cpuAttacksPlayer(state.activeResult);
+  const creaturesHtml=creatures.length?tableCreaturesHtml(anim,opp.id,creatures,{gear:opp.attachedGear||[],removeOpp:dead?null:opp.id,blockOpen}):'<span class="tt-empty">No creatures</span>';
+  // Declaring your attacks: each living opponent's seat is a target you can click.
+  const attacking=boardAttackMode()&&!dead;
+  const incoming=attacking?ensureAttackDraft().rows.filter(r=>r.targetId===opp.id):[];
+  const isTarget=attacking&&attackTargetId()===opp.id;
   const commandZone=commander?"":tableCardHtml({name:opp.name,ico:opp.ico,kind:"commander",effect:"Command zone"},{className:"in-zone",stat:opp.commanderInHand?"Hand":`+${opp.commanderTax||0}`});
   const removeOpp=dead?null:opp.id;
   const permanents=tablePermanentsHtml(anim,opp.id,(opp.looseGear||[]).map((g,i)=>({name:g.name,ico:"⚙",effect:`${g.effect||""} (unattached)`,key:`loose:${i}`})),"artifact",removeOpp)
     +tablePermanentsHtml(anim,opp.id,(opp.utilityPermanents||[]).map((u,i)=>({name:u.name,ico:u.ico||"✦",effect:u.effect||"",key:`util:${i}`})),"enchantment",removeOpp);
   const rocks=(opp.rampInPlay||0)+(opp.explosiveInPlay||0);
-  return `<div class="tt-seat ${dead?"dead":""} ${active?"is-active":""}" style="--seat:${oppColor(opp)}">
+  return `<div class="tt-seat ${dead?"dead":""} ${active?"is-active":""}${attacking?" tt-attack-target":""}${isTarget?" is-target":""}" ${attacking?`data-attack-target="${opp.id}" title="Click to attack ${escapeHtml(nm(opp))}"`:""} style="--seat:${oppColor(opp)}">
     <div class="tt-seat-h"><button type="button" class="tt-seat-name" data-view-target="${opp.index}" title="Open ${escapeHtml(nm(opp))}'s detail view">${opp.ico} ${escapeHtml(nm(opp))}</button>
       ${dead?'<span class="tt-life">☠</span>':stepHtml(`data-opp-stat="life" data-opp-id="${opp.id}"`,`${nm(opp)} life`,opp.life,{className:"tt-life",ico:"♥",warn:opp.life<=10})}
       ${(opp.poison||0)>0?`<span class="tt-chip" title="Poison counters">☣ ${opp.poison}</span>`:""}
       ${dead?"":stepHtml(`data-cmdr-from="${opp.id}"`,`commander damage from ${nm(opp)}`,`${cd}/21`,{className:"tt-chip",ico:"⚜",warn:cd>=14,title:"Commander damage this opponent has dealt you"})}
       <span class="tt-chip" title="Mana available${opp.heldMana?" · held open":""}">◇ ${manaAvailable(opp)}${opp.heldMana?` (${opp.heldMana} open)`:""}</span>
       <span class="tt-chip" title="${escapeHtml(handBreakdownText(opp))}">🃏 ${opponentHandSize(opp)}</span>
-      ${active?'<span class="tt-chip tt-turn">Taking turn</span>':""}</div>
+      ${active?'<span class="tt-chip tt-turn">▶ Their turn</span>':""}${isTarget?'<span class="tt-chip tt-target-chip">🎯 Target</span>':""}${incoming.length?`<span class="tt-chip tt-incoming" title="Your attackers on ${escapeHtml(nm(opp))}">⚔ ${incoming.length} · ${incoming.reduce((s,r)=>s+(parseInt(r.p)||0)*(r.kws.includes("Double Strike")?2:1),0)} power</span>`:""}</div>
     <div class="tt-zone tt-creatures">${commandZone}${creaturesHtml}</div>
     <div class="tt-zone tt-back">
       ${tablePile(anim,`${opp.id}|lands`,"🌲","Lands",opp.landsInPlay||0,{className:"land"})}
@@ -704,17 +745,21 @@ function tablePlayerSeatHtml(state,anim){
   const pws=(p.planeswalkers||[]).map(pw=>tableCardHtml({name:pw.name,ico:"⬡"},{className:"pw",stat:`◆${pw.loyalty}`,pwId:pw.id,anim:tableAnimClass(anim,[`player|${pw.id}`],true),
     extraHtml:`<div class="tt-pw-adj"><button type="button" class="step-btn" data-pw-loyalty="${pw.id}" data-d="-1" aria-label="Decrease ${escapeHtml(pw.name)} loyalty">−</button><button type="button" class="step-btn" data-pw-loyalty="${pw.id}" data-d="1" aria-label="Increase ${escapeHtml(pw.name)} loyalty">+</button></div>`})).join("");
   const tracked=trackedPlayerCreatures(p).slice().sort((a,b)=>(b.commander?1:0)-(a.commander?1:0));
-  const yourCreatures=tableCreaturesHtml(anim,"player",tracked,{player:true});
+  const attackMode=boardAttackMode();
+  const yourCreatures=tableCreaturesHtml(anim,"player",tracked,{player:true,attack:attackMode?ensureAttackDraft():null});
+  const paperAttackers=attackMode?ensureAttackDraft().rows.filter(r=>!r.uid).length:0;
+  const untracked=untrackedPlayerCreatures(p);
   const cmdrDmg=state.opponents.filter(o=>(p.commanderDamageReceived[o.id]||0)>0).map(o=>{const v=p.commanderDamageReceived[o.id];return stepHtml(`data-cmdr-from="${o.id}"`,`commander damage from ${nm(o)}`,`${v}/21`,{className:"tt-chip",ico:o.ico,warn:v>=14});}).join("");
   return `<div class="tt-seat tt-you ${state.phase==="player"?"is-active":""}" style="--seat:var(--gold)">
     <div class="tt-seat-h"><button type="button" class="tt-seat-name" data-view-target="-1" title="Open your detail view">🗡️ You</button>
       ${stepHtml('data-player-stat="life"',"your life",p.life,{className:"tt-life",ico:"♥",warn:p.life<=10})}
       ${stepHtml('data-player-stat="poison"',"your poison counters",p.poison||0,{className:"tt-chip",ico:"☣",warn:(p.poison||0)>=7})}${cmdrDmg}
-      ${state.phase==="player"?'<span class="tt-chip tt-turn">Your turn</span>':""}
+      ${state.phase==="player"?'<span class="tt-chip tt-turn">▶ Your turn</span>':""}
       <button type="button" class="btn-ghost tt-add" data-creature-add>+ Creature</button>
       <button type="button" class="btn-ghost tt-add" data-pw-add>+ Planeswalker</button></div>
     <div class="tt-zone tt-creatures">${pws}${yourCreatures}
-      ${tablePile(anim,"player|creatures","♟",tracked.length?"Other creatures":"Creatures (paper)",untrackedPlayerCreatures(p),{stepData:'data-player-stat="creatures"',title:"Creatures on your real table that you have not added as cards"})}
+      ${attackMode&&untracked?`<button type="button" class="tt-pile tt-attackable-pile" data-attack-paper title="Attack with a creature you have not added as a card"><span class="tt-pile-ico">♟</span><span class="tt-pile-count">${untracked}</span><span class="tt-pile-lbl">${paperAttackers?`⚔ ${paperAttackers} attacking`:"Click to attack"}</span></button>`
+        :tablePile(anim,"player|creatures","♟",tracked.length?"Other creatures":"Creatures (paper)",untracked,{stepData:'data-player-stat="creatures"',title:"Creatures on your real table that you have not added as cards"})}
       <span class="tt-spacer"></span>
       ${tablePileHtml("📚","Library",p.librarySize||0,{className:"facedown",stepData:'data-player-stat="librarySize"'})}
       ${tablePile(anim,"player|gy","⚰","Graveyard",p.graveyardCount||0,{attrs:'data-graveyard-owner="player"',title:"View graveyard"})}
@@ -770,7 +815,7 @@ function wireTablePeek(board){
     cardEl.addEventListener('mouseleave',hideTablePeek);
     cardEl.addEventListener('focus',()=>{if(peekOnHover())showTablePeek(cardEl);});
     cardEl.addEventListener('blur',hideTablePeek);
-    cardEl.addEventListener('click',e=>{if(e.target.closest('button'))return;showTablePeek(cardEl);});
+    cardEl.addEventListener('click',e=>{if(e.target.closest('button,[data-attack-uid],[data-block-open]')||(boardAttackMode()&&e.target.closest('[data-attack-target]')))return;showTablePeek(cardEl);});
   });
 }
 function renderTableView(state,board){
@@ -1079,7 +1124,7 @@ function showCommanderGame(){
   document.getElementById('modePill').textContent=`Commander Battle`;
   document.getElementById('turnNum').textContent=gameState.turn;
   const active=oppById(gameState.activeOppId);
-  document.getElementById('phasePill').textContent=gameState.phase==="cpu"&&active?`${nm(active)}'s Turn`:gameState.phase==="cpu"?"Opponents' Turn":"Your Turn";
+  document.getElementById('phasePill').textContent=gameState.phase==="ready"?"Ready to start":gameState.phase==="cpu"&&active?`${nm(active)}'s Turn`:gameState.phase==="cpu"?"Opponents' Turn":"Your Turn";
   updateCommanderTurnBanner(gameState);
   renderLifeHud(gameState);
   const playerHud=document.querySelector('.player-hud');
@@ -1118,9 +1163,17 @@ function setConfirmButton(text,className,onclick,showEndTurn,previewFn){
   const bar=ensureConfirmBar();
   let html=`<button class="cmd-confirm-btn ${className}" id="cmdConfirmBtn"><span class="cmd-preview" hidden></span><span class="cmd-label">${text}</span><kbd class="cmd-key" aria-hidden="true">Space</kbd></button>`;
   if(showEndTurn)html+=`<button class="cmd-confirm-btn cmd-end-turn-btn ${className}" id="cmdEndTurnBtn">End Turn</button>`;
+  // Player Action and Battlefield Rules open as popups from the bar, on every turn screen.
+  if(gameState&&(gameState.phase==="player"||gameState.phase==="cpu")){
+    const rules=activeBattlefieldRules().length;
+    html+=`<span class="cmd-icon-group"><button type="button" class="cmd-icon-btn" id="cmdPlayerActionBtn" title="Player action: discard, mill, destroy, draw, life, poison, tokens…" aria-label="Player action">⚡<span class="cmd-icon-lbl">Action</span></button>
+      <button type="button" class="cmd-icon-btn" id="cmdRulesBtn" title="Battlefield rules: your ongoing effects that restrict the CPUs" aria-label="Battlefield rules${rules?`, ${rules} active`:""}">🛡<span class="cmd-icon-lbl">Rules</span>${rules?`<span class="cmd-icon-badge">${rules}</span>`:""}</button></span>`;
+  }
   bar.innerHTML=html;
   document.getElementById('cmdConfirmBtn').onclick=onclick;
   if(showEndTurn)document.getElementById('cmdEndTurnBtn').onclick=()=>endTurnFromCurrentStep();
+  document.getElementById('cmdPlayerActionBtn')?.addEventListener('click',openPlayerActionPopup);
+  document.getElementById('cmdRulesBtn')?.addEventListener('click',openBattlefieldRulesPopup);
   confirmPreviewFn=previewFn||null;
   refreshConfirmPreview();
 }
@@ -1173,7 +1226,71 @@ function updateRecapToggle(){
 function markRecapStart(){
   const life={player:gameState.player.life};
   gameState.opponents.forEach(opp=>{life[opp.id]=opp.life;});
-  gameState.recap={seq:gameState.logSeq||0,life};
+  // Board bookmark for the "Since your last turn" popup: who controls which creatures.
+  const creatures={player:Object.fromEntries((gameState.player.tokens||[]).map(t=>[t.uid,t.name]))};
+  gameState.opponents.forEach(opp=>{creatures[opp.id]=Object.fromEntries(opp.tokens.map(t=>[t.uid,t.name]));});
+  gameState.recap={seq:gameState.logSeq||0,life,creatures,paper:untrackedPlayerCreatures(gameState.player),
+    cmdDamage:{...(gameState.player.commanderDamageReceived||{})},poison:gameState.player.poison||0,
+    dead:gameState.opponents.filter(isOpponentDead).map(o=>o.id)};
+}
+/* "2× Soldier token, Primal Hydra" */
+function recapNameList(names){
+  const counts=new Map();names.forEach(n=>counts.set(n,(counts.get(n)||0)+1));
+  return [...counts].map(([n,c])=>`${c>1?`${c}× `:""}${escapeHtml(n)}`).join(", ");
+}
+/* Popup overview of everything since you ended your last turn: life, creatures that died or
+   arrived, commander damage, eliminations, and what each CPU did. */
+function recapPopupHtml(){
+  const recap=gameState.recap;
+  if(!recap)return `<p class="recap-quiet">Nothing to report yet.</p>`;
+  const seats=[{id:"player",ico:"🗡️",name:"You",life:gameState.player.life,tokens:gameState.player.tokens||[]},
+    ...gameState.opponents.map(o=>({id:o.id,ico:o.ico,name:nm(o),life:o.life,tokens:o.tokens,opp:o}))];
+  const section=(title,body)=>body?`<section class="recap-section"><h4>${title}</h4>${body}</section>`:"";
+  // Life
+  const lives=seats.filter(p=>recap.life[p.id]!=null&&recap.life[p.id]!==p.life).map(p=>{
+    const delta=p.life-recap.life[p.id];
+    return `<span class="recap-life ${delta<0?"down":"up"}${p.id==="player"?" is-you":""}">${p.ico} ${escapeHtml(p.name)} ${recap.life[p.id]} → <b>${p.life}</b> <small>(${delta>0?"+":"−"}${Math.abs(delta)})</small></span>`;
+  });
+  let html=section("Life",lives.length?`<div class="recap-lives">${lives.join("")}</div>`:`<p class="recap-quiet">No life totals changed.</p>`);
+  // Eliminations, commander damage and poison on you
+  const notes=[];
+  gameState.opponents.filter(o=>isOpponentDead(o)&&!(recap.dead||[]).includes(o.id)).forEach(o=>notes.push(`☠ <b>${escapeHtml(nm(o))}</b> was eliminated.`));
+  const cmd=gameState.player.commanderDamageReceived||{};
+  gameState.opponents.forEach(o=>{
+    const before=(recap.cmdDamage||{})[o.id]||0,now=cmd[o.id]||0;
+    if(now>before)notes.push(`⚜ ${escapeHtml(nm(o))} dealt you ${now-before} commander damage <b>(${now}/21)</b>.`);
+  });
+  if((gameState.player.poison||0)>(recap.poison||0))notes.push(`☣ You got ${(gameState.player.poison||0)-(recap.poison||0)} poison <b>(${gameState.player.poison}/10)</b>.`);
+  html+=section("Watch out",notes.length?`<ul class="recap-lines">${notes.map(n=>`<li>${n}</li>`).join("")}</ul>`:"");
+  // Creatures that left and arrived, per seat
+  if(recap.creatures){
+    const left=[],arrived=[];
+    seats.forEach(p=>{
+      const before=recap.creatures[p.id]||{};
+      const nowUids=new Set(p.tokens.map(t=>t.uid));
+      const gone=Object.entries(before).filter(([uid])=>!nowUids.has(uid)).map(([,n])=>n);
+      const fresh=p.tokens.filter(t=>!(t.uid in before)).map(t=>t.name);
+      if(p.id==="player"){
+        const paperDelta=untrackedPlayerCreatures(gameState.player)-(recap.paper||0);
+        if(paperDelta<0)gone.push(...Array(-paperDelta).fill("Creature (not added as a card)"));
+        if(paperDelta>0)fresh.push(...Array(paperDelta).fill("Creature (not added as a card)"));
+      }
+      if(gone.length)left.push(`<li>${p.ico} <b>${escapeHtml(p.name)}</b>: ${recapNameList(gone)}</li>`);
+      if(fresh.length)arrived.push(`<li>${p.ico} <b>${escapeHtml(p.name)}</b>: ${recapNameList(fresh)}</li>`);
+    });
+    html+=section("Creatures that died or left",left.length?`<ul class="recap-lines">${left.join("")}</ul>`:"");
+    html+=section("New creatures",arrived.length?`<ul class="recap-lines">${arrived.join("")}</ul>`:"");
+  }
+  // What each CPU did (its spell summary and attacks), oldest first
+  const lines=gameState.log.filter(e=>e.seq>recap.seq).reverse().map(e=>e.msg)
+    .filter(m=>/^⚔/.test(m)||gameState.opponents.some(o=>m.startsWith(`${o.ico} `)));
+  html+=section("What happened",lines.length?`<ul class="recap-lines">${lines.map(m=>`<li>${m}</li>`).join("")}</ul>`:`<p class="recap-quiet">The opponents made no notable plays.</p>`);
+  return `<div class="recap-popup">${html}<p class="recap-foot"><button type="button" class="btn-quiet" id="recapPopupLog">Full log</button> · Turn this popup off in Settings → Gameplay.</p></div>`;
+}
+function showRecapPopup(){
+  openInfoModal(`📜 Since your last turn · Round ${gameState.turn}`,recapPopupHtml());
+  const logBtn=document.getElementById('recapPopupLog');
+  if(logBtn)logBtn.onclick=()=>{closeInfoModal();if(typeof openLog==="function")openLog();};
 }
 function buildRecapHtml(){
   const recap=gameState.recap;
@@ -1243,11 +1360,6 @@ function beginCpuTurn(opp){
   responseDraft=null;commanderEffectDraft=null;
   if(isOpponentDead(opp)){finishCpuTurn(opp,false);return;}
   saveState();
-  // Nothing to counter or answer (land, draw…): go straight on. Its actions still show in
-  // the combat window and in your turn recap.
-  const result=gameState.activeResult;
-  // Deferred a tick: this can run inside the previous window's continue (transitioning).
-  if(!counterableCpuActions(result).length&&!pendingPlayerRemovalActions(result).length){const seq=++windowSeq;setTimeout(()=>continueCpuWindow(seq),0);return;}
   showCpuWindow();
 }
 function logCpuActions(opp,actions){
@@ -1610,7 +1722,7 @@ function renderCpuWindowForm(){
       ${stepperHtml("instantDamage","Damage you dealt",draft.instantDamage)}
       ${draft.instantDamage>0?instantTargetsHtml(draft):""}
     </div></div></details>`;
-  html+='<div id="cpuResponsePlayerAction"></div></div>';
+  html+='</div>';
   panel.innerHTML=html;
 
   const extras=panel.querySelector('.response-extras');
@@ -1636,11 +1748,6 @@ function renderCpuWindowForm(){
     btn.onclick=()=>attacksPlayer?openBlockersDialog(opp,result):selectResponseToken(oppById(btn.dataset.owner),btn.dataset.uid);
   });
   panel.querySelector('#declareBlockersBtn')?.addEventListener('click',()=>openBlockersDialog(opp,result));
-  renderPlayerActionPanel(panel.querySelector('#cpuResponsePlayerAction'),{
-    contextKey:`cpu:${responseDraft.key}`,
-    help:"Resolve an instant-speed action, then continue the opponent's turn.",
-    onResolved:()=>{if(seq===windowSeq)renderCpuWindowForm();}
-  });
 
   const continueLabel=result.stage==="main"?"Continue to Combat ▸":nextSeatLabel();
   setConfirmButton(continueLabel,"garruk",()=>continueCpuWindow(seq),false,()=>cpuWindowPreviewText(opp,result));
@@ -1824,6 +1931,25 @@ async function confirmPlayerAction(effect,draft){
   return true;
 }
 
+/* Player action draft for the open screen: one per step / CPU window. */
+function playerActionContext(){
+  if(gameState.phase==="cpu"&&responseDraft)return {contextKey:`cpu:${responseDraft.key}`,help:"Resolve an instant-speed action, then continue the opponent's turn."};
+  if(gameState.playerStep==="combat")return {contextKey:`combat:${gameState.turn}`,help:"Resolve a player action before combat damage."};
+  return {contextKey:`player:${gameState.turn}:${gameState.playerStep}`,help:"All resolves to each target’s available amount. Noncreature permanents you control remain a table action."};
+}
+function openPlayerActionPopup(){
+  const ctx=playerActionContext();
+  openInfoModal("⚡ Player Action",'<div class="modal-panel" id="playerActionModal"></div>');
+  const draft=playerActionDraft(ctx.contextKey);draft.actionOpen=true;
+  renderPlayerActionPanel(document.getElementById('playerActionModal'),{...ctx,onResolved:()=>{closeInfoModal();refreshActivePanel();}});
+}
+function openBattlefieldRulesPopup(){
+  openInfoModal("🛡 Battlefield Rules",'<div class="modal-panel" id="rulesModal"></div>');
+  const host=document.getElementById('rulesModal');
+  const render=()=>{battlefieldRulesOpen=true;host.innerHTML=buildBattlefieldRulesPanel();wireBattlefieldRulesPanel(host,()=>{render();refreshActivePanel();});};
+  render();
+}
+
 /* =====================================================================
    BATTLEFIELD RULES PANEL
    ===================================================================== */
@@ -1920,16 +2046,11 @@ function playerStepDraft(){
 function startPlayerPhase(){
   gameState.phase="player";
   gameState.activeOppId=null;gameState.activeResult=null;gameState.responseStage=null;
+  gameState.playerStep="draw";
   playerDraft=null;attackDraft=null;commanderEffectDraft=null;
-  autoDrawStep();
   saveState();
   showPlayerStep();
-}
-/* Untap + draw happen automatically; Main Phase shows what you drew (gameState.turnDraw). */
-function autoDrawStep(){
-  const drawn=playerDrawStep(gameState);
-  gameState.turnDraw={turn:gameState.turn,skipped:!!drawn.skipped,empty:!!drawn.empty};
-  gameState.playerStep="main1";
+  if(recapEnabled())showRecapPopup();
 }
 function showPlayerStep(){
   windowSeq++;
@@ -1945,7 +2066,7 @@ function renderPlayerStepPanel(){
     case "main1": showMainStep(); break;
     case "combat": showCombatStep(); break;
     case "end": showMainTwoStep(); break;
-    default: autoDrawStep();saveState();showMainStep(); // saves from before the automatic draw
+    default: showDrawStep();
   }
 }
 function setPlayerStepHeader(stepLabel,instructions,responseTitle){
@@ -1971,20 +2092,29 @@ function goToPlayerStep(next,apply){
   showPlayerStep();
 }
 
-/* --- START OF TURN: recap + the automatic draw, shown above Main Phase 1 --- */
-function turnStartHtml(){
-  const d=gameState.turnDraw;
-  if(!d||d.turn!==gameState.turn)return "";
+/* --- DRAW STEP --- */
+// With the "Since your last turn" popup on, the step offers a button to reopen it;
+// with it off, the recap shows inline here.
+function showDrawStep(){
   const p=gameState.player;
-  const drawText=d.skipped?"You skip your first draw (first player in a two-player game).":d.empty?"Your library is empty. You could not draw.":`Untap and draw for the turn. Library ${p.librarySize||0}.`;
-  return `${recapEnabled()?buildRecapHtml():""}<div class="context-summary draw-summary"><span class="context-summary-icon">🃏</span><div><strong>${d.skipped?"No draw this turn":"You drew a card"}</strong><span>${drawText}</span></div></div>`;
+  const skip=playerSkipsFirstDraw(gameState);
+  setPlayerStepHeader("Draw Step",skip?"Untap and resolve upkeep triggers. You skip your first draw.":"Untap your permanents, resolve upkeep triggers, then draw a card.","Upkeep & Draw");
+  const panel=document.getElementById('respGrid');
+  const recapHtml=recapEnabled()?`<div class="attack-builder-actions"><button type="button" class="target-btn" id="recapPopupBtn">📜 Since your last turn</button></div>`:buildRecapHtml();
+  panel.innerHTML=`<div class="context-form commander-form">${recapHtml}
+    <div class="context-summary draw-summary"><span class="context-summary-icon">🃏</span><div><strong>${skip?"No draw this turn":"Draw for the turn"}</strong><span>${skip?"The first player in a two-player game skips the first draw.":`Library ${p.librarySize||0} → ${Math.max(0,(p.librarySize||0)-1)}`}</span></div></div>
+  </div>`;
+  const openLogBtn=panel.querySelector('#recapOpenLog');
+  if(openLogBtn&&typeof openLog==="function")openLogBtn.onclick=openLog;
+  panel.querySelector('#recapPopupBtn')?.addEventListener('click',showRecapPopup);
+  setConfirmButton(skip?"Continue to Main Phase ▸":"Draw a Card ▸","",()=>goToPlayerStep("main1",()=>playerDrawStep(gameState)),true);
 }
 
 /* --- MAIN PHASES --- */
 function mainStepPanelHtml(draft,extraHtml,topHtml){
   return `<div class="context-form commander-form">${topHtml||""}<div class="context-section"><div class="attack-builder-actions"><button type="button" class="target-btn" id="mainAddCreatureBtn">+ Creature you played</button></div><div class="commander-player-actions">
     ${stepperHtml("lifeGained","Life you gained",draft.lifeGained)}
-  </div>${extraHtml||""}</div>${buildBattlefieldRulesPanel()}<div id="mainPlayerAction"></div></div>`;
+  </div>${extraHtml||""}</div></div>`;
 }
 function mainStepPreview(draft){
   return joinPreview([draft.creaturesPlayed>0&&`+${plural(draft.creaturesPlayed,"creature")}`,draft.lifeGained>0&&`+${draft.lifeGained} life`]);
@@ -1994,20 +2124,13 @@ function renderMainPanel(rerender,extraHtml,topHtml){
   const panel=document.getElementById('respGrid');
   panel.innerHTML=mainStepPanelHtml(draft,extraHtml,topHtml);
   wireDraftSteppers(panel.querySelector('.commander-player-actions'),draft);
-  wireBattlefieldRulesPanel(panel,rerender);
   panel.querySelector('#mainAddCreatureBtn').onclick=()=>addPlayerCreatureFlow(rerender);
-  renderPlayerActionPanel(panel.querySelector('#mainPlayerAction'),{contextKey:`player:${draft.key}`,
-    help:"All resolves to each target’s available amount. Noncreature permanents you control remain a table action.",onResolved:rerender});
   return draft;
 }
 function showMainStep(){
   setPlayerStepHeader("Main Phase","Play lands, cast spells, and record what changed.","Your Actions");
-  const draft=renderMainPanel(showMainStep,"",turnStartHtml());
-  const openLogBtn=document.getElementById('recapOpenLog');
-  if(openLogBtn&&typeof openLog==="function")openLogBtn.onclick=openLog;
-  // With no creatures there is nothing to attack with: end the turn from here.
-  if(!(gameState.player.creatures>0))setConfirmButton("End Turn ▸","",()=>endPlayerTurn(()=>applyPlayerTurnInputs(gameState,draft)),false,()=>mainStepPreview(draft));
-  else setConfirmButton("Go to Combat ▸","",()=>goToPlayerStep("combat",()=>applyPlayerTurnInputs(gameState,draft)),true,()=>mainStepPreview(draft));
+  const draft=renderMainPanel(showMainStep);
+  setConfirmButton("Go to Combat ▸","",()=>goToPlayerStep("combat",()=>applyPlayerTurnInputs(gameState,draft)),true,()=>mainStepPreview(draft));
 }
 function showMainTwoStep(){
   setPlayerStepHeader("Main Phase 2","Cast spells, record what changed, then end your turn.","Your Actions");
@@ -2068,49 +2191,97 @@ function attackerRowHtml(row,i,alive){
     ${row.uid?"":`<div class="kw-chips">${kwChips}</div>`}
   </div>`;
 }
+/* ---------- Declaring attacks on the board ----------
+   While your Combat step is in the builder, the table is the input: click an opponent's
+   seat to make it the target, then click your creatures to send them (click again to take
+   one back, or pick another target and click to move it). The paper-creature pile adds an
+   attacker for creatures you have not added as cards. */
+function boardAttackMode(){
+  return !!gameState&&!gameState.gameOver&&gameState.phase==="player"&&gameState.playerStep==="combat"
+    &&(!attackDraft||attackDraft.key!==`${gameState.turn}`||attackDraft.mode==="builder");
+}
+function attackTargetId(){
+  const draft=ensureAttackDraft();
+  if(!aliveOpponents(gameState).some(o=>o.id===draft.activeTarget))draft.activeTarget=defaultAttackTarget();
+  return draft.activeTarget;
+}
+function refreshCombatViews(){renderBoardView(gameState);showCombatStep();}
+function setAttackTarget(id){
+  if(!aliveOpponents(gameState).some(o=>o.id===id))return;
+  ensureAttackDraft().activeTarget=id;refreshCombatViews();
+}
+function attackRowFor(t,targetId){return {uid:t.uid,name:t.name,p:t.p,t:t.t,kws:(t.kws||[]).slice(),targetId,commander:!!t.commander};}
+function toggleBoardAttacker(uid){
+  const draft=ensureAttackDraft();
+  const t=trackedPlayerCreatures(gameState.player).find(x=>x.uid===uid);
+  if(!t||isCreatureTapped(t))return;
+  const target=attackTargetId();
+  const row=draft.rows.find(r=>r.uid===uid);
+  if(!row)draft.rows.push(attackRowFor(t,target));
+  else if(row.targetId===target)draft.rows.splice(draft.rows.indexOf(row),1);
+  else row.targetId=target;
+  refreshCombatViews();
+}
+function addPaperAttacker(){
+  const draft=ensureAttackDraft();
+  if(draft.rows.filter(r=>!r.uid).length>=untrackedPlayerCreatures(gameState.player))return;
+  draft.rows.push({p:2,t:2,kws:[],targetId:attackTargetId(),commander:false});
+  refreshCombatViews();
+}
+function attackRowPower(r){return (parseInt(r.p)||0)*(r.kws.includes("Double Strike")?2:1);}
+function attackRowLabel(r){return r.name||(r.commander?"Your commander":"Creature");}
 function showCombatStep(){
-  setPlayerStepHeader("Combat","Select your attackers. Each defending CPU chooses its blockers.","Combat");
+  setPlayerStepHeader("Combat","Declare attackers on the table. Each defending CPU chooses its blockers.","Combat");
   const draft=ensureAttackDraft();
   const panel=document.getElementById('respGrid');
   const alive=aliveOpponents(gameState);
   if(draft.mode==="manual"){renderManualCombat(panel,alive);return;}
   if(draft.mode==="review"&&draft.outcome){renderAttackReview(panel,draft);return;}
   const p=gameState.player;
-  // Your tracked creatures attack with one click; rows for removed cards drop out.
   const tracked=trackedPlayerCreatures(p);
-  draft.rows=draft.rows.filter(r=>!r.uid||tracked.some(t=>t.uid===r.uid));
-  // Summoning sickness is yours to track: any untapped creature can be sent.
-  const canAttack=t=>!isCreatureTapped(t);
-  const picker=tracked.length?`<div class="attack-picker">${tracked.map(t=>{
-      const on=draft.rows.some(r=>r.uid===t.uid);const ready=canAttack(t);
-      return `<button type="button" class="kill-btn card-choice${on?" selected":""}${ready?"":" is-tapped"}" data-attack-uid="${escapeHtml(t.uid)}" aria-pressed="${on}" ${ready?"":"disabled"} title="${ready?(on?"Remove from attack":"Attack with this creature"):"Tapped"}"><span class="kill-btn-status">${on?"⚔":ready?"⬡":"↷"}</span>${cardReferenceHtml(t)}</button>`;
-    }).join("")}</div>`:"";
-  const readyCount=tracked.filter(canAttack).length;
-  const rowsHtml=draft.rows.map((row,i)=>attackerRowHtml(row,i,alive)).join("");
+  draft.rows=draft.rows.filter(r=>!r.uid||tracked.some(t=>t.uid===r.uid)); // cards removed since
+  const target=attackTargetId();
+  const targetOpp=oppById(target);
+  const ready=tracked.filter(t=>!isCreatureTapped(t)&&!draft.rows.some(r=>r.uid===t.uid));
+  const untracked=untrackedPlayerCreatures(p);
+  const chips=alive.map(o=>`<button type="button" class="target-btn atk-target-chip${o.id===target?" active":""}" data-set-target="${o.id}" aria-pressed="${o.id===target}" style="--seat:${oppColor(o)}">${o.ico} ${escapeHtml(nm(o))} <small>♥ ${o.life}</small></button>`).join("");
+  const summary=alive.map(o=>{
+    const rows=draft.rows.map((r,i)=>({r,i})).filter(x=>x.r.targetId===o.id);
+    if(!rows.length)return "";
+    return `<div class="atk-summary-row" style="border-left-color:${oppColor(o)}"><b>${o.ico} ${escapeHtml(nm(o))}</b><span class="atk-summary-power">⚔ ${rows.reduce((s,x)=>s+attackRowPower(x.r),0)} power</span>
+      <div class="atk-summary-chips">${rows.map(({r,i})=>`<span class="atk-chip">${r.commander?"⚜ ":""}${escapeHtml(attackRowLabel(r))} <small>${r.p}/${r.t}</small><button type="button" data-row-remove="${i}" aria-label="Take back ${escapeHtml(attackRowLabel(r))}">✕</button></span>`).join("")}</div></div>`;
+  }).join("");
+  const hint=tracked.length||untracked
+    ?`On the table: click an opponent to choose who you attack (🎯), then click your creatures to send them. Click a creature again to take it back.${untracked?" Click your creature pile to attack with creatures you have not added as cards.":""}`
+    :"You have no creatures on the battlefield. Add them with + Creature on your seat.";
   panel.innerHTML=`<div class="context-form commander-form">
     <section class="resolution-step response-step attack-builder" data-step="attackers">
       <div class="resolution-step-h"><span>1</span><strong>Declare attackers</strong><em class="step-status">${draft.rows.length?plural(draft.rows.length,"attacker"):"None"}</em></div>
-      <p class="step-hint">${tracked.length?"Select your creatures to attack, or add a row for an attacker you have not added as a card.":"Add a row for each attacking creature, or add your creatures as cards (+ Creature) to attack with one click."} You control ${plural(p.creatures,"creature")}. CPU creatures that attacked on their last turn are still tapped and cannot block, unless they have vigilance.</p>
-      <div class="resolution-step-b">${picker}${readyCount>1?`<div class="attack-builder-actions"><button type="button" class="target-btn" id="attackAllBtn">⚔ All ready creatures (${readyCount})</button></div>`:""}${rowsHtml||'<div class="empty-field">No attackers declared.</div>'}
-        <div class="attack-builder-actions"><button type="button" class="target-btn" id="addAttackerBtn">+ Attacker</button>${draft.rows.some(r=>r.commander)?"":`<button type="button" class="target-btn" id="addCommanderBtn">+ Commander</button>`}<button type="button" class="btn-quiet" id="manualCombatBtn">Enter results manually</button></div>
+      <p class="step-hint">${hint}</p>
+      <div class="resolution-step-b">
+        <div class="atk-targets" role="group" aria-label="Attack target">${chips}</div>
+        ${summary||'<div class="empty-field">No attackers yet.</div>'}
+        <div class="attack-builder-actions">
+          ${ready.length?`<button type="button" class="target-btn" id="attackAllBtn">⚔ All ready creatures → ${escapeHtml(targetOpp?nm(targetOpp):"target")} (${ready.length})</button>`:""}
+          <button type="button" class="target-btn" id="addAttackerBtn">+ Attacker not on the table</button>
+          ${draft.rows.some(r=>r.commander)||tracked.some(t=>t.commander)?"":`<button type="button" class="target-btn" id="addCommanderBtn">+ Commander</button>`}
+          <button type="button" class="btn-quiet" id="manualCombatBtn">Enter results manually</button>
+        </div>
+        ${draft.rows.length?`<details class="context-disclosure atk-adjust"${draft.adjustOpen?" open":""}><summary><span>Adjust attackers (power, toughness, keywords, target)</span><small>Optional</small></summary><div class="context-disclosure-body">${draft.rows.map((row,i)=>attackerRowHtml(row,i,alive)).join("")}</div></details>`:""}
       </div>
-    </section>
-    <div id="combatPlayerAction"></div></div>`;
-  const rerender=()=>showCombatStep();
-  const addRow=commander=>{draft.rows.push({p:commander?4:2,t:commander?4:2,kws:[],targetId:defaultAttackTarget(),commander:!!commander});rerender();};
-  const addTracked=t=>draft.rows.push({uid:t.uid,name:t.name,p:t.p,t:t.t,kws:(t.kws||[]).slice(),targetId:defaultAttackTarget(),commander:!!t.commander});
-  panel.querySelectorAll('[data-attack-uid]').forEach(btn=>{btn.onclick=()=>{
-    const uid=btn.dataset.attackUid;const i=draft.rows.findIndex(r=>r.uid===uid);
-    if(i>=0)draft.rows.splice(i,1);else{const t=tracked.find(x=>x.uid===uid);if(t)addTracked(t);}
-    rerender();
-  };});
-  panel.querySelector('#attackAllBtn')?.addEventListener('click',()=>{tracked.filter(canAttack).forEach(t=>{if(!draft.rows.some(r=>r.uid===t.uid))addTracked(t);});rerender();});
+    </section></div>`;
+  const rerender=()=>refreshCombatViews();
+  const addRow=commander=>{draft.rows.push({p:commander?4:2,t:commander?4:2,kws:[],targetId:target,commander:!!commander});draft.adjustOpen=true;rerender();};
+  panel.querySelectorAll('[data-set-target]').forEach(btn=>{btn.onclick=()=>setAttackTarget(btn.dataset.setTarget);});
+  panel.querySelector('#attackAllBtn')?.addEventListener('click',()=>{ready.forEach(t=>draft.rows.push(attackRowFor(t,target)));rerender();});
   panel.querySelector('#addAttackerBtn').onclick=()=>addRow(false);
   panel.querySelector('#addCommanderBtn')?.addEventListener('click',()=>addRow(true));
   panel.querySelector('#manualCombatBtn').onclick=()=>{draft.mode="manual";rerender();};
+  const adjust=panel.querySelector('.atk-adjust');
+  if(adjust)adjust.addEventListener('toggle',()=>{draft.adjustOpen=adjust.open;});
   panel.querySelectorAll('[data-row-remove]').forEach(btn=>{btn.onclick=()=>{draft.rows.splice(parseInt(btn.dataset.rowRemove),1);rerender();};});
-  panel.querySelectorAll('[data-row-cmdr]').forEach(box=>{box.onchange=()=>{const i=parseInt(box.dataset.rowCmdr);draft.rows.forEach((r,j)=>{r.commander=j===i?box.checked:false;});rerender();};});
-  panel.querySelectorAll('[data-row-target]').forEach(sel=>{sel.onchange=()=>{draft.rows[parseInt(sel.dataset.rowTarget)].targetId=sel.value;refreshConfirmPreview();};});
+  panel.querySelectorAll('[data-row-cmdr]').forEach(box=>{box.onchange=()=>{const i=parseInt(box.dataset.rowCmdr);draft.rows.forEach((r,j)=>{if(!r.uid)r.commander=j===i?box.checked:false;});rerender();};});
+  panel.querySelectorAll('[data-row-target]').forEach(sel=>{sel.onchange=()=>{draft.rows[parseInt(sel.dataset.rowTarget)].targetId=sel.value;rerender();};});
   panel.querySelectorAll('.kw-chip').forEach(chip=>{chip.onclick=()=>{
     const row=draft.rows[parseInt(chip.dataset.row)];const kw=chip.dataset.kw;
     row.kws=row.kws.includes(kw)?row.kws.filter(k=>k!==kw):[...row.kws,kw];
@@ -2121,20 +2292,21 @@ function showCombatStep(){
   panel.querySelectorAll('[data-row-field]').forEach(stepper=>{
     const row=draft.rows[parseInt(stepper.dataset.rowIndex)];const field=stepper.dataset.rowField;
     const inp=stepper.querySelector('input');
-    const set=v=>{row[field]=Math.max(0,Math.min(99,v));inp.value=row[field];refreshConfirmPreview();};
+    const set=v=>{row[field]=Math.max(0,Math.min(99,v));inp.value=row[field];refreshConfirmPreview();renderBoardView(gameState);};
     stepper.querySelectorAll('[data-row-delta]').forEach(b=>{b.onclick=()=>set((parseInt(inp.value)||0)+parseInt(b.dataset.rowDelta));});
     inp.onchange=()=>set(parseInt(inp.value)||0);
   });
-  renderPlayerActionPanel(panel.querySelector('#combatPlayerAction'),{contextKey:`combat:${gameState.turn}`,help:"Resolve a player action before combat damage.",onResolved:rerender});
   const validRows=draft.rows.filter(r=>r.targetId);
   if(validRows.length){
     setConfirmButton("Declare Attackers ▸","",()=>{
       draft.outcome=computePlayerAttack(gameState,draft.rows);
-      draft.mode="review";rerender();
-    },true,()=>`${plural(validRows.length,"attacker")} · ${validRows.reduce((s,r)=>s+(parseInt(r.p)||0)*(r.kws.includes("Double Strike")?2:1),0)} power`);
+      draft.mode="review";refreshCombatViews();
+    },true,()=>{
+      const per=alive.map(o=>({o,n:validRows.filter(r=>r.targetId===o.id)})).filter(x=>x.n.length);
+      return per.map(x=>`${x.o.ico} ${x.n.reduce((s,r)=>s+attackRowPower(r),0)}`).join(" · ");
+    });
   }else{
-    // No attack: Main Phase 2 would repeat Main Phase 1, so this ends the turn.
-    setConfirmButton("No Attack · End Turn ▸","",()=>endPlayerTurn(null),false);
+    setConfirmButton("Skip Combat ▸","",()=>goToPlayerStep("end",null),true);
   }
 }
 function renderAttackReview(panel,draft){
@@ -2162,7 +2334,7 @@ function renderAttackReview(panel,draft){
         </ul></div>
         <div class="attack-builder-actions"><button type="button" class="target-btn" id="editAttackersBtn">Edit attackers</button><button type="button" class="btn-quiet" id="manualCombatBtn">Enter results manually</button></div>
       </div></section></div>`;
-  panel.querySelector('#editAttackersBtn').onclick=()=>{draft.mode="builder";draft.outcome=null;showCombatStep();};
+  panel.querySelector('#editAttackersBtn').onclick=()=>{draft.mode="builder";draft.outcome=null;refreshCombatViews();};
   panel.querySelector('#manualCombatBtn').onclick=()=>{draft.mode="manual";showCombatStep();};
   const dealt=outcome.perOpp.reduce((s,e)=>s+e.damage,0);
   const kills=outcome.perOpp.reduce((s,e)=>s+e.kills.length,0);
@@ -2197,7 +2369,7 @@ function renderManualCombat(panel,alive){
     });
     html+=`</div>`;
   }
-  html+=`<div class="attack-builder-actions"><button type="button" class="target-btn" id="backToBuilderBtn">Declare attackers instead</button></div><div id="combatPlayerAction"></div></div>`;
+  html+=`<div class="attack-builder-actions"><button type="button" class="target-btn" id="backToBuilderBtn">Declare attackers instead</button></div></div>`;
   panel.innerHTML=html;
   alive.forEach(opp=>{const sec=panel.querySelector(`[data-opp-section="${opp.id}"]`);if(sec)wireDraftSteppers(sec,m.perOpp[opp.id]);});
   wireDraftSteppers(panel.querySelector('.manual-you'),m);
@@ -2206,8 +2378,7 @@ function renderManualCombat(panel,alive){
     if(m.kills.has(uid))m.kills.delete(uid);else m.kills.set(uid,{ownerId:btn.dataset.owner,uid});
     renderManualCombat(panel,alive);
   };});
-  panel.querySelector('#backToBuilderBtn').onclick=()=>{attackDraft.mode="builder";showCombatStep();};
-  renderPlayerActionPanel(panel.querySelector('#combatPlayerAction'),{contextKey:`combat:${gameState.turn}`,help:"Resolve a player action before finalizing combat.",onResolved:()=>renderManualCombat(panel,alive)});
+  panel.querySelector('#backToBuilderBtn').onclick=()=>{attackDraft.mode="builder";refreshCombatViews();};
   setConfirmButton("Finish Combat ▸","",()=>goToPlayerStep("end",applyCombatDraft),true,()=>{
     const r=manualCombatResults(alive);
     const dealt=r.perOpp.reduce((s,e)=>s+e.damage,0),cmd=r.perOpp.reduce((s,e)=>s+e.commanderDamage,0);
@@ -2248,9 +2419,34 @@ function startCommanderBattle(numOpponents,settings){
   const first=gameState.firstSeat==="player"?"You go":`${nm(oppById(gameState.firstSeat))} goes`;
   logCommander(`Commander Battle begins. ${first} first.`);
   markRecapStart();
+  // Wait on a Start Game screen so the table can be read before the first turn runs.
+  gameState.phase="ready";
+  saveState();
+  showStartScreen();
+}
+function showStartScreen(){
+  windowSeq++;
+  clearConfirmBar();hideLastTurnSection();
   showCommanderGame();
-  beginCommanderRoundQueue(gameState);
-  advanceSeat();
+  const level=(gameState.settings&&gameState.settings.cpu&&gameState.settings.cpu.powerLevel)||3;
+  const diff=(typeof DIFFICULTY_LEVELS!=="undefined"&&DIFFICULTY_LEVELS.find(d=>d.level===level))||null;
+  const firstOpp=gameState.firstSeat==="player"?null:oppById(gameState.firstSeat);
+  document.getElementById('huntTitle').textContent="⚔ Commander Battle";
+  document.getElementById('declare').className="declare player compact-declare";
+  document.getElementById('declareTitle').textContent="Ready";
+  document.getElementById('declareFlavor').textContent=firstOpp?`${nm(firstOpp)} goes first.`:"You go first.";
+  document.getElementById('declareMech').innerHTML='';
+  document.getElementById('respTitle').textContent="Your table";
+  document.getElementById('respGrid').innerHTML=`<div class="context-form commander-form start-screen">
+    <ul class="start-opponents">${gameState.opponents.map((o,i)=>`<li style="border-left-color:${oppColor(o)}"><span>${o.ico} <b>${escapeHtml(nm(o))}</b></span><small>${escapeHtml(opponentDeckName(o,i))}</small></li>`).join("")}</ul>
+    <p class="step-hint">Difficulty ${level}${diff?` · ${escapeHtml(diff.name)}`:""} · Everyone starts at 40 life. ${firstOpp?`${escapeHtml(nm(firstOpp))} takes the first turn; you'll see each of its phases.`:"You take the first turn."} Add creatures already on your table with + Creature on your seat.</p>
+  </div>`;
+  setConfirmButton("Start Game ▸","",()=>{
+    if(gameState.phase!=="ready")return;
+    gameState.phase="cpu";
+    beginCommanderRoundQueue(gameState);
+    advanceSeat();
+  },false);
 }
 
 /* Re-shows the saved turn state (boot, undo). Never re-runs a CPU phase that already ran. */
@@ -2260,6 +2456,7 @@ function resumeTurnFlow(){
   showCommanderGame();
   renderCommanderLog();
   if(gameState.gameOver){const end=checkCommanderBattleEnd(gameState);endCommanderGame(end.won,end.reason||"");return;}
+  if(gameState.phase==="ready"){showStartScreen();return;}
   if(gameState.phase==="player"){
     if(!gameState.playerStep)gameState.playerStep="draw";
     showPlayerStep();return;
@@ -2355,27 +2552,33 @@ window.showCommanderGame=showCommanderGame;
 window.cmdSnapshot=cmdSnapshot;
 window.renderBoardView=renderBoardView;
 
-// Wire reset button (overrides game.js's binding)
-const resetBtn=document.getElementById('resetBtn');
-if(resetBtn)resetBtn.onclick=async()=>{
+// Settings → Restart game (same opponents / same adventure) and New game (setup screen).
+function confirmGameChange(title,body,okLabel){return askConfirm(title,body,okLabel,"Keep playing");}
+const restartGameBtn=document.getElementById('restartGameBtn');
+if(restartGameBtn)restartGameBtn.onclick=async()=>{
   closeSettings();
-  const ok=await askConfirm("Restart encounter?","This ends the current game and returns to mode selection. This cannot be undone.","Restart","Cancel");
-  if(ok)restart();
+  if(gameState){
+    const settings=gameState.settings,count=gameState.opponents.length;
+    if(!await confirmGameChange("Restart this game?",`This ends the current game and starts a fresh one against ${plural(count,"opponent")} at the same difficulty. This cannot be undone.`,"Restart"))return;
+    restart();startCommanderBattle(count,settings);
+  }else if(typeof S!=="undefined"&&S&&S.mode){
+    const mode=S.mode;
+    if(!await confirmGameChange("Restart this encounter?","This ends the current encounter and starts it again from the beginning. This cannot be undone.","Restart"))return;
+    restart();startAdventure(mode);
+  }else showSetup();
+};
+const newGameBtn=document.getElementById('newGameBtn');
+if(newGameBtn)newGameBtn.onclick=async()=>{
+  closeSettings();
+  if((gameState||(typeof S!=="undefined"&&S))&&!await confirmGameChange("Start a new game?","This ends the current game and opens the setup screen, where you can choose opponents and difficulty.","New game"))return;
+  restart();
 };
 
-// "New game with different settings…" — back to the setup screen (choices are kept).
-const newGameSettingsBtn=document.getElementById('newGameSettingsBtn');
-if(newGameSettingsBtn)newGameSettingsBtn.onclick=async()=>{
-  closeSettings();
-  const ok=await askConfirm("Start a new game?","This ends the current game and opens Commander setup, where you can change opponents and difficulty.","New game","Keep playing");
-  if(ok)restart();
-};
-
-// Turn Recap setting (commander mode only). Re-renders Main Phase 1 if you're on it.
+// "Since your last turn" popup setting (commander mode only). Re-renders the draw step if you're on it.
 const recapToggle=document.getElementById('recapToggle');
 if(recapToggle)recapToggle.onchange=()=>{
   setRecapEnabled(recapToggle.checked);
-  if(gameState&&gameState.phase==="player"&&gameState.playerStep==="main1")showMainStep();
+  if(gameState&&gameState.phase==="player"&&gameState.playerStep==="draw")showDrawStep();
 };
 updateRecapToggle();
 

@@ -235,6 +235,9 @@ function showEnemyExile(){
    promise still resolves. Not dismissible: the setup screen, victory/defeat, and prompts
    opened with askConfirm(..., {dismissible:false}). */
 function topOverlay(){
+  // Input dialogs stack above every other popup (z-index), so they are always the top one.
+  const input=document.getElementById('inputOverlay');
+  if(input&&input.classList.contains('show'))return input;
   const open=Array.from(document.querySelectorAll('.overlay.show'));
   return open.length?open[open.length-1]:null;
 }

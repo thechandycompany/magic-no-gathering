@@ -20,8 +20,8 @@ This is an early alpha. Send bugs and ideas to **thechandycompany@gmail.com**, o
 
 ## How a Commander game works
 1. Choose 1–4 opponents, their decks (or "Mixed"), and a difficulty on the setup screen.
-2. On each CPU turn, the app shows what it did and only stops when you can respond: counter a spell, remove creatures, or declare blockers in a popup when it attacks you. The main button previews the result ("Take 7 (6 commander)"). Press it or Space/Enter.
-3. On your turn the draw happens automatically: main phase → declare attackers (CPUs choose blocks) → main phase 2.
+2. On each CPU turn, the app shows what it did, then lets you respond: counter a spell, remove creatures, or declare blockers in a popup when it attacks you. The main button previews the result ("Take 7 (6 commander)"). Press it or Space/Enter.
+3. On your turn, follow the steps: draw → main phase → combat → main phase 2. In combat, click an opponent on the table, then click your creatures to attack them (you can split attackers between opponents); CPUs choose blocks. An optional "Since your last turn" popup (Settings → Gameplay) sums up what happened.
 4. Add your creatures as cards (+ Creature, with a number of copies) to attack and block with them in one click, or just keep a count. Your hand stays on your table and is not tracked.
 
 ## Fan content & donations

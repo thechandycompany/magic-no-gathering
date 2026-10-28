@@ -101,7 +101,6 @@ function beginGame(){
   logSys(`${modeConfig().summary} Starting life: ${S.player.life}.`);
   startEnemyTurn();
 }
-async function confirmRestart(){const ok=await askConfirm("Restart encounter?","This clears the current encounter and returns to mode selection. This cannot be undone.","Restart");if(ok)restart();}
 function restart(){safeRemove(SAVE_KEY);S=null;turnInput=null;undoStack=[];gameOver=false;document.getElementById('overlay').classList.remove("show");document.getElementById('inputOverlay').classList.remove("show");document.getElementById('logOverlay').classList.remove("show");showSetup();}
 function manualAddEnemy(){
   if(!S||gameOver)return;
@@ -130,10 +129,9 @@ function wire(){
   document.getElementById('endTurnBtn').onclick=resolveTurn;
   document.getElementById('quickEndBtn').onclick=endPlayerTurnNow;
   document.getElementById('undoBtn').onclick=undo;
-  // Settings dialog (commander-ui.js re-binds resetBtn for commander mode)
+  // Settings dialog (Restart game / New game are bound in commander-ui.js for both modes)
   document.getElementById('menuBtn').onclick=openSettings;
   document.getElementById('settingsClose').onclick=closeSettings;
-  document.getElementById('resetBtn').onclick=()=>{closeSettings();confirmRestart();};
   document.getElementById('rulesBtn').onclick=showModeRules;
   document.getElementById('graveyardBtn').onclick=showEnemyGraveyard;
   document.getElementById('exileBtn').onclick=showEnemyExile;
@@ -201,9 +199,14 @@ function gameTitleHtml(){return `${escapeText(GAME_TITLE)}${GAME_STAGE?` <span c
 /* One quiet line of project links, shared by the title screen and Settings → About. */
 function projectLinksHtml(){
   const mail=typeof FEEDBACK_EMAIL==="string"&&/^[^@\s]+@[^@\s]+$/.test(FEEDBACK_EMAIL)?`mailto:${FEEDBACK_EMAIL}?subject=${encodeURIComponent(`${GAME_TITLE} ${GAME_STAGE} feedback`.replace(/\s+/g," ").trim())}`:"";
-  const links=[[mail,"Feedback",`Email ${FEEDBACK_EMAIL}`],[externalUrl(SOURCE_URL),"Source code","View the source on GitHub"],[externalUrl(DONATION_URL),"Tip on Ko-fi","Optional tip"]]
+  const links=[[mail,"Feedback",`Email ${FEEDBACK_EMAIL}`],[externalUrl(SOURCE_URL),"Source code","View the source on GitHub"]]
     .filter(([href])=>href).map(([href,label,title])=>`<a href="${escapeText(href)}" title="${escapeText(title)}"${href.startsWith("mailto:")?"":' target="_blank" rel="noopener noreferrer"'}>${label}</a>`);
-  return links.join('<span aria-hidden="true">·</span>');
+  return links.join('<span aria-hidden="true">·</span>')+kofiButtonHtml();
+}
+/* Ko-fi's own button image (shipped in img/, no third-party request), on its own line. Tips are optional. */
+function kofiButtonHtml(){
+  const href=externalUrl(DONATION_URL);
+  return href?`<a class="kofi-btn" href="${escapeText(href)}" target="_blank" rel="noopener noreferrer" title="Optional tip on Ko-fi. Nothing is unlocked."><img src="img/kofi-button.png" alt="Buy me a coffee on Ko-fi" width="145" height="36"></a>`:"";
 }
 function applyAboutInfo(){
   const notice=document.getElementById('fanNotice');
