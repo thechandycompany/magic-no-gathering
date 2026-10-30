@@ -57,7 +57,14 @@ top level outside the commander-ui IIFE, no modules, load order).
   `duplicatePlayerCreature`, `removePlayerCreature`, `playerLoseCreatures` (untracked first),
   `untapPlayerCreatures` (your draw step). Tracked attackers keep `attacking` until then;
   `playerCreatureProfile(p, true)` leaves them out as blockers. Attack rows / CPU-attack blocks
-  carry the creature's `uid` / `blockerUid`.
+  carry the creature's `uid` / `blockerUid`. Typed-in attack rows (no `uid`) become tracked cards
+  on "Declare Attackers" via `trackAttackRows` (an untracked paper creature is adopted first).
+- `gameState.player.recentCreatures` (newest first, max 12; filled by `addPlayerCreatures`) feeds
+  the attack builder's quick adds; `gameState.player.lastAttack` (`[{uid, targetId}]`, set by
+  `rememberPlayerAttack`) feeds "Repeat last attack" through `lastAttackSuggestions`.
+- Zone browser actions (`ai-commander.js`, any owner incl. you): `returnZoneCreatureToBattlefield`,
+  `exileGraveyardCards`, `returnExileCardToGraveyard`, `returnZoneCardToHand` (+
+  `zoneCardCanReturnToHand`), `moveGraveyardToExile` for exile-all.
 - `gameState.firstSeat` (`"player"` or an opponent id) chosen at random in
   `createCommanderBattle`; in a 1-CPU game the first player skips their first draw.
 - New `PLAYER_ACTIONS`: `bounce` (return permanents to hand; a bounced commander goes to

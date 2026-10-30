@@ -2163,6 +2163,7 @@ function ensureCommanderEffectState(state){
   if(player.poison==null)player.poison=0;
   player.tokens=player.tokens||[];
   player.tokens.forEach(token=>registerToken(player,token));
+  player.recentCreatures=player.recentCreatures||[];
   if(state.firstSeat==null)state.firstSeat="player";
   state.settings=state.settings||{};
   state.settings.cpu=normalizeCpuSettings(state.settings.cpu);
@@ -2551,25 +2552,81 @@ function recordDiscardedCards(owner,cards){
 }
 function unmaterializedGraveyardCount(owner){return Math.max(0,(owner.graveyardCount||0)-(owner.graveyard||[]).length);}
 function graveyardCreatureCards(player){return (player.graveyard||[]).filter(card=>!card.isToken&&card.types?.includes("Creature"));}
-function reanimateGraveyardCard(owner,cardId){
-  const index=(owner.graveyard||[]).findIndex(card=>card.id===cardId&&card.types?.includes("Creature")&&!card.isToken);
+function reanimateGraveyardCard(owner,cardId){return returnZoneCreatureToBattlefield(owner,"graveyard",cardId);}
+function exileOpponentGraveyardCreature(opp,cardId){
+  const card=(opp.graveyard||[]).find(entry=>entry.id===cardId);
+  return zoneCardIsCreature(card)?exileGraveyardCards(opp,[cardId])[0]||null:null;
+}
+
+/* ---------- zone browser: graveyard / exile cards of any owner (you or a CPU) ---------- */
+function zoneCards(owner,zone){return (zone==="exile"?owner.exile:owner.graveyard)||[];}
+function zoneCardIsCreature(card){return !!card&&!card.isToken&&!!card.types?.includes("Creature");}
+/** Removes a card from an owner's graveyard or exile and keeps the zone count in step. */
+function takeZoneCard(owner,zone,cardId){
+  const list=zoneCards(owner,zone);
+  const index=list.findIndex(card=>card.id===cardId);
   if(index<0)return null;
-  const [card]=owner.graveyard.splice(index,1);
-  owner.graveyardCount=Math.max(0,(owner.graveyardCount||0)-1);
-  const player=gameState.player;
-  player.tokens=player.tokens||[];
-  const token={name:card.name,ico:card.ico||"🐾",kind:"reanimated-creature",type:"Creature",p:card.p||1,t:card.t||1,baseP:card.p||1,baseT:card.t||1,kws:card.kws?[...card.kws]:[],effect:card.effect||`Resurrected from ${effectTargetName(owner)}'s graveyard.`,summoningSick:true,owner:card.ownerId||owner.id,controller:"player",isToken:false};
-  player.tokens.push(token);
-  registerToken(player,token);
-  player.creatures++;
+  const [card]=list.splice(index,1);
+  if(zone==="exile")owner.exileCount=Math.max(0,(owner.exileCount||0)-1);
+  else owner.graveyardCount=Math.max(0,(owner.graveyardCount||0)-1);
   return card;
 }
-function exileOpponentGraveyardCreature(opp,cardId){
-  const index=(opp.graveyard||[]).findIndex(card=>card.id===cardId&&card.types?.includes("Creature")&&!card.isToken);
-  if(index<0)return null;
-  const [card]=opp.graveyard.splice(index,1);
-  opp.graveyardCount=Math.max(0,(opp.graveyardCount||0)-1);
-  return addOpponentExileCard(opp,card);
+/**
+ * Puts a creature card from any graveyard or exile onto your battlefield as a
+ * tracked creature. Your own cards come back as ordinary cards; a CPU's card is
+ * a "reanimated-creature" you control. Returns the card or null.
+ */
+function returnZoneCreatureToBattlefield(owner,zone,cardId){
+  if(!zoneCardIsCreature(zoneCards(owner,zone).find(card=>card.id===cardId)))return null;
+  const card=takeZoneCard(owner,zone,cardId);
+  const player=gameState.player,own=owner.id==="player";
+  player.tokens=player.tokens||[];
+  const p=card.p!=null?card.p:1,t=card.t!=null?card.t:1;
+  const from=zone==="exile"?"exile":`${effectTargetName(owner)}'s graveyard`;
+  const token={name:card.name,ico:card.ico||(own?"♟":"🐾"),kind:own?"player-creature":"reanimated-creature",type:"Creature",p,t,baseP:p,baseT:t,
+    kws:card.kws?[...card.kws]:[],effect:card.effect||(own?"":`Returned from ${from}.`),summoningSick:true,controller:"player",isToken:false};
+  if(!own)token.owner=card.ownerId||owner.id;
+  player.tokens.push(token);
+  registerToken(player,token);
+  player.creatures=(player.creatures||0)+1;
+  if(typeof rememberPlayerCreature==="function")rememberPlayerCreature(player,token);
+  return card;
+}
+/** Moves the chosen graveyard cards to their owner's exile. Returns the exile entries. */
+function exileGraveyardCards(owner,cardIds){
+  return cardIds.map(cardId=>{const card=takeZoneCard(owner,"graveyard",cardId);return card?addOpponentExileCard(owner,card):null;}).filter(Boolean);
+}
+/** Moves an exiled card back to its owner's graveyard (never redirected to exile). */
+function returnExileCardToGraveyard(owner,cardId){
+  const card=takeZoneCard(owner,"exile",cardId);
+  if(!card)return null;
+  owner.graveyard=owner.graveyard||[];
+  owner.nextGraveyardCardId=(owner.nextGraveyardCardId||0)+1;
+  const {id:_id,destination:_destination,...cardData}=card;
+  const entry={...cardData,id:`${owner.id}:gy:${owner.nextGraveyardCardId}`,ownerId:owner.id,destination:"graveyard"};
+  owner.graveyard.push(entry);owner.graveyardCount=(owner.graveyardCount||0)+1;
+  return entry;
+}
+/** Hand category for a CPU's virtual card ("Basic Land" → lands), or null. */
+function virtualCardHandCategory(card){
+  return card.virtual&&["lands","ramp","explosive"].find(key=>virtualGraveyardCard(key).name===card.name)||null;
+}
+/** A CPU card can go back to hand when the deck knows it (typed hand) or it is a virtual land/ramp/fast-mana card. Your hand is paper. */
+function zoneCardCanReturnToHand(owner,card){
+  if(!card||card.isToken)return false;
+  if(owner.id==="player")return true;
+  return !!(card.ref||findCardRefByName(card.name,owner)||virtualCardHandCategory(card));
+}
+/** Returns a graveyard or exile card to its owner's hand. Returns the card or null. */
+function returnZoneCardToHand(owner,zone,cardId){
+  const found=zoneCards(owner,zone).find(card=>card.id===cardId);
+  if(!zoneCardCanReturnToHand(owner,found))return null;
+  const card=takeZoneCard(owner,zone,cardId);
+  if(owner.id==="player")return card;
+  const ref=card.ref||findCardRefByName(card.name,owner);
+  if(ref)addTypedRefToHand(owner,ref);
+  else{const category=virtualCardHandCategory(card);owner.hand[category]=(owner.hand[category]||0)+1;}
+  return card;
 }
 function cpuDiscardPriority(opp,option){
   if(option.kind==="hand"){

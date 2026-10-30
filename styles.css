@@ -1553,3 +1553,35 @@ button.tt-pile{cursor:pointer;} button.tt-pile:hover{border-color:var(--gold);}
 /* End Turn sits apart from the main button so the two are not mistaken for each other. */
 .cmd-end-turn-btn{margin-left:18px;}
 .settings-modal:focus{outline:none;}
+
+/* ===== Zone browser (graveyards / exile) ===== */
+.zone-browser{width:min(760px,100%); max-width:760px;}
+.zone-owner-row{display:flex; align-items:center; gap:6px; margin:12px 0 8px;}
+.zone-tabs{display:flex; flex:1; gap:6px; overflow-x:auto; padding:2px;}
+.zone-tab{flex:0 0 auto; padding:6px 10px; border:1px solid var(--border-lt); border-left:3px solid var(--seat,var(--gold-dim)); border-radius:var(--radius-sm); background:var(--panel2); color:var(--ink2); font:12px var(--font); cursor:pointer; white-space:nowrap;}
+.zone-tab small{color:var(--muted);}
+.zone-tab:hover{color:var(--ink); border-color:var(--gold-dim);}
+.zone-tab.active{color:var(--ink); border-color:var(--gold); box-shadow:0 0 0 1px var(--gold) inset;}
+.zone-flip{flex:0 0 auto; width:30px; height:30px; border:1px solid var(--border-lt); border-radius:50%; background:var(--panel2); color:var(--gold); font-size:18px; line-height:1; cursor:pointer;}
+.zone-flip:hover{border-color:var(--gold);}
+.zone-toolbar{display:flex; flex-wrap:wrap; align-items:center; gap:8px;}
+.zone-seg{display:inline-flex; border:1px solid var(--border-lt); border-radius:var(--radius-sm); overflow:hidden;}
+.zone-seg button{padding:5px 10px; border:0; background:transparent; color:var(--ink2); font:12px var(--font); cursor:pointer;}
+.zone-seg button+button{border-left:1px solid var(--border-lt);}
+.zone-seg button[aria-pressed="true"]{background:color-mix(in srgb,var(--gold) 16%,transparent); color:var(--gold);}
+.zone-card-grid{display:flex; flex-wrap:wrap; gap:8px; max-height:340px; padding:4px; margin-bottom:12px; overflow:auto;}
+.zone-actions .zone-bulk{margin-top:8px; padding-top:8px; border-top:1px dashed var(--border-lt);}
+@media(max-width:430px){.zone-flip{display:none;}}
+
+/* ===== Attack builder: suggestions ===== */
+.atk-suggest{display:flex; flex-direction:column; gap:6px; margin:6px 0 8px;}
+.atk-repeat{align-self:flex-start;}
+.atk-quick{display:flex; flex-wrap:wrap; align-items:center; gap:5px;}
+.atk-quick-lbl{font-size:11px; color:var(--muted); margin-right:2px;}
+.atk-quick-btn{padding:3px 9px; border:1px dashed var(--border-lt); border-radius:999px; background:transparent; color:var(--ink2); font:12px var(--font); cursor:pointer;}
+.atk-quick-btn small{color:var(--muted);}
+.atk-quick-btn.on-board{border-style:solid;}
+.atk-quick-btn:hover{border-color:var(--gold); color:var(--ink);}
+.attack-name{display:flex; align-items:center; gap:6px;}
+.attack-name input{width:160px; padding:3px 6px; border:1px solid var(--border-lt); border-radius:6px; background:var(--bg2); color:var(--ink); font:inherit;}
+.atk-chip button[data-row-clone]:hover{color:var(--gold);}

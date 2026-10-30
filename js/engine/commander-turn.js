@@ -78,8 +78,8 @@ var PLAYER_CREATURE_KEYWORDS=["Flying","Reach","Trample","Vigilance","Haste","De
 function trackedPlayerCreatures(player){return (player.tokens||[]).filter(function(t){return t.p!=null;});}
 function untrackedPlayerCreatures(player){return Math.max(0,(player.creatures||0)-trackedPlayerCreatures(player).length);}
 function playerCommanderCreature(player){return (player.tokens||[]).find(function(t){return t.commander;})||null;}
-/** Adds `count` copies of spec {name, ico, p, t, kws, commander, isToken}. Returns the new tokens. */
-function addPlayerCreatures(state,spec,count){
+/** Adds `count` copies of spec {name, ico, p, t, kws, commander, isToken}. Returns the new tokens. opts.quiet skips the log line. */
+function addPlayerCreatures(state,spec,count,opts){
   var player=state.player;player.tokens=player.tokens||[];
   var n=Math.max(1,Math.min(99,parseInt(count,10)||1));
   var p=Math.max(0,parseInt(spec.p,10)||0),t=Math.max(0,parseInt(spec.t,10)||0);
@@ -93,8 +93,65 @@ function addPlayerCreatures(state,spec,count){
   }
   player.creatures=(player.creatures||0)+n;
   if(commander)player.commanderPower=p;
-  cmdLog("You put "+(n>1?n+"× ":"")+name+" ("+p+"/"+t+") onto your battlefield.");
+  rememberPlayerCreature(player,made[0]);
+  if(!(opts&&opts.quiet))cmdLog("You put "+(n>1?n+"× ":"")+name+" ("+p+"/"+t+") onto your battlefield.");
   return made;
+}
+/**
+ * player.recentCreatures: the last named creatures you put onto the battlefield
+ * (newest first, max 12), offered as quick adds when you declare attackers.
+ * Your commander is left out (it is never added twice).
+ */
+var RECENT_CREATURE_LIMIT=12;
+function rememberPlayerCreature(player,token){
+  if(!token||token.commander)return;
+  var name=(token.name||"").trim();
+  if(!name||name==="Creature")return;
+  var p=token.baseP!=null?token.baseP:token.p,t=token.baseT!=null?token.baseT:token.t;
+  var kws=(token.kws||[]).slice();
+  var key=[name,p,t,kws.join(","),token.isToken?1:0].join("|");
+  player.recentCreatures=(player.recentCreatures||[]).filter(function(c){return c.key!==key;});
+  player.recentCreatures.unshift({key:key,name:name,ico:token.ico&&token.ico!=="⚜"?token.ico:"♟",p:p,t:t,kws:kws,isToken:!!token.isToken});
+  player.recentCreatures=player.recentCreatures.slice(0,RECENT_CREATURE_LIMIT);
+}
+/**
+ * Declaring attacks: attackers you typed in (rows without a uid) become
+ * tracked cards so they stay on the board for later turns, CPU blocks and
+ * removal. An untracked paper creature gets the card first; past that the
+ * creature is new to your battlefield. Sets row.uid. Returns the new tokens.
+ */
+function trackAttackRows(state,rows){
+  var player=state.player,made=[];
+  (rows||[]).forEach(function(row){
+    if(row.uid||!row.targetId)return;
+    var paper=untrackedPlayerCreatures(player)>0;
+    var token=addPlayerCreatures(state,{name:row.name,p:row.p,t:row.t,kws:row.kws,commander:row.commander,isToken:row.isToken},1,{quiet:true})[0];
+    if(paper)player.creatures--;
+    row.uid=token.uid;row.name=token.name;row.commander=token.commander;
+    cmdLog("You add "+token.name+" ("+token.p+"/"+token.t+") to the table as it attacks.");
+    made.push(token);
+  });
+  return made;
+}
+/** Remembers this turn's tracked attackers and their targets for "Repeat last attack". */
+function rememberPlayerAttack(state,rows){
+  var picked=(rows||[]).filter(function(r){return r.uid&&r.targetId;}).map(function(r){return {uid:r.uid,targetId:r.targetId};});
+  if(picked.length)state.player.lastAttack=picked;
+}
+/**
+ * Last attack, replayed onto the current board: each remembered attacker that is
+ * still on the battlefield, untapped and not yet declared. A target that has
+ * been eliminated falls back to `fallbackTarget`. Returns [{token, targetId}].
+ */
+function lastAttackSuggestions(state,declaredRows,fallbackTarget){
+  var declared=new Set((declaredRows||[]).map(function(r){return r.uid;}).filter(Boolean));
+  var tracked=trackedPlayerCreatures(state.player);
+  return (state.player.lastAttack||[]).map(function(entry){
+    var token=tracked.find(function(t){return t.uid===entry.uid;});
+    if(!token||declared.has(token.uid)||isCreatureTapped(token))return null;
+    var target=state.opponents.find(function(o){return o.id===entry.targetId;});
+    return {token:token,targetId:target&&!isOpponentDead(target)?target.id:fallbackTarget};
+  }).filter(function(x){return x&&x.targetId;});
 }
 /** Adds `count` more copies of a tracked creature (never a second commander). */
 function duplicatePlayerCreature(state,uid,count){

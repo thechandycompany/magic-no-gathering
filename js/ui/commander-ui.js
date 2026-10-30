@@ -201,52 +201,120 @@ function findGraveyardOwner(state,ownerId){
   return ownerId==="player"?state.player:state.opponents.find(opp=>opp.id===ownerId)||null;
 }
 function escapeHtml(value){return String(value??"").replace(/[&<>"']/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[char]));}
-function showGraveyardViewer(state,ownerId){
-  const owner=findGraveyardOwner(state,ownerId);
+/* ---------- Zone browser: graveyards and exile ----------
+   One popup for every graveyard and exile on the table. Flip between owners with the
+   tabs, the ‹ › buttons or the arrow keys; switch Graveyard / Exile; select cards
+   (several at once) and move them. Creature cards from any graveyard, yours included,
+   can come onto your battlefield. */
+function zoneOwners(state){return [state.player,...state.opponents];}
+function zoneOwnerLabel(owner){return owner.id==="player"?"You":nm(owner);}
+function zoneOwnerIco(owner){return owner.id==="player"?"🗡️":owner.ico;}
+function showGraveyardViewer(state,ownerId,startZone){
   const overlay=document.getElementById('overlay'),modal=document.getElementById('modal');
-  if(!owner||!overlay||!modal)return;
-  const ownerName=owner.id==="player"?"Your":`${nm(owner)}'s`;
-  let selectedCardId=null;
-  const close=()=>{overlay.classList.remove("show");modal.innerHTML="";};
+  if(!findGraveyardOwner(gameState||state,ownerId)||!overlay||!modal)return;
+  const view={ownerId,zone:startZone==="exile"?"exile":"graveyard",filter:"all",selected:new Set()};
+  const onKey=event=>{
+    if(!overlay.classList.contains("show")||!modal.classList.contains("zone-browser")){document.removeEventListener("keydown",onKey);return;}
+    if(document.getElementById('inputOverlay')?.classList.contains('show')||event.target.closest?.("input,select,textarea"))return;
+    if(event.key==="ArrowLeft"||event.key==="ArrowRight"){event.preventDefault();flip(event.key==="ArrowLeft"?-1:1);}
+  };
+  const close=()=>{document.removeEventListener("keydown",onKey);overlay.classList.remove("show");modal.innerHTML="";modal.className="modal";};
+  const flip=step=>{
+    const owners=zoneOwners(gameState);
+    const at=owners.findIndex(o=>o.id===view.ownerId);
+    view.ownerId=owners[(at+step+owners.length)%owners.length].id;
+    view.selected.clear();render();
+    modal.querySelector(`[data-zone-owner="${view.ownerId}"]`)?.focus();
+  };
+  const afterMove=lines=>{
+    lines.forEach(line=>logCommander(line));
+    view.selected.clear();
+    ensureCommanderEffectState(gameState);
+    saveState();renderBoardView(gameState);renderLifeHud(gameState);refreshActivePanel();
+    render();
+  };
   const render=()=>{
-    const cards=owner.graveyard||[];
-    const selectableCards=owner.id==="player"?[]:cards.filter(card=>!card.isToken&&card.types?.includes("Creature"));
-    if(!selectableCards.some(card=>card.id===selectedCardId))selectedCardId=null;
-    const selectedCard=selectableCards.find(card=>card.id===selectedCardId)||null;
-    const unmaterialized=unmaterializedGraveyardCount(owner);
-    const cardsHtml=cards.length?`<span class="card-reference-list zone-card-list">${cards.map(card=>{
-      const selectable=selectableCards.some(candidate=>candidate.id===card.id);
-      const selected=card.id===selectedCardId;
-      return selectable?`<button type="button" class="zone-card-select card-choice ${selected?"selected":""}" data-graveyard-card-id="${escapeHtml(card.id)}" aria-pressed="${selected}" aria-label="${selected?"Deselect":"Select"} ${escapeHtml(card.name)}">${cardReferenceHtml(card)}</button>`:cardReferenceHtml(card);
-    }).join("")}</span>`:"<div class=\"graveyard-empty\">No individual cards recorded yet.</div>";
+    const state=gameState;
+    const owner=findGraveyardOwner(state,view.ownerId);
+    if(!owner){close();return;}
+    const own=owner.id==="player";
+    const whose=own?"your":`${nm(owner)}'s`;
+    const all=zoneCards(owner,view.zone);
+    const cards=view.filter==="creatures"?all.filter(zoneCardIsCreature):all;
+    [...view.selected].forEach(id=>{if(!all.some(card=>card.id===id))view.selected.delete(id);});
+    const picked=all.filter(card=>view.selected.has(card.id));
+    const pickedCreatures=picked.filter(zoneCardIsCreature);
+    const pickedToHand=picked.filter(card=>zoneCardCanReturnToHand(owner,card));
+    const total=view.zone==="exile"?owner.exileCount||0:owner.graveyardCount||0;
+    const unmaterialized=view.zone==="graveyard"?unmaterializedGraveyardCount(owner):0;
+    const tabs=zoneOwners(state).map(o=>`<button type="button" class="zone-tab${o.id===view.ownerId?" active":""}" data-zone-owner="${o.id}" role="tab" aria-selected="${o.id===view.ownerId}"${o.id==="player"?"":` style="--seat:${oppColor(o)}"`}>${zoneOwnerIco(o)} ${escapeHtml(zoneOwnerLabel(o))} <small>⚰ ${o.graveyardCount||0}${o.exileCount?` · ✦ ${o.exileCount}`:""}</small></button>`).join("");
+    const cardsHtml=cards.length?`<div class="zone-card-grid">${cards.map(card=>{
+      const on=view.selected.has(card.id);
+      return `<button type="button" class="zone-card-select card-choice${on?" selected":""}${zoneCardIsCreature(card)?" is-creature":""}" data-zone-card="${escapeHtml(card.id)}" aria-pressed="${on}" aria-label="${on?"Deselect":"Select"} ${escapeHtml(card.name)}">${cardReferenceHtml(card)}</button>`;
+    }).join("")}</div>`
+      :`<div class="graveyard-empty">${all.length?"No creature cards here.":view.zone==="exile"?"No cards in exile.":unmaterialized?"No individual cards recorded yet.":"The graveyard is empty."}</div>`;
     const historicalNote=unmaterialized?`<p class="graveyard-untracked">${plural(unmaterialized,"earlier card")} ${unmaterialized===1?"is":"are"} included in the count but ${unmaterialized===1?"was":"were"} not recorded individually.</p>`:"";
-    const actionControls=selectableCards.length?`<section class="graveyard-card-actions"><p>${selectedCard?`Selected: <strong>${escapeHtml(selectedCard.name)}</strong>.`:"Select a creature card to exile or return it."}</p><div><button type="button" class="target-btn graveyard-exile-action" id="exileSelectedGraveyardCreature" ${selectedCard?"":"disabled"}>Exile selected creature</button><button type="button" class="target-btn graveyard-resurrect-action" id="resurrectSelectedGraveyardCreature" ${selectedCard?"":"disabled"}>Return to your battlefield</button></div></section>`:"";
-    modal.className="modal graveyard-modal";
-    modal.innerHTML=`<div class="graveyard-modal-head"><div><span class="big-ico">⚰</span><h2>${escapeHtml(ownerName)} Graveyard</h2></div><button type="button" class="graveyard-close" data-dismiss aria-label="Close graveyard">×</button></div><p class="graveyard-summary">${plural(owner.graveyardCount||0,"card")} · ${cards.length} shown</p>${cardsHtml}${historicalNote}${actionControls}<button type="button" class="cta ghost" id="closeGraveyardViewer">Close</button>`;
+    const n=picked.length;
+    const actions=`<section class="graveyard-card-actions zone-actions">
+      <p>${n?`Selected: <strong>${escapeHtml(picked.slice(0,3).map(c=>c.name).join(", "))}${n>3?` and ${n-3} more`:""}</strong>.`:"Select cards to move them."}</p>
+      <div>
+        <button type="button" class="target-btn graveyard-resurrect-action" data-zone-act="battlefield" ${pickedCreatures.length?"":"disabled"}>↩ Onto your battlefield${pickedCreatures.length>1?` (${pickedCreatures.length})`:""}</button>
+        ${view.zone==="graveyard"?`<button type="button" class="target-btn graveyard-exile-action" data-zone-act="exile" ${n?"":"disabled"}>✦ Exile${n>1?` (${n})`:""}</button>`
+          :`<button type="button" class="target-btn" data-zone-act="graveyard" ${n?"":"disabled"}>⚰ To graveyard${n>1?` (${n})`:""}</button>`}
+        <button type="button" class="target-btn" data-zone-act="hand" ${pickedToHand.length?"":"disabled"}>✋ To ${own?"your":"its owner's"} hand${pickedToHand.length>1?` (${pickedToHand.length})`:""}</button>
+      </div>
+      ${view.zone==="graveyard"&&total?`<div class="zone-bulk"><button type="button" class="target-btn graveyard-exile-action" data-zone-act="exileAll">✦ Exile ${whose} whole graveyard (${total})</button></div>`:""}
+    </section>`;
+    modal.className="modal graveyard-modal zone-browser";
+    modal.innerHTML=`<div class="graveyard-modal-head"><div><span class="big-ico">${view.zone==="exile"?"✦":"⚰"}</span><h2>${escapeHtml(own?"Your":`${nm(owner)}'s`)} ${view.zone==="exile"?"Exile":"Graveyard"}</h2></div><button type="button" class="graveyard-close" data-dismiss aria-label="Close">×</button></div>
+      <div class="zone-owner-row"><button type="button" class="zone-flip" data-zone-flip="-1" aria-label="Previous player">‹</button><div class="zone-tabs" role="tablist" aria-label="Whose cards">${tabs}</div><button type="button" class="zone-flip" data-zone-flip="1" aria-label="Next player">›</button></div>
+      <div class="zone-toolbar">
+        <div class="zone-seg" role="group" aria-label="Zone"><button type="button" data-zone-zone="graveyard" aria-pressed="${view.zone==="graveyard"}">⚰ Graveyard ${owner.graveyardCount||0}</button><button type="button" data-zone-zone="exile" aria-pressed="${view.zone==="exile"}">✦ Exile ${owner.exileCount||0}</button></div>
+        <div class="zone-seg" role="group" aria-label="Filter"><button type="button" data-zone-filter="all" aria-pressed="${view.filter==="all"}">All</button><button type="button" data-zone-filter="creatures" aria-pressed="${view.filter==="creatures"}">Creatures</button></div>
+        ${cards.length?`<button type="button" class="btn-quiet" data-zone-select="${cards.every(c=>view.selected.has(c.id))?"none":"all"}">${cards.every(c=>view.selected.has(c.id))?"Clear selection":"Select all"}</button>`:""}
+      </div>
+      <p class="graveyard-summary">${plural(total,"card")}${view.zone==="graveyard"?` · ${all.length} shown`:" exiled"} · ‹ › or arrow keys switch players</p>
+      ${cardsHtml}${historicalNote}${all.length||total?actions:""}
+      <button type="button" class="cta ghost" id="closeGraveyardViewer">Close</button>`;
     overlay.classList.add("show");
     document.getElementById("closeGraveyardViewer").onclick=close;
     modal.querySelector(".graveyard-close").onclick=close;
-    modal.querySelectorAll("[data-graveyard-card-id]").forEach(button=>button.onclick=()=>{
-      selectedCardId=button.dataset.graveyardCardId;
+    modal.querySelectorAll("[data-zone-owner]").forEach(btn=>btn.onclick=()=>{view.ownerId=btn.dataset.zoneOwner;view.selected.clear();render();});
+    modal.querySelectorAll("[data-zone-flip]").forEach(btn=>btn.onclick=()=>flip(parseInt(btn.dataset.zoneFlip,10)));
+    modal.querySelectorAll("[data-zone-zone]").forEach(btn=>btn.onclick=()=>{view.zone=btn.dataset.zoneZone;view.selected.clear();render();});
+    modal.querySelectorAll("[data-zone-filter]").forEach(btn=>btn.onclick=()=>{view.filter=btn.dataset.zoneFilter;render();});
+    modal.querySelector("[data-zone-select]")?.addEventListener("click",event=>{
+      if(event.currentTarget.dataset.zoneSelect==="all")cards.forEach(c=>view.selected.add(c.id));else view.selected.clear();
       render();
     });
-    const resolveSelectedCreature=action=>{
-      if(!selectedCard)return;
+    modal.querySelectorAll("[data-zone-card]").forEach(btn=>btn.onclick=()=>{
+      const id=btn.dataset.zoneCard;
+      if(view.selected.has(id))view.selected.delete(id);else view.selected.add(id);
+      render();
+    });
+    modal.querySelectorAll("[data-zone-act]").forEach(btn=>btn.onclick=()=>{
+      const act=btn.dataset.zoneAct,from=view.zone==="exile"?"exile":`${whose} graveyard`;
       cmdSnapshot();
-      const moved=action==="exile"
-        ?exileOpponentGraveyardCreature(owner,selectedCard.id)
-        :reanimateGraveyardCard(owner,selectedCard.id);
-      if(!moved)return;
-      if(action==="exile")logCommander(`You exile ${discardedCardText(moved)} from ${nm(owner)}'s graveyard.`);
-      else logCommander(`You resurrect ${discardedCardText(moved)} from ${nm(owner)}'s graveyard onto your battlefield.`);
-      ensureCommanderEffectState(gameState);
-      saveState();
-      close();
-      showCommanderGame();
-    };
-    modal.querySelector("#exileSelectedGraveyardCreature")?.addEventListener("click",()=>resolveSelectedCreature("exile"));
-    modal.querySelector("#resurrectSelectedGraveyardCreature")?.addEventListener("click",()=>resolveSelectedCreature("resurrect"));
+      if(act==="exileAll"){
+        const result=moveGraveyardToExile(owner);
+        afterMove([`You exile ${whose} graveyard (${plural(result.total,"card")}).`]);
+        return;
+      }
+      let moved=[];
+      if(act==="battlefield")moved=pickedCreatures.map(card=>returnZoneCreatureToBattlefield(owner,view.zone,card.id));
+      else if(act==="exile")moved=exileGraveyardCards(owner,picked.map(card=>card.id));
+      else if(act==="graveyard")moved=picked.map(card=>returnExileCardToGraveyard(owner,card.id));
+      else if(act==="hand")moved=pickedToHand.map(card=>returnZoneCardToHand(owner,view.zone,card.id));
+      moved=moved.filter(Boolean);
+      if(!moved.length){render();return;}
+      const list=moved.map(discardedCardText).join(", ");
+      afterMove([act==="battlefield"?`You put ${list} from ${from} onto your battlefield.`
+        :act==="exile"?`You exile ${list} from ${whose} graveyard.`
+        :act==="graveyard"?`${list} ${moved.length===1?"goes":"go"} from exile to ${whose} graveyard.`
+        :`${list} ${moved.length===1?"returns":"return"} from ${from} to ${own?"your":`${nm(owner)}'s`} hand.`]);
+    });
   };
+  document.addEventListener("keydown",onKey);
   render();
 }
 function wireGraveyardViewerControls(root,state){
@@ -261,20 +329,7 @@ function wireGraveyardViewerControls(root,state){
     control.onkeydown=event=>{if(event.key==="Enter"||event.key===" ")open(event);};
   });
 }
-function showExileViewer(state,ownerId){
-  const owner=findGraveyardOwner(state,ownerId);
-  const overlay=document.getElementById('overlay'),modal=document.getElementById('modal');
-  if(!owner||!overlay||!modal)return;
-  const cards=owner.exile||[];
-  const ownerName=owner.id==="player"?"Your":`${nm(owner)}'s`;
-  const cardsHtml=cards.length?cardReferenceListHtml(cards,"zone-card-list"):`<div class="graveyard-empty">No cards in exile.</div>`;
-  modal.className="modal graveyard-modal";
-  modal.innerHTML=`<div class="graveyard-modal-head"><div><span class="big-ico">✦</span><h2>${escapeHtml(ownerName)} Exile</h2></div><button type="button" class="graveyard-close" data-dismiss aria-label="Close exile">×</button></div><p class="graveyard-summary">${plural(owner.exileCount||0,"card")} exiled</p>${cardsHtml}<button type="button" class="cta ghost" id="closeGraveyardViewer">Close</button>`;
-  overlay.classList.add("show");
-  const close=()=>{overlay.classList.remove("show");modal.innerHTML="";};
-  document.getElementById("closeGraveyardViewer").onclick=close;
-  modal.querySelector(".graveyard-close").onclick=close;
-}
+function showExileViewer(state,ownerId){showGraveyardViewer(state,ownerId,"exile");}
 
 /* Opponent identity color. Dark Purple swaps the deck colors (red/orange/…) for
    distinct purple shades so the palette stays purple-only. */
@@ -2196,6 +2251,7 @@ function attackerRowHtml(row,i,alive){
       ${row.uid?(row.kws.length?`<small class="attack-row-kws">${escapeHtml(row.kws.join(" · "))}</small>`:""):`<label class="attack-cmdr-toggle"><input type="checkbox" data-row-cmdr="${i}" ${row.commander?"checked":""}> Commander</label>`}
       <button type="button" class="btn-quiet attack-row-remove" data-row-remove="${i}" aria-label="Remove attacker ${i+1}">✕</button></div>
     <div class="attack-row-b">
+      ${row.uid?"":`<label class="attack-name">Name<input type="text" data-row-name="${i}" value="${escapeHtml(row.name||"")}" placeholder="e.g. Llanowar Elves" maxlength="60" list="recentCreatureNames" autocomplete="off"></label>`}
       <div class="inline-stepper" data-row-field="p" data-row-index="${i}"><label>Power</label><button type="button" data-row-delta="-1" aria-label="Decrease power">−</button><input type="number" min="0" max="99" value="${row.p}" aria-label="Power"><button type="button" data-row-delta="1" aria-label="Increase power">+</button></div>
       <div class="inline-stepper" data-row-field="t" data-row-index="${i}"><label>Toughness</label><button type="button" data-row-delta="-1" aria-label="Decrease toughness">−</button><input type="number" min="0" max="99" value="${row.t}" aria-label="Toughness"><button type="button" data-row-delta="1" aria-label="Increase toughness">+</button></div>
       <label class="attack-target">Target<select data-row-target="${i}">${alive.map(o=>`<option value="${o.id}" ${row.targetId===o.id?"selected":""}>${o.ico} ${nm(o)} (${o.life})</option>`).join("")}</select></label>
@@ -2261,11 +2317,19 @@ function showCombatStep(){
     const rows=draft.rows.map((r,i)=>({r,i})).filter(x=>x.r.targetId===o.id);
     if(!rows.length)return "";
     return `<div class="atk-summary-row" style="border-left-color:${oppColor(o)}"><b>${o.ico} ${escapeHtml(nm(o))}</b><span class="atk-summary-power">⚔ ${rows.reduce((s,x)=>s+attackRowPower(x.r),0)} power</span>
-      <div class="atk-summary-chips">${rows.map(({r,i})=>`<span class="atk-chip">${r.commander?"⚜ ":""}${escapeHtml(attackRowLabel(r))} <small>${r.p}/${r.t}</small><button type="button" data-row-remove="${i}" aria-label="Take back ${escapeHtml(attackRowLabel(r))}">✕</button></span>`).join("")}</div></div>`;
+      <div class="atk-summary-chips">${rows.map(({r,i})=>`<span class="atk-chip">${r.commander?"⚜ ":""}${escapeHtml(attackRowLabel(r))} <small>${r.p}/${r.t}</small><button type="button" data-row-clone="${i}" title="Clone: another copy attacks too" aria-label="Clone ${escapeHtml(attackRowLabel(r))}">⧉</button><button type="button" data-row-remove="${i}" aria-label="Take back ${escapeHtml(attackRowLabel(r))}">✕</button></span>`).join("")}</div></div>`;
   }).join("");
-  const hint=tracked.length||untracked
+  const hint=(tracked.length||untracked
     ?`On the table: click an opponent to choose who you attack (🎯), then click your creatures to send them. Click a creature again to take it back.${untracked?" Click your creature pile to attack with creatures you have not added as cards.":""}`
-    :"You have no creatures on the battlefield. Add them with + Creature on your seat.";
+    :"You have no creatures on the battlefield. Add them with + Creature on your seat, or below.")+" Attackers you type in stay on the table as cards.";
+  const repeat=lastAttackSuggestions(gameState,draft.rows,target);
+  const onBoard=new Set(tracked.map(t=>`${t.name}|${t.baseP??t.p}|${t.baseT??t.t}`));
+  const recent=(p.recentCreatures||[]).slice(0,8);
+  const suggestions=repeat.length||recent.length?`<div class="atk-suggest">
+      ${repeat.length?`<button type="button" class="target-btn atk-repeat" id="repeatAttackBtn" title="${escapeHtml(repeat.map(x=>x.token.name).join(", "))}">↻ Repeat last attack (${repeat.length})</button>`:""}
+      ${recent.length?`<div class="atk-quick"><span class="atk-quick-lbl">Quick add ${helpTip("Puts another copy of a creature you have played onto your battlefield and sends it at the current target.")}</span>${recent.map((c,ri)=>`<button type="button" class="atk-quick-btn${onBoard.has(`${c.name}|${c.p}|${c.t}`)?" on-board":""}" data-quick-add="${ri}" title="${escapeHtml(c.kws.join(" · ")||c.name)}">+ ${escapeHtml(c.ico)} ${escapeHtml(c.name)} <small>${c.p}/${c.t}</small></button>`).join("")}</div>`:""}
+    </div>`:"";
+  const datalist=recent.length?`<datalist id="recentCreatureNames">${recent.map(c=>`<option value="${escapeHtml(c.name)}">${c.p}/${c.t}</option>`).join("")}</datalist>`:"";
   panel.innerHTML=`<div class="context-form commander-form">
     <section class="resolution-step response-step attack-builder" data-step="attackers">
       <div class="resolution-step-h"><span>1</span><strong>Declare attackers</strong><em class="step-status">${draft.rows.length?plural(draft.rows.length,"attacker"):"None"}</em></div>
@@ -2273,6 +2337,7 @@ function showCombatStep(){
       <div class="resolution-step-b">
         <div class="atk-targets" role="group" aria-label="Attack target">${chips}</div>
         ${summary||'<div class="empty-field">No attackers yet.</div>'}
+        ${suggestions}
         <div class="attack-builder-actions">
           ${ready.length?`<button type="button" class="target-btn" id="attackAllBtn">⚔ All ready creatures → ${escapeHtml(targetOpp?nm(targetOpp):"target")} (${ready.length})</button>`:""}
           <button type="button" class="target-btn" id="addAttackerBtn">+ Attacker not on the table</button>
@@ -2280,6 +2345,7 @@ function showCombatStep(){
           <button type="button" class="btn-quiet" id="manualCombatBtn">Enter results manually</button>
         </div>
         ${draft.rows.length?`<details class="context-disclosure atk-adjust"${draft.adjustOpen?" open":""}><summary><span>Adjust attackers (power, toughness, keywords, target)</span><small>Optional</small></summary><div class="context-disclosure-body">${draft.rows.map((row,i)=>attackerRowHtml(row,i,alive)).join("")}</div></details>`:""}
+        ${datalist}
       </div>
     </section></div>`;
   const rerender=()=>refreshCombatViews();
@@ -2292,6 +2358,29 @@ function showCombatStep(){
   const adjust=panel.querySelector('.atk-adjust');
   if(adjust)adjust.addEventListener('toggle',()=>{draft.adjustOpen=adjust.open;});
   panel.querySelectorAll('[data-row-remove]').forEach(btn=>{btn.onclick=()=>{draft.rows.splice(parseInt(btn.dataset.rowRemove),1);rerender();};});
+  const boardChanged=()=>{saveState();renderLifeHud(gameState);rerender();};
+  panel.querySelector('#repeatAttackBtn')?.addEventListener('click',()=>{repeat.forEach(x=>draft.rows.push(attackRowFor(x.token,x.targetId)));rerender();});
+  panel.querySelectorAll('[data-quick-add]').forEach(btn=>{btn.onclick=()=>{
+    const spec=recent[parseInt(btn.dataset.quickAdd,10)];if(!spec)return;
+    cmdSnapshot();
+    const [token]=addPlayerCreatures(gameState,spec,1);
+    draft.rows.push(attackRowFor(token,target));boardChanged();
+  };});
+  panel.querySelectorAll('[data-row-clone]').forEach(btn=>{btn.onclick=()=>{
+    const row=draft.rows[parseInt(btn.dataset.rowClone,10)];if(!row)return;
+    if(!row.uid){draft.rows.push({...row,kws:row.kws.slice(),commander:false});rerender();return;}
+    cmdSnapshot();
+    const [copy]=duplicatePlayerCreature(gameState,row.uid,1);
+    if(copy)draft.rows.push(attackRowFor(copy,row.targetId));
+    boardChanged();
+  };});
+  panel.querySelectorAll('[data-row-name]').forEach(inp=>{inp.onchange=()=>{
+    const row=draft.rows[parseInt(inp.dataset.rowName,10)];if(!row)return;
+    row.name=inp.value.trim();
+    const match=(p.recentCreatures||[]).find(c=>c.name.toLowerCase()===row.name.toLowerCase());
+    if(match)Object.assign(row,{name:match.name,p:match.p,t:match.t,kws:match.kws.slice(),isToken:match.isToken});
+    rerender();
+  };});
   panel.querySelectorAll('[data-row-cmdr]').forEach(box=>{box.onchange=()=>{const i=parseInt(box.dataset.rowCmdr);draft.rows.forEach((r,j)=>{if(!r.uid)r.commander=j===i?box.checked:false;});rerender();};});
   panel.querySelectorAll('[data-row-target]').forEach(sel=>{sel.onchange=()=>{draft.rows[parseInt(sel.dataset.rowTarget)].targetId=sel.value;rerender();};});
   panel.querySelectorAll('.kw-chip').forEach(chip=>{chip.onclick=()=>{
@@ -2311,6 +2400,7 @@ function showCombatStep(){
   const validRows=draft.rows.filter(r=>r.targetId);
   if(validRows.length){
     setConfirmButton("Declare Attackers ▸","",()=>{
+      if(draft.rows.some(r=>!r.uid&&r.targetId)){cmdSnapshot();trackAttackRows(gameState,draft.rows);saveState();renderLifeHud(gameState);}
       draft.outcome=computePlayerAttack(gameState,draft.rows);
       draft.mode="review";refreshCombatViews();
     },true,()=>{
@@ -2401,7 +2491,7 @@ function renderManualCombat(panel,alive){
 /* Applies whichever combat entry is open (review outcome or manual results). */
 function applyCombatDraft(){
   if(!attackDraft)return;
-  if(attackDraft.mode==="review"&&attackDraft.outcome)applyPlayerCombat(gameState,attackDraft.outcome);
+  if(attackDraft.mode==="review"&&attackDraft.outcome){rememberPlayerAttack(gameState,attackDraft.rows);applyPlayerCombat(gameState,attackDraft.outcome);}
   else if(attackDraft.mode==="manual")applyPlayerCombat(gameState,manualCombatResults(aliveOpponents(gameState)));
   attackDraft=null;
 }
